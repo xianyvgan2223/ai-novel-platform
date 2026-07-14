@@ -1,0 +1,526 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
+import '../../controller/outline_controller.dart';
+import 'outline_setting_page.dart';
+import 'outline_history_page.dart';
+
+/// 一键生成小说大纲页面（流式输出）
+class OutlineGenerationPage extends StatefulWidget {
+  const OutlineGenerationPage({super.key});
+
+  @override
+  State<OutlineGenerationPage> createState() => _OutlineGenerationPageState();
+}
+
+class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
+  final _controller = OutlineController();
+  final _majorEventCountController = TextEditingController();
+  final _minorEventCountController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.addListener(_onChanged);
+    _majorEventCountController.text = '${_controller.majorEventCount}';
+    _minorEventCountController.text = '${_controller.minorEventCount}';
+  }
+
+  @override
+  void dispose() {
+    _controller.removeListener(_onChanged);
+    _controller.dispose();
+    _majorEventCountController.dispose();
+    _minorEventCountController.dispose();
+    super.dispose();
+  }
+
+  void _onChanged() => setState(() {});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = _controller;
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        title: const Text(
+          '一键生成大纲',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+        ),
+        backgroundColor: Colors.white,
+        elevation: 0.5,
+        centerTitle: true,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Color(0xFF333333)),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.history, color: Color(0xFF4D6BFE)),
+            tooltip: '历史大纲',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const OutlineHistoryPage()),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.settings, color: Color(0xFF4D6BFE)),
+            tooltip: '大纲生成设置',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const OutlineSettingPage()),
+            ),
+          ),
+        ],
+      ),
+      floatingActionButton: c.loading
+          ? FloatingActionButton.extended(
+              onPressed: () => c.cancel(),
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+              icon: const Icon(Icons.stop, size: 20),
+              label: const Text(
+                '停止生成',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+            )
+          : null,
+      body: CupertinoScrollbar(
+        controller: c.scrollController,
+        thumbVisibility: true,
+        thickness: 6,
+        radius: const Radius.circular(3),
+        child: SingleChildScrollView(
+          controller: c.scrollController,
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildInputSection(),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                height: 44,
+                child: ElevatedButton.icon(
+                  onPressed: c.loading ? null : () => c.generate(),
+                  icon: c.loading
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.auto_awesome),
+                  label: Text(c.loading ? '生成中...' : '一键生成大纲'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF4D6BFE),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    textStyle: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+              if (c.error != null) ...[
+                const SizedBox(height: 8),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.red.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.red.shade200),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.error_outline,
+                        size: 16,
+                        color: Colors.red.shade700,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          c.error!,
+                          style: TextStyle(
+                            color: Colors.red.shade700,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+              if (c.rawText.isNotEmpty || c.loading) ...[
+                const SizedBox(height: 16),
+                if (c.title.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Text(
+                      '📖 ${c.title}',
+                      style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF333333),
+                      ),
+                    ),
+                  ),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF8F9FF),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFE8ECF4)),
+                  ),
+                  child: SelectableText(
+                    c.rawText.isEmpty ? '正在生成...' : c.rawText,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      height: 1.5,
+                      color: Color(0xFF444444),
+                    ),
+                  ),
+                ),
+                if (c.loading)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 8),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                        SizedBox(width: 8),
+                        Text(
+                          '正在生成...',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Color(0xFF999999),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInputSection() {
+    final c = _controller;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8F9FF),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE8ECF4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            '小说设定',
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF333333),
+            ),
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            value: c.genreController.text,
+            decoration: _inputDecoration('小说类型'),
+            items: [
+              '玄幻',
+              '都市',
+              '科幻',
+              '仙侠',
+              '奇幻',
+              '悬疑',
+              '言情',
+              '历史',
+            ].map((g) => DropdownMenuItem(value: g, child: Text(g))).toList(),
+            onChanged: (v) => c.genreController.text = v ?? '玄幻',
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: c.themeController,
+            decoration: _inputDecoration('主题（如：废土世界中的 AI 觉醒）'),
+            style: const TextStyle(fontSize: 14),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: c.protagonistController,
+                  decoration: _inputDecoration('主角设定（如：流浪剑客林墨）'),
+                  style: const TextStyle(fontSize: 14),
+                ),
+              ),
+              const SizedBox(width: 4),
+              IconButton(
+                icon: const Icon(
+                  Icons.fullscreen,
+                  size: 20,
+                  color: Color(0xFF4D6BFE),
+                ),
+                tooltip: '放大编辑',
+                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                padding: EdgeInsets.zero,
+                onPressed: () =>
+                    _showLargeEditor(context, c.protagonistController, '主角设定'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          _buildCountRow(
+            '大事件数：',
+            c.majorEventCount,
+            1,
+            50,
+            (v) => c.majorEventCount = v,
+            _majorEventCountController,
+          ),
+          const SizedBox(height: 10),
+          _buildCountRow(
+            '小事件数：',
+            c.minorEventCount,
+            1,
+            20,
+            (v) => c.minorEventCount = v,
+            _minorEventCountController,
+          ),
+        ],
+      ),
+    );
+  }
+
+  InputDecoration _inputDecoration(String hint) {
+    return InputDecoration(
+      hintText: hint,
+      hintStyle: const TextStyle(fontSize: 14, color: Color(0xFF999999)),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: const BorderSide(color: Color(0xFFDDE1EA)),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: const BorderSide(color: Color(0xFFDDE1EA)),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(8),
+        borderSide: const BorderSide(color: Color(0xFF4D6BFE), width: 1.5),
+      ),
+      filled: true,
+      fillColor: Colors.white,
+      isDense: true,
+    );
+  }
+
+  Widget _buildCountRow(
+    String label,
+    int value,
+    int min,
+    int max,
+    ValueChanged<int> onChanged,
+    TextEditingController controller,
+  ) {
+    return Row(
+      children: [
+        Text(
+          label,
+          style: const TextStyle(fontSize: 14, color: Color(0xFF666666)),
+        ),
+        const Spacer(),
+        IconButton(
+          icon: const Icon(Icons.remove_circle_outline),
+          onPressed: value > min
+              ? () => setState(() {
+                  onChanged(value - 1);
+                  controller.text = '${value - 1}';
+                })
+              : null,
+          constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+          padding: EdgeInsets.zero,
+        ),
+        SizedBox(
+          width: 50,
+          height: 32,
+          child: TextField(
+            keyboardType: TextInputType.number,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+            decoration: InputDecoration(
+              contentPadding: const EdgeInsets.symmetric(vertical: 4),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(6),
+                borderSide: const BorderSide(color: Color(0xFFDDE1EA)),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(6),
+                borderSide: const BorderSide(color: Color(0xFFDDE1EA)),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(6),
+                borderSide: const BorderSide(
+                  color: Color(0xFF4D6BFE),
+                  width: 1.5,
+                ),
+              ),
+              filled: true,
+              fillColor: Colors.white,
+              isDense: true,
+            ),
+            controller: controller,
+            onChanged: (v) {
+              final n = int.tryParse(v);
+              if (n != null && n >= min && n <= max) {
+                setState(() => onChanged(n));
+              }
+            },
+          ),
+        ),
+        IconButton(
+          icon: const Icon(Icons.add_circle_outline),
+          onPressed: value < max
+              ? () => setState(() {
+                  onChanged(value + 1);
+                  controller.text = '${value + 1}';
+                })
+              : null,
+          constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+          padding: EdgeInsets.zero,
+        ),
+      ],
+    );
+  }
+
+  Future<void> _showLargeEditor(
+    BuildContext context,
+    TextEditingController controller,
+    String title,
+  ) async {
+    await showDialog(
+      context: context,
+      builder: (ctx) => _LargeEditorDialog(
+        initialText: controller.text,
+        title: title,
+        onConfirm: (text) => controller.text = text,
+      ),
+    );
+  }
+}
+
+/// 大编辑框弹窗（独立 StatefulWidget，生命周期安全）
+class _LargeEditorDialog extends StatefulWidget {
+  final String initialText;
+  final String title;
+  final ValueChanged<String> onConfirm;
+
+  const _LargeEditorDialog({
+    required this.initialText,
+    required this.title,
+    required this.onConfirm,
+  });
+
+  @override
+  State<_LargeEditorDialog> createState() => _LargeEditorDialogState();
+}
+
+class _LargeEditorDialogState extends State<_LargeEditorDialog> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialText);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      insetPadding: const EdgeInsets.all(16),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(
+                  widget.title,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const Spacer(),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: TextField(
+                controller: _controller,
+                maxLines: null,
+                expands: true,
+                textAlignVertical: TextAlignVertical.top,
+                style: const TextStyle(fontSize: 13, height: 1.5),
+                decoration: const InputDecoration(
+                  hintText: '详细设定主角的姓名、外貌、性格、背景故事...',
+                  hintStyle: TextStyle(fontSize: 13, color: Color(0xFFBBBBBB)),
+                  border: InputBorder.none,
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              height: 44,
+              child: ElevatedButton(
+                onPressed: () {
+                  widget.onConfirm(_controller.text);
+                  Navigator.of(context).pop();
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF4D6BFE),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                child: const Text(
+                  '确认',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
