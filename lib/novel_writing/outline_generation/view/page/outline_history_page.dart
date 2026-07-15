@@ -211,7 +211,7 @@ class _OutlineEditPageState extends State<_OutlineEditPage> {
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
                 child: Text(
-                  '📖 ${r.title}',
+                  '${r.title}',
                   style: const TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.bold,

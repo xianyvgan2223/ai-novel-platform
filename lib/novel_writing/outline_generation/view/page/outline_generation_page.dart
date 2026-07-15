@@ -172,7 +172,7 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
                   Padding(
                     padding: const EdgeInsets.only(bottom: 12),
                     child: Text(
-                      '📖 ${c.title}',
+                      '${c.title}',
                       style: const TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
@@ -189,7 +189,7 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
                     border: Border.all(color: const Color(0xFFE8ECF4)),
                   ),
                   child: SelectableText(
-                    c.rawText.isEmpty ? '正在生成...' : c.rawText,
+                    c.displayText.isEmpty ? '正在生成...' : c.displayText,
                     style: const TextStyle(
                       fontSize: 12,
                       height: 1.5,
@@ -198,20 +198,20 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
                   ),
                 ),
                 if (c.loading)
-                  const Padding(
-                    padding: EdgeInsets.only(top: 8),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        SizedBox(
+                        const SizedBox(
                           width: 14,
                           height: 14,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         ),
-                        SizedBox(width: 8),
+                        const SizedBox(width: 8),
                         Text(
-                          '正在生成...',
-                          style: TextStyle(
+                          '${c.stepLabel} (${c.currentStep + 1}/${c.totalSteps})',
+                          style: const TextStyle(
                             fontSize: 13,
                             color: Color(0xFF999999),
                           ),
