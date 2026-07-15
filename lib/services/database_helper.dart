@@ -6,7 +6,7 @@ import 'package:path/path.dart' as p;
 
 class DatabaseHelper {
   static const _dbName = 'deepseek.db';
-  static const _dbVersion = 10;
+  static const _dbVersion = 11;
   static Database? _database;
 
   /// 单例入口，全局复用同一个数据库连接
@@ -177,7 +177,8 @@ class DatabaseHelper {
         temperature REAL NOT NULL DEFAULT 0.8,
         max_tokens INTEGER NOT NULL DEFAULT 4096,
         model TEXT NOT NULL DEFAULT 'deepseek-v4-flash',
-        system_prompt TEXT NOT NULL DEFAULT ''
+        system_prompt TEXT NOT NULL DEFAULT '',
+        chapter_system_prompt TEXT NOT NULL DEFAULT ''
       )
     ''');
     await db.insert('outline_settings', {
@@ -186,6 +187,7 @@ class DatabaseHelper {
       'max_tokens': 4096,
       'model': 'deepseek-v4-flash',
       'system_prompt': '',
+      'chapter_system_prompt': '',
     });
 
     // ── outline_records 大纲生成记录表（小说模块） ──
@@ -365,6 +367,19 @@ class DatabaseHelper {
           FOREIGN KEY (outline_id) REFERENCES outline_records(id) ON DELETE CASCADE
         )
       ''');
+    }
+
+    // V10 → V11：outline_settings 新增 chapter_system_prompt 列
+    if (oldVersion < 11) {
+      final columns = await db.rawQuery('PRAGMA table_info(outline_settings)');
+      final hasColumn = columns.any(
+        (c) => c['name'] == 'chapter_system_prompt',
+      );
+      if (!hasColumn) {
+        await db.execute(
+          "ALTER TABLE outline_settings ADD COLUMN chapter_system_prompt TEXT NOT NULL DEFAULT ''",
+        );
+      }
     }
   }
 

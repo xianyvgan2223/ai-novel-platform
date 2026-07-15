@@ -71,6 +71,21 @@ class OutlineChapterDbHelper {
     );
   }
 
+  /// 更新章节标题和大纲概要
+  Future<void> updateSummary(int id, String eventTitle, String eventSummary) async {
+    final db = await database;
+    await db.update(
+      'outline_chapters',
+      {
+        'event_title': eventTitle,
+        'event_summary': eventSummary,
+        'updated_at': DateTime.now().toIso8601String(),
+      },
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
   /// 删除某个大纲的所有章节
   Future<void> deleteByOutlineId(int outlineId) async {
     final db = await database;

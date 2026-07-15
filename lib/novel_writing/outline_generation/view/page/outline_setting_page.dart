@@ -17,6 +17,7 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
   int _maxTokens = 4096;
   String _model = 'deepseek-v4-flash';
   final TextEditingController _systemCtrl = TextEditingController();
+  final TextEditingController _chapterSystemCtrl = TextEditingController();
   final TextEditingController _maxTokensCtrl = TextEditingController();
   bool _loading = true;
 
@@ -35,11 +36,15 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
         _maxTokens = setting.maxTokens;
         _model = setting.model;
         _systemCtrl.text = setting.systemPrompt;
+        _chapterSystemCtrl.text = setting.chapterSystemPrompt;
         _maxTokensCtrl.text = '${setting.maxTokens}';
       }
     } catch (_) {}
     if (_systemCtrl.text.trim().isEmpty) {
       _systemCtrl.text = _defaultSystemPrompt();
+    }
+    if (_chapterSystemCtrl.text.trim().isEmpty) {
+      _chapterSystemCtrl.text = _defaultChapterSystemPrompt();
     }
     if (_maxTokensCtrl.text.isEmpty) {
       _maxTokensCtrl.text = '$_maxTokens';
@@ -53,6 +58,7 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
       maxTokens: _maxTokens,
       model: _model,
       systemPrompt: _systemCtrl.text,
+      chapterSystemPrompt: _chapterSystemCtrl.text,
     );
     await OutlineDbHelper().saveSettings(setting.toMap());
     if (mounted) {
@@ -67,8 +73,16 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
     return '你是一个专业的小说大纲生成助手，请用纯文本格式输出。';
   }
 
-  void _showEnlargeDialog() {
-    final editCtrl = TextEditingController(text: _systemCtrl.text);
+  String _defaultChapterSystemPrompt() {
+    return '你是一个专业的小说作家。';
+  }
+
+  void _showEnlargeDialog({
+    required TextEditingController targetCtrl,
+    required String hintText,
+    required Color accentColor,
+  }) {
+    final editCtrl = TextEditingController(text: targetCtrl.text);
     final screenHeight = MediaQuery.of(context).size.height;
     final screenWidth = MediaQuery.of(context).size.width;
     showDialog(
@@ -93,7 +107,7 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
             expands: true,
             textAlignVertical: TextAlignVertical.top,
             decoration: InputDecoration(
-              hintText: _defaultSystemPrompt(),
+              hintText: hintText,
               hintStyle: const TextStyle(
                 fontSize: 13,
                 color: Color(0xFFBBBBBB),
@@ -129,15 +143,15 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
             onPressed: () {
-              _systemCtrl.text = editCtrl.text;
+              targetCtrl.text = editCtrl.text;
               Navigator.of(ctx).pop();
               WidgetsBinding.instance.addPostFrameCallback(
                 (_) => editCtrl.dispose(),
               );
             },
-            child: const Text(
+            child: Text(
               '确定',
-              style: TextStyle(fontSize: 12, color: Color(0xFF4D6BFE)),
+              style: TextStyle(fontSize: 12, color: accentColor),
             ),
           ),
         ],
@@ -148,6 +162,7 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
   @override
   void dispose() {
     _systemCtrl.dispose();
+    _chapterSystemCtrl.dispose();
     _maxTokensCtrl.dispose();
     super.dispose();
   }
@@ -158,7 +173,7 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
       backgroundColor: Colors.white,
       appBar: AppBar(
         title: const Text(
-          '大纲生成设置',
+          '大纲/章节设置',
           style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
         ),
         backgroundColor: Colors.white,
@@ -183,9 +198,11 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                // ── 系统提示 ──
+                // ════════════════════════════════════════
+                //  大纲生成系统提示
+                // ════════════════════════════════════════
                 const Text(
-                  '系统提示 (System Prompt)',
+                  '大纲生成 · 系统提示',
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
@@ -194,13 +211,13 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '自定义 AI 的指令，为空时使用默认提示',
+                  '一键生成大纲时使用的 AI 指令',
                   style: TextStyle(fontSize: 12, color: Colors.grey[500]),
                 ),
                 const SizedBox(height: 8),
                 TextField(
                   controller: _systemCtrl,
-                  maxLines: 6,
+                  maxLines: 4,
                   decoration: InputDecoration(
                     hintText: _defaultSystemPrompt(),
                     hintStyle: const TextStyle(
@@ -219,14 +236,69 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
                       icon: const Icon(Icons.open_in_full, size: 18),
                       tooltip: '放大编辑',
                       color: const Color(0xFF999999),
-                      onPressed: () => _showEnlargeDialog(),
+                      onPressed: () => _showEnlargeDialog(
+                        targetCtrl: _systemCtrl,
+                        hintText: _defaultSystemPrompt(),
+                        accentColor: const Color(0xFF4D6BFE),
+                      ),
                     ),
                   ),
                   style: const TextStyle(fontSize: 14, height: 1.5),
                 ),
                 const SizedBox(height: 24),
 
-                // ── 模型选择 ──
+                // ════════════════════════════════════════
+                //  章节写作系统提示
+                // ════════════════════════════════════════
+                const Text(
+                  '章节写作 · 系统提示',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF333333),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '大纲转章节写正文时使用的 AI 指令',
+                  style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _chapterSystemCtrl,
+                  maxLines: 4,
+                  decoration: InputDecoration(
+                    hintText: _defaultChapterSystemPrompt(),
+                    hintStyle: const TextStyle(
+                      fontSize: 13,
+                      color: Color(0xFFBBBBBB),
+                      height: 1.5,
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: Color(0xFFDDDDDD)),
+                    ),
+                    contentPadding: const EdgeInsets.all(12),
+                    filled: true,
+                    fillColor: const Color(0xFFFAFAFA),
+                    suffixIcon: IconButton(
+                      icon: const Icon(Icons.open_in_full, size: 18),
+                      tooltip: '放大编辑',
+                      color: const Color(0xFF999999),
+                      onPressed: () => _showEnlargeDialog(
+                        targetCtrl: _chapterSystemCtrl,
+                        hintText: _defaultChapterSystemPrompt(),
+                        accentColor: const Color(0xFF4D6BFE),
+                      ),
+                    ),
+                  ),
+                  style: const TextStyle(fontSize: 14, height: 1.5),
+                ),
+                const SizedBox(height: 24),
+
+                // ════════════════════════════════════════
+                //  模型选择
+                // ════════════════════════════════════════
                 const Text(
                   'AI 模型',
                   style: TextStyle(
@@ -264,7 +336,9 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
                 ),
                 const SizedBox(height: 24),
 
-                // ── 温度 ──
+                // ════════════════════════════════════════
+                //  温度
+                // ════════════════════════════════════════
                 const Text(
                   '温度 (Temperature)',
                   style: TextStyle(
@@ -298,7 +372,9 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
                 ),
                 const SizedBox(height: 24),
 
-                // ── 最大长度 ──
+                // ════════════════════════════════════════
+                //  最大长度
+                // ════════════════════════════════════════
                 const Text(
                   '最大生成长度 (Max Tokens)',
                   style: TextStyle(
