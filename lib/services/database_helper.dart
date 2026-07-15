@@ -6,7 +6,7 @@ import 'package:path/path.dart' as p;
 
 class DatabaseHelper {
   static const _dbName = 'deepseek.db';
-  static const _dbVersion = 11;
+  static const _dbVersion = 12;
   static Database? _database;
 
   /// 单例入口，全局复用同一个数据库连接
@@ -198,6 +198,7 @@ class DatabaseHelper {
         genre TEXT NOT NULL DEFAULT '',
         theme TEXT NOT NULL DEFAULT '',
         protagonist TEXT NOT NULL DEFAULT '',
+        worldview TEXT NOT NULL DEFAULT '',
         content TEXT NOT NULL DEFAULT '',
         created_at TEXT NOT NULL
       )
@@ -344,6 +345,7 @@ class DatabaseHelper {
           genre TEXT NOT NULL DEFAULT '',
           theme TEXT NOT NULL DEFAULT '',
           protagonist TEXT NOT NULL DEFAULT '',
+          worldview TEXT NOT NULL DEFAULT '',
           content TEXT NOT NULL DEFAULT '',
           created_at TEXT NOT NULL
         )
@@ -378,6 +380,17 @@ class DatabaseHelper {
       if (!hasColumn) {
         await db.execute(
           "ALTER TABLE outline_settings ADD COLUMN chapter_system_prompt TEXT NOT NULL DEFAULT ''",
+        );
+      }
+    }
+
+    // V11 → V12：outline_records 新增 worldview 列
+    if (oldVersion < 12) {
+      final columns = await db.rawQuery('PRAGMA table_info(outline_records)');
+      final hasColumn = columns.any((c) => c['name'] == 'worldview');
+      if (!hasColumn) {
+        await db.execute(
+          "ALTER TABLE outline_records ADD COLUMN worldview TEXT NOT NULL DEFAULT ''",
         );
       }
     }

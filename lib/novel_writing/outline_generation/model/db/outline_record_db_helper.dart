@@ -33,6 +33,12 @@ class OutlineRecordDbHelper {
     return results.isNotEmpty ? results.first : null;
   }
 
+  /// 更新大纲记录内容
+  Future<void> update(int id, Map<String, dynamic> record) async {
+    final db = await database;
+    await db.update('outline_records', record, where: 'id = ?', whereArgs: [id]);
+  }
+
   /// 删除大纲记录
   Future<void> delete(int id) async {
     final db = await database;

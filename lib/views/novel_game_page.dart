@@ -5,14 +5,14 @@ import 'package:deepseekapp/game/controller/novel_game_controller.dart';
 import 'package:deepseekapp/game/view/page/novel_game_main_page.dart';
 import 'package:deepseekapp/game/novel_global_state.dart';
 
-class NovelShelfPage extends StatefulWidget {
-  const NovelShelfPage({super.key});
+class NovelGamePage extends StatefulWidget {
+  const NovelGamePage({super.key});
 
   @override
-  State<NovelShelfPage> createState() => _NovelShelfPageState();
+  State<NovelGamePage> createState() => _NovelGamePageState();
 }
 
-class _NovelShelfPageState extends State<NovelShelfPage> {
+class _NovelGamePageState extends State<NovelGamePage> {
   final NovelGameController _controller = NovelGameController();
   bool _initialized = false;
   String? _error;

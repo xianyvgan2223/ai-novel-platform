@@ -12,6 +12,7 @@ class OutlineController extends ChangeNotifier {
   final genreController = TextEditingController(text: '玄幻');
   final themeController = TextEditingController();
   final protagonistController = TextEditingController();
+  final worldViewController = TextEditingController();
   final scrollController = ScrollController();
   final _apiService = ApiService();
 
@@ -35,6 +36,7 @@ class OutlineController extends ChangeNotifier {
     genreController.dispose();
     themeController.dispose();
     protagonistController.dispose();
+    worldViewController.dispose();
     scrollController.dispose();
     super.dispose();
   }
@@ -92,6 +94,7 @@ class OutlineController extends ChangeNotifier {
 类型：${genreController.text}
 主题：${themeController.text}
 主角：${protagonistController.text}
+世界观：${worldViewController.text}
 主事件（大事件）数量：$majorEventCount
 每个主事件下小事件数量：$minorEventCount
 
@@ -164,6 +167,7 @@ class OutlineController extends ChangeNotifier {
               genre: genreController.text,
               theme: themeController.text,
               protagonist: protagonistController.text,
+              worldview: worldViewController.text,
               content: rawText,
             );
             OutlineRecordDbHelper().insert(record.toMap());

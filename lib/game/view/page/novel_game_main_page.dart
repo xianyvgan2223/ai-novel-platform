@@ -110,6 +110,7 @@ class _NovelGameMainPageState extends State<NovelGameMainPage> {
         child: Column(
           children: [
             _buildTopBar(unreadCount),
+            _buildDevNotice(),
             Expanded(flex: 3, child: _buildCharacterList(characters)),
             Divider(height: 1, color: Colors.grey.shade300),
             Expanded(flex: 7, child: _buildCopyList(copies, runningCopy)),
@@ -158,6 +159,24 @@ class _NovelGameMainPageState extends State<NovelGameMainPage> {
             onTap: () => Navigator.of(
               context,
             ).push(MaterialPageRoute(builder: (_) => const SettingsPage())),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDevNotice() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      color: const Color(0xFFFFF8E1),
+      child: const Row(
+        children: [
+          Icon(Icons.construction, size: 14, color: Color(0xFFE6A817)),
+          SizedBox(width: 6),
+          Text(
+            '功能开发中，部分功能可能不稳定',
+            style: TextStyle(fontSize: 11, color: Color(0xFFB8860B)),
           ),
         ],
       ),

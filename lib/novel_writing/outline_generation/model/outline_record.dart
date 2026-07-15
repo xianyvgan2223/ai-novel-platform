@@ -5,6 +5,7 @@ class OutlineRecord {
   final String genre;
   final String theme;
   final String protagonist;
+  final String worldview;
   final String content;
   final String createdAt;
 
@@ -14,6 +15,7 @@ class OutlineRecord {
     this.genre = '',
     this.theme = '',
     this.protagonist = '',
+    this.worldview = '',
     this.content = '',
     String? createdAt,
   }) : createdAt = createdAt ?? DateTime.now().toIso8601String();
@@ -23,6 +25,7 @@ class OutlineRecord {
     'genre': genre,
     'theme': theme,
     'protagonist': protagonist,
+    'worldview': worldview,
     'content': content,
     'created_at': createdAt,
   };
@@ -33,6 +36,7 @@ class OutlineRecord {
     genre: map['genre'] as String? ?? '',
     theme: map['theme'] as String? ?? '',
     protagonist: map['protagonist'] as String? ?? '',
+    worldview: map['worldview'] as String? ?? '',
     content: map['content'] as String? ?? '',
     createdAt: map['created_at'] as String?,
   );

@@ -7,6 +7,7 @@ import '../../model/outline_chapter.dart';
 import '../../model/outline_setting.dart';
 import '../../model/db/outline_db_helper.dart';
 import '../../model/db/outline_chapter_db_helper.dart';
+import '../../model/db/outline_record_db_helper.dart';
 import 'outline_setting_page.dart';
 
 /// 大纲转章节写作页面
@@ -26,7 +27,14 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
   void initState() {
     super.initState();
     _controller = _ChapterWriteController(widget.outline);
-    _controller.initLoad().then((_) => setState(() {}));
+    _controller.initLoad().then((_) {
+      if (mounted) setState(() {});
+      if (mounted && _controller.needsResync) {
+        WidgetsBinding.instance.addPostFrameCallback(
+          (_) => _showResyncDialog(),
+        );
+      }
+    });
   }
 
   @override
@@ -336,11 +344,15 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
               final title = titleCtrl.text.trim();
               final summary = summaryCtrl.text.trim();
               if (title.isEmpty && summary.isEmpty) return;
+              final oldCh = _controller.chapters.firstWhere(
+                (c) => c.id == ch.id,
+              );
               await OutlineChapterDbHelper().updateSummary(
                 ch.id!,
                 title,
                 summary,
               );
+              await _controller.syncEventToOutline(oldCh, title, summary);
               final idx = _controller.chapters.indexWhere((c) => c.id == ch.id);
               if (idx != -1) {
                 _controller.chapters[idx] = _controller.chapters[idx].copyWith(
@@ -359,6 +371,34 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
         ],
       ),
     );
+  }
+
+  /// 检测到大纲内容已修改时弹出同步确认对话框
+  Future<void> _showResyncDialog() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('大纲已修改'),
+        content: const Text('检测到大纲内容已更新，是否重新解析章节结构？\n\n注意：已完成的章节正文内容将被保留。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('忽略', style: TextStyle(color: Color(0xFF999999))),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text(
+              '重新解析',
+              style: TextStyle(color: Color(0xFF4D6BFE)),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await _controller.resync();
+      if (mounted) setState(() {});
+    }
   }
 
   /// 打开章节编辑全屏页面
@@ -729,7 +769,10 @@ class _ChapterWriteController {
   final OutlineRecord outline;
   final _apiService = ApiService();
 
-  _ChapterWriteController(this.outline);
+  /// 大纲文本内容（可变，与 DB 同步后更新）
+  String outlineContent;
+
+  _ChapterWriteController(this.outline) : outlineContent = outline.content;
 
   List<OutlineChapter> chapters = [];
   bool isLoading = true;
@@ -742,14 +785,118 @@ class _ChapterWriteController {
   int get completedCount =>
       chapters.where((c) => c.status == 'completed').length;
 
+  bool needsResync = false;
+
+  /// 重新从大纲内容解析事件并更新数据库（保留已完成的正文内容）
+  Future<void> resync() async {
+    needsResync = false;
+    final oldChapters = Map.fromEntries(
+      chapters.map((c) => MapEntry(c.eventTitle, c)),
+    );
+    final newChapters = _parseEvents(outlineContent);
+    for (int i = 0; i < newChapters.length; i++) {
+      final old = oldChapters[newChapters[i].eventTitle];
+      if (old != null && old.status == 'completed' && old.content.isNotEmpty) {
+        newChapters[i] = newChapters[i].copyWith(
+          content: old.content,
+          status: 'completed',
+        );
+      }
+    }
+    await OutlineChapterDbHelper().deleteByOutlineId(outline.id!);
+    await OutlineChapterDbHelper().batchInsert(
+      newChapters.map((c) => c.toMap()).toList(),
+    );
+    final newRows = await OutlineChapterDbHelper().getByOutlineId(outline.id!);
+    chapters = newRows.map((m) => OutlineChapter.fromMap(m)).toList();
+  }
+
+  /// 将章节标题/概要的修改同步到大纲记录文本中
+  Future<void> syncEventToOutline(
+    OutlineChapter oldCh,
+    String newTitle,
+    String newSummary,
+  ) async {
+    if (outline.id == null) return;
+    var content = outlineContent;
+    // 用旧标题找到事件标记行，替换为新标题
+    final lines = content.split('\n');
+    for (int i = 0; i < lines.length; i++) {
+      final trimmed = lines[i].trimLeft();
+      // 匹配大事件：══ 大事件N：旧标题 ══
+      if (trimmed.startsWith('══') &&
+          trimmed.contains(oldCh.eventTitle) &&
+          trimmed.endsWith('══')) {
+        final newLine = trimmed.replaceFirst(oldCh.eventTitle, newTitle);
+        final indent = lines[i].length - lines[i].trimLeft().length;
+        lines[i] = ' ' * indent + newLine.trimLeft();
+        // 找到下一行非══/○的文本行作为概要进行替换
+        if (newSummary.isNotEmpty) {
+          for (int j = i + 1; j < lines.length; j++) {
+            final t = lines[j].trimLeft();
+            if (t.startsWith('══') || t.startsWith('○') || t.startsWith('-'))
+              break;
+            if (t.isNotEmpty) {
+              final indent2 = lines[j].length - lines[j].trimLeft().length;
+              lines[j] = ' ' * indent2 + newSummary;
+              break;
+            }
+          }
+        }
+        break;
+      }
+      // 匹配小事件：○ 小事件N：旧标题
+      if (trimmed.startsWith('○') && trimmed.contains(oldCh.eventTitle)) {
+        final newLine = trimmed.replaceFirst(oldCh.eventTitle, newTitle);
+        final indent = lines[i].length - lines[i].trimLeft().length;
+        lines[i] = ' ' * indent + newLine.trimLeft();
+        // 下一行是概要
+        if (newSummary.isNotEmpty && i + 1 < lines.length) {
+          final t = lines[i + 1].trimLeft();
+          if (t.isNotEmpty &&
+              !t.startsWith('══') &&
+              !t.startsWith('○') &&
+              !t.startsWith('-')) {
+            final indent2 =
+                lines[i + 1].length - lines[i + 1].trimLeft().length;
+            lines[i + 1] = ' ' * indent2 + newSummary;
+          }
+        }
+        break;
+      }
+    }
+    outlineContent = lines.join('\n');
+    await OutlineRecordDbHelper().update(outline.id!, {
+      'content': outlineContent,
+      'title': outline.title,
+      'genre': outline.genre,
+      'theme': outline.theme,
+      'protagonist': outline.protagonist,
+      'worldview': outline.worldview,
+    });
+  }
+
   Future<void> initLoad() async {
     isLoading = true;
     try {
       final rows = await OutlineChapterDbHelper().getByOutlineId(outline.id!);
       if (rows.isNotEmpty) {
         chapters = rows.map((m) => OutlineChapter.fromMap(m)).toList();
+        // 检测大纲内容是否变化
+        final freshChapters = _parseEvents(outlineContent);
+        if (freshChapters.length != chapters.length) {
+          needsResync = true;
+        } else {
+          for (int i = 0; i < chapters.length; i++) {
+            if (chapters[i].eventTitle != freshChapters[i].eventTitle ||
+                chapters[i].eventIndex != freshChapters[i].eventIndex) {
+              needsResync = true;
+              break;
+            }
+          }
+        }
       } else {
-        chapters = _parseEvents(outline.content);
+        chapters = _parseEvents(outlineContent);
         await OutlineChapterDbHelper().batchInsert(
           chapters.map((c) => c.toMap()).toList(),
         );
@@ -782,9 +929,10 @@ class _ChapterWriteController {
 类型：${outline.genre}
 主题：${outline.theme}
 主角：${outline.protagonist}
+世界观：${outline.worldview}
 
 【大纲结构】
-${outline.content}
+${outlineContent}
 
 【当前事件】${ch.eventTitle}
 【事件概要】${ch.eventSummary}

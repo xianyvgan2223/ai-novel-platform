@@ -17,6 +17,17 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
   final _majorEventCountController = TextEditingController();
   final _minorEventCountController = TextEditingController();
 
+  static const _predefinedGenres = [
+    '玄幻',
+    '都市',
+    '科幻',
+    '仙侠',
+    '奇幻',
+    '悬疑',
+    '言情',
+    '历史',
+  ];
+
   @override
   void initState() {
     super.initState();
@@ -238,19 +249,36 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
-            value: c.genreController.text,
+            value: _predefinedGenres.contains(c.genreController.text)
+                ? c.genreController.text
+                : '__custom__',
             decoration: _inputDecoration('小说类型'),
             items: [
-              '玄幻',
-              '都市',
-              '科幻',
-              '仙侠',
-              '奇幻',
-              '悬疑',
-              '言情',
-              '历史',
-            ].map((g) => DropdownMenuItem(value: g, child: Text(g))).toList(),
-            onChanged: (v) => c.genreController.text = v ?? '玄幻',
+              ..._predefinedGenres.map(
+                (g) => DropdownMenuItem(value: g, child: Text(g)),
+              ),
+              const DropdownMenuItem(
+                value: '__custom__',
+                child: Row(
+                  children: [
+                    Icon(Icons.edit, size: 16, color: Color(0xFF4D6BFE)),
+                    SizedBox(width: 6),
+                    Text('自定义'),
+                  ],
+                ),
+              ),
+            ],
+            onChanged: (v) async {
+              if (v == '__custom__') {
+                final result = await _showCustomGenreDialog(context);
+                if (result != null && result.isNotEmpty) {
+                  c.genreController.text = result;
+                }
+              } else {
+                c.genreController.text = v ?? '玄幻';
+              }
+              setState(() {});
+            },
           ),
           const SizedBox(height: 10),
           TextField(
@@ -280,6 +308,31 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
                 padding: EdgeInsets.zero,
                 onPressed: () =>
                     _showLargeEditor(context, c.protagonistController, '主角设定'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: c.worldViewController,
+                  decoration: _inputDecoration('世界观（如：灵力为尊的大陆，科技与魔法并存）'),
+                  style: const TextStyle(fontSize: 14),
+                ),
+              ),
+              const SizedBox(width: 4),
+              IconButton(
+                icon: const Icon(
+                  Icons.fullscreen,
+                  size: 20,
+                  color: Color(0xFF4D6BFE),
+                ),
+                tooltip: '放大编辑',
+                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                padding: EdgeInsets.zero,
+                onPressed: () =>
+                    _showLargeEditor(context, c.worldViewController, '世界观'),
               ),
             ],
           ),
@@ -421,6 +474,13 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
       ),
     );
   }
+
+  Future<String?> _showCustomGenreDialog(BuildContext context) async {
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => const _CustomGenreDialog(),
+    );
+  }
 }
 
 /// 大编辑框弹窗（独立 StatefulWidget，生命周期安全）
@@ -452,6 +512,17 @@ class _LargeEditorDialogState extends State<_LargeEditorDialog> {
   void dispose() {
     _controller.dispose();
     super.dispose();
+  }
+
+  String _hintFor(String title) {
+    switch (title) {
+      case '主角设定':
+        return '详细设定主角的姓名、外貌、性格、背景故事...';
+      case '世界观':
+        return '描述世界的规则、势力分布、力量体系、历史背景...';
+      default:
+        return '请输入详细内容...';
+    }
   }
 
   @override
@@ -488,9 +559,12 @@ class _LargeEditorDialogState extends State<_LargeEditorDialog> {
                 expands: true,
                 textAlignVertical: TextAlignVertical.top,
                 style: const TextStyle(fontSize: 13, height: 1.5),
-                decoration: const InputDecoration(
-                  hintText: '详细设定主角的姓名、外貌、性格、背景故事...',
-                  hintStyle: TextStyle(fontSize: 13, color: Color(0xFFBBBBBB)),
+                decoration: InputDecoration(
+                  hintText: _hintFor(widget.title),
+                  hintStyle: const TextStyle(
+                    fontSize: 13,
+                    color: Color(0xFFBBBBBB),
+                  ),
                   border: InputBorder.none,
                   contentPadding: EdgeInsets.zero,
                 ),
@@ -514,6 +588,91 @@ class _LargeEditorDialogState extends State<_LargeEditorDialog> {
                 ),
                 child: const Text(
                   '确认',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 自定义小说类型输入弹窗
+class _CustomGenreDialog extends StatefulWidget {
+  const _CustomGenreDialog();
+
+  @override
+  State<_CustomGenreDialog> createState() => _CustomGenreDialogState();
+}
+
+class _CustomGenreDialogState extends State<_CustomGenreDialog> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              '自定义小说类型',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _controller,
+              autofocus: true,
+              decoration: InputDecoration(
+                hintText: '输入自定义类型（如：赛博朋克、末日废土...）',
+                hintStyle: const TextStyle(
+                  fontSize: 14,
+                  color: Color(0xFFBBBBBB),
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              style: const TextStyle(fontSize: 14),
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              height: 44,
+              child: ElevatedButton(
+                onPressed: () {
+                  Navigator.of(context).pop(_controller.text.trim());
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF4D6BFE),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                child: const Text(
+                  '确定',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                 ),
               ),
