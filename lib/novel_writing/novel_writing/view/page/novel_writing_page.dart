@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import '../../../ai_battle/view/page/ai_battle_page.dart';
 import '../../../outline_generation/view/page/outline_generation_page.dart';
-import '../../../outline_generation/view/page/chapter_list_page.dart';
+import '../../../chapter_writing/view/page/chapter_list_page.dart';
+import '../../../outline_format/view/page/outline_format_page.dart';
 
 /// 写小说页面
 class NovelWritingPage extends StatelessWidget {
@@ -63,6 +64,16 @@ class NovelWritingPage extends StatelessWidget {
               label: '大纲转章节',
               color: const Color(0xFF7C4DFF),
               page: const ChapterListPage(),
+            ),
+            const SizedBox(height: 16),
+
+            // 匹配大纲格式
+            _buildNavButton(
+              context,
+              icon: Icons.format_align_left,
+              label: '匹配大纲格式',
+              color: const Color(0xFF00BFA5),
+              page: const OutlineFormatPage(),
             ),
           ],
         ),

@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import 'package:deepseekapp/services/api_service.dart';
 import 'package:deepseekapp/services/user_setting_service.dart';
-import '../model/outline_setting.dart';
-import '../model/outline_record.dart';
-import '../model/db/outline_db_helper.dart';
-import '../model/db/outline_record_db_helper.dart';
+import '../../shared/models/outline_setting.dart';
+import '../../shared/models/outline_record.dart';
+import '../../shared/models/db/outline_db_helper.dart';
+import '../../shared/models/db/outline_record_db_helper.dart';
 
 /// 大纲生成控制器，管理业务逻辑与状态
 class OutlineController extends ChangeNotifier {

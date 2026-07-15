@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import '../../model/outline_record.dart';
-import '../../model/db/outline_record_db_helper.dart';
+import '../../../shared/models/outline_record.dart';
+import '../../../shared/models/db/outline_record_db_helper.dart';
 
 /// 历史生成大纲列表页面
 class OutlineHistoryPage extends StatefulWidget {
