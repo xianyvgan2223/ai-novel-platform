@@ -6,7 +6,7 @@ import 'package:path/path.dart' as p;
 
 class DatabaseHelper {
   static const _dbName = 'deepseek.db';
-  static const _dbVersion = 12;
+  static const _dbVersion = 13;
   static Database? _database;
 
   /// 单例入口，全局复用同一个数据库连接
@@ -178,7 +178,14 @@ class DatabaseHelper {
         max_tokens INTEGER NOT NULL DEFAULT 4096,
         model TEXT NOT NULL DEFAULT 'deepseek-v4-flash',
         system_prompt TEXT NOT NULL DEFAULT '',
-        chapter_system_prompt TEXT NOT NULL DEFAULT ''
+        chapter_system_prompt TEXT NOT NULL DEFAULT '',
+        concept_min_words INTEGER NOT NULL DEFAULT 30,
+        concept_max_words INTEGER NOT NULL DEFAULT 50,
+        major_event_min_words INTEGER NOT NULL DEFAULT 50,
+        major_event_max_words INTEGER NOT NULL DEFAULT 100,
+        minor_event_min_words INTEGER NOT NULL DEFAULT 30,
+        minor_event_max_words INTEGER NOT NULL DEFAULT 50,
+        summary_max_words INTEGER NOT NULL DEFAULT 80
       )
     ''');
     await db.insert('outline_settings', {
@@ -188,6 +195,13 @@ class DatabaseHelper {
       'model': 'deepseek-v4-flash',
       'system_prompt': '',
       'chapter_system_prompt': '',
+      'concept_min_words': 30,
+      'concept_max_words': 50,
+      'major_event_min_words': 50,
+      'major_event_max_words': 100,
+      'minor_event_min_words': 30,
+      'minor_event_max_words': 50,
+      'summary_max_words': 80,
     });
 
     // ── outline_records 大纲生成记录表（小说模块） ──
@@ -393,6 +407,25 @@ class DatabaseHelper {
           "ALTER TABLE outline_records ADD COLUMN worldview TEXT NOT NULL DEFAULT ''",
         );
       }
+    }
+
+    // V12 → V13：outline_settings 新增字数配置列
+    if (oldVersion < 13) {
+      final columns = await db.rawQuery('PRAGMA table_info(outline_settings)');
+      final addIfMissing = (String col, int defaultVal) async {
+        if (!columns.any((c) => c['name'] == col)) {
+          await db.execute(
+            "ALTER TABLE outline_settings ADD COLUMN $col INTEGER NOT NULL DEFAULT $defaultVal",
+          );
+        }
+      };
+      await addIfMissing('concept_min_words', 30);
+      await addIfMissing('concept_max_words', 50);
+      await addIfMissing('major_event_min_words', 50);
+      await addIfMissing('major_event_max_words', 100);
+      await addIfMissing('minor_event_min_words', 30);
+      await addIfMissing('minor_event_max_words', 50);
+      await addIfMissing('summary_max_words', 80);
     }
   }
 

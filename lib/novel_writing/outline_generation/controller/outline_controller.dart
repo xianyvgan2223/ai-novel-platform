@@ -89,31 +89,45 @@ class OutlineController extends ChangeNotifier {
 
       final prompt =
           '''
-你是一位资深小说编辑。请根据以下设定生成一份完整的小说大纲。
+你是从业十年资深网文/出版双栖小说编辑，擅长搭建逻辑闭环、人物成长清晰、伏笔回收完整的长篇小说大纲，严格遵守所有输出格式与内容约束，禁止擅自增删层级、改格式、加多余符号。
 
-类型：${genreController.text}
-主题：${themeController.text}
-主角：${protagonistController.text}
-世界观：${worldViewController.text}
-主事件（大事件）数量：$majorEventCount
-每个主事件下小事件数量：$minorEventCount
+基础设定参数：
+小说类型：${genreController.text}
+核心主题：${themeController.text}
+主角完整人设：${protagonistController.text}（包含身份、初始性格、执念、软肋、终极渴望、初始缺陷）
+完整世界观：${worldViewController.text}（规则、势力、矛盾根源、危险机制、底层冲突）
+全篇主事件总数量：$majorEventCount
+单个主事件配套小事件固定数量：$minorEventCount
 
-要求：
-1. 用第一行输出小说标题，格式：书名：《xxx》
-2. 第二行空行后，写一段核心概念简介（50字以内）
-3. 按三幕式结构（开端、发展、高潮/结局）组织主事件
-4. 每个主事件下包含若干小事件，格式如下：
+硬性内容创作规则（必须全部执行）：
+1. 三幕均衡分配主事件：
+   第一幕开端占总主事件30%，第二幕发展占总主事件50%，第三幕高潮结局占总主事件20%，无法整除时第二幕多分配余量；
+2. 人物成长强制落地：每一幕结尾写明主角阶段性性格变化，全篇完成「缺陷暴露→挣扎蜕变→圆满/遗憾闭环」完整人物弧光；
+3. 冲突分层：每个大事件必须包含外部矛盾+主角内心矛盾，至少埋1处长线伏笔；第三幕必须回收前文80%以上伏笔；
+4. 情节节奏：小事件有递进关系，依次完成铺垫→冲突升级→危机加剧，禁止平铺流水账；
+5. 结局区分两种导向：主题正向则圆满救赎结局，主题偏现实/暗黑则留白遗憾结局，全程贴合核心主题；
+6. 禁忌约束：不出现逻辑漏洞、战力/世界观崩坏、人物行为动机割裂、强行降智、突兀机械降神。
 
-   ══ 大事件X：标题 ══
-   大事件概述（50-100字）
-   ○ 小事件1：标题
-     小事件概要（30-50字）
-   ○ 小事件2：标题
-     小事件概要（30-50字）
+固定输出格式（一字不差遵守，禁止markdown、表格、json、加粗符号，纯普通文本）：
+1. 第一行固定格式：书名：《xxx》，书名贴合类型、主题、主角核心宿命，简洁有记忆点；
+2. 第二行为空行；
+3. 第三行核心概念简介，严格控制${outlineSetting.conceptMinWords}-${outlineSetting.conceptMaxWords}字，概括世界观、主角核心困境、故事最终落点；
+4. 分段结构标识：
+══ 第一幕：开端 ══
+（分配好的开端主事件）
+══ 第二幕：发展 ══
+（分配好的发展主事件）
+══ 第三幕：高潮&结局 ══
+（分配好的高潮结局主事件）
 
-5. 每幕之间用 ══ 第一幕：开端 ══ 这样的分隔线隔开
-6. 确保情节有起承转合，人物有成长弧线
-7. 直接用纯文本输出，不要使用 JSON 或 Markdown 格式
+单一大事件统一格式：
+══ 大事件X：大事件标题 ══
+大事件概述（${outlineSetting.majorEventMinWords}-${outlineSetting.majorEventMaxWords}字，写清本阶段核心危机、主角行动、埋下的长线伏笔）
+○ 小事件1：小标题
+小事件概要（${outlineSetting.minorEventMinWords}-${outlineSetting.minorEventMaxWords}字，写清场景、冲突、主角心理变化）
+○ 小事件2：小标题
+小事件概要（${outlineSetting.minorEventMinWords}-${outlineSetting.minorEventMaxWords}字，承接上一小事件，冲突升级，加深主角困境）
+……循环至$minorEventCount个小事件
 ''';
 
       String accumulated = '';
