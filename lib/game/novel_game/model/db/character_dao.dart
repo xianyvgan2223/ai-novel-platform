@@ -12,7 +12,11 @@ class CharacterDao {
 
   Future<CharacterEntity?> getById(int id) async {
     final db = await _dbHelper.database;
-    final maps = await db.query('character_table', where: 'id = ?', whereArgs: [id]);
+    final maps = await db.query(
+      'character_table',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
     if (maps.isEmpty) return null;
     return CharacterEntity.fromMap(maps.first);
   }
@@ -24,7 +28,12 @@ class CharacterDao {
 
   Future<int> update(CharacterEntity entity) async {
     final db = await _dbHelper.database;
-    return await db.update('character_table', entity.toMap(), where: 'id = ?', whereArgs: [entity.id]);
+    return await db.update(
+      'character_table',
+      entity.toMap(),
+      where: 'id = ?',
+      whereArgs: [entity.id],
+    );
   }
 
   Future<int> delete(int id) async {

@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:deepseekapp/game/model/entity/character_entity.dart';
-import 'package:deepseekapp/game/model/entity/skill_entity.dart';
-import 'package:deepseekapp/game/model/entity/equipment_entity.dart';
-import 'package:deepseekapp/game/model/repo/character_repository.dart';
-import 'package:deepseekapp/game/model/repo/copy_repository.dart';
-import 'package:deepseekapp/game/view/page/copy_detail_page.dart';
+import 'package:deepseekapp/game/novel_game/model/entity/character_entity.dart';
+import 'package:deepseekapp/game/novel_game/model/entity/skill_entity.dart';
+import 'package:deepseekapp/game/novel_game/model/entity/equipment_entity.dart';
+import 'package:deepseekapp/game/novel_game/model/repo/character_repository.dart';
+import 'package:deepseekapp/game/novel_game/model/repo/copy_repository.dart';
+import 'package:deepseekapp/game/novel_game/view/page/copy_detail_page.dart';
 
 class CharacterEditPage extends StatefulWidget {
   final CharacterEntity character;

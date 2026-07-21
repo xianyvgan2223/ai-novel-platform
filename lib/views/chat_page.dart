@@ -13,7 +13,7 @@ import 'settings_page.dart';
 import 'session_setting_page.dart';
 import '../novel_writing/novel_writing/view/page/novel_writing_page.dart';
 import 'widgets/message_bubble.dart';
-import 'novel_game_page.dart';
+import '../game/game_hub_page.dart';
 import '../pet/pet_page.dart';
 import '../memo/memo_page.dart';
 
@@ -348,9 +348,9 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                   context,
                 ).push(MaterialPageRoute(builder: (_) => const MemoPage()));
               case 'game':
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const NovelGamePage()),
-                );
+                Navigator.of(
+                  context,
+                ).push(MaterialPageRoute(builder: (_) => const GameHubPage()));
             }
           },
           itemBuilder: (context) => [

@@ -7,14 +7,16 @@ class AiBaseClient {
   final Dio _dio;
 
   AiBaseClient({Duration? connectTimeout, Duration? receiveTimeout})
-      : _dio = Dio(BaseOptions(
+    : _dio = Dio(
+        BaseOptions(
           connectTimeout: connectTimeout ?? const Duration(seconds: 30),
           receiveTimeout: receiveTimeout ?? const Duration(seconds: 60),
           headers: {
             'Content-Type': 'application/json',
             'Accept': 'application/json',
           },
-        ));
+        ),
+      );
 
   /// 发送HTTP POST请求
   /// [url] 目标URL
@@ -35,11 +37,7 @@ class AiBaseClient {
         headers: headers,
       );
 
-      final response = await _dio.post(
-        url,
-        data: body,
-        options: options,
-      );
+      final response = await _dio.post(url, data: body, options: options);
 
       if (response.statusCode == 200) {
         return jsonEncode(response.data);

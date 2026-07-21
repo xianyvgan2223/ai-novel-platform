@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:deepseekapp/game/model/entity/character_entity.dart';
-import 'package:deepseekapp/game/view/page/character_edit_page.dart';
+import 'package:deepseekapp/game/novel_game/model/entity/character_entity.dart';
+import 'package:deepseekapp/game/novel_game/view/page/character_edit_page.dart';
 
 class CharacterCardWidget extends StatelessWidget {
   final CharacterEntity character;

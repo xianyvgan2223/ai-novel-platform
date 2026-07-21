@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:deepseekapp/game/model/entity/copy_entity.dart';
-import 'package:deepseekapp/game/model/entity/character_entity.dart';
+import 'package:deepseekapp/game/novel_game/model/entity/copy_entity.dart';
+import 'package:deepseekapp/game/novel_game/model/entity/character_entity.dart';
 
 class CopyCardWidget extends StatelessWidget {
   final CopyEntity copy;

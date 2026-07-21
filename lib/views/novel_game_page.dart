@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:deepseekapp/game/model/db/novel_db_helper.dart';
-import 'package:deepseekapp/game/controller/novel_game_controller.dart';
-import 'package:deepseekapp/game/view/page/novel_game_main_page.dart';
-import 'package:deepseekapp/game/novel_global_state.dart';
+import 'package:deepseekapp/game/novel_game/model/db/novel_db_helper.dart';
+import 'package:deepseekapp/game/novel_game/controller/novel_game_controller.dart';
+import 'package:deepseekapp/game/novel_game/view/page/novel_game_main_page.dart';
+import 'package:deepseekapp/game/novel_game/novel_global_state.dart';
 
 class NovelGamePage extends StatefulWidget {
   const NovelGamePage({super.key});

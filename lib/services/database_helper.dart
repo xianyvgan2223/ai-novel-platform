@@ -6,7 +6,7 @@ import 'package:path/path.dart' as p;
 
 class DatabaseHelper {
   static const _dbName = 'deepseek.db';
-  static const _dbVersion = 15;
+  static const _dbVersion = 17;
   static Database? _database;
 
   /// 单例入口，全局复用同一个数据库连接
@@ -265,6 +265,69 @@ class DatabaseHelper {
         updated_at TEXT NOT NULL
       )
     ''');
+
+    // ── character_chat_sessions 角色扮演会话表 ──
+    await db.execute('''
+      CREATE TABLE character_chat_sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        character_name TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        personality TEXT NOT NULL DEFAULT '',
+        scenario TEXT NOT NULL DEFAULT '',
+        system_prompt TEXT NOT NULL DEFAULT '',
+        summary TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    ''');
+
+    // ── character_chat_messages 角色扮演消息表 ──
+    await db.execute('''
+      CREATE TABLE character_chat_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id INTEGER NOT NULL,
+        is_user INTEGER NOT NULL DEFAULT 1,
+        content TEXT NOT NULL,
+        timestamp TEXT NOT NULL,
+        FOREIGN KEY (session_id) REFERENCES character_chat_sessions(id) ON DELETE CASCADE
+      )
+    ''');
+
+    // ── character_tags 角色标签表 ──
+    await db.execute('''
+      CREATE TABLE character_tags (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        character_name TEXT NOT NULL UNIQUE,
+        tags TEXT NOT NULL DEFAULT '[]'
+      )
+    ''');
+
+    // ── world_info_entries 世界书条目表 ──
+    await db.execute('''
+      CREATE TABLE world_info_entries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        content TEXT NOT NULL,
+        keywords TEXT NOT NULL DEFAULT '[]',
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (session_id) REFERENCES character_chat_sessions(id) ON DELETE CASCADE
+      )
+    ''');
+
+    // ── character_memories 记忆表 ──
+    await db.execute('''
+      CREATE TABLE character_memories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id INTEGER NOT NULL,
+        content TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT 'general',
+        importance INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (session_id) REFERENCES character_chat_sessions(id) ON DELETE CASCADE
+      )
+    ''');
   }
 
   static Future<void> _onUpgrade(
@@ -490,6 +553,78 @@ class DatabaseHelper {
           remind_at TEXT,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
+        )
+      ''');
+    }
+
+    // V15 → V16：新增 character_chat_sessions 和 character_chat_messages 表
+    if (oldVersion < 16) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS character_chat_sessions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          character_name TEXT NOT NULL,
+          description TEXT NOT NULL DEFAULT '',
+          personality TEXT NOT NULL DEFAULT '',
+          scenario TEXT NOT NULL DEFAULT '',
+          system_prompt TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+      ''');
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS character_chat_messages (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id INTEGER NOT NULL,
+          is_user INTEGER NOT NULL DEFAULT 1,
+          content TEXT NOT NULL,
+          timestamp TEXT NOT NULL,
+          FOREIGN KEY (session_id) REFERENCES character_chat_sessions(id) ON DELETE CASCADE
+        )
+      ''');
+    }
+
+    // V15 → V16 迁移后补充 summary 列（兼容已有 V16 用户）
+    if (oldVersion < 16 || oldVersion == 16) {
+      final columns = await db.rawQuery(
+        'PRAGMA table_info(character_chat_sessions)',
+      );
+      if (!columns.any((c) => c['name'] == 'summary')) {
+        await db.execute(
+          "ALTER TABLE character_chat_sessions ADD COLUMN summary TEXT NOT NULL DEFAULT ''",
+        );
+      }
+    }
+
+    // V16 → V17：新增 character_tags / world_info_entries / character_memories 表
+    if (oldVersion < 17) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS character_tags (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          character_name TEXT NOT NULL UNIQUE,
+          tags TEXT NOT NULL DEFAULT '[]'
+        )
+      ''');
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS world_info_entries (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id INTEGER NOT NULL,
+          title TEXT NOT NULL,
+          content TEXT NOT NULL,
+          keywords TEXT NOT NULL DEFAULT '[]',
+          enabled INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY (session_id) REFERENCES character_chat_sessions(id) ON DELETE CASCADE
+        )
+      ''');
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS character_memories (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id INTEGER NOT NULL,
+          content TEXT NOT NULL,
+          category TEXT NOT NULL DEFAULT 'general',
+          importance INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY (session_id) REFERENCES character_chat_sessions(id) ON DELETE CASCADE
         )
       ''');
     }

@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:deepseekapp/views/settings_page.dart';
-import 'package:deepseekapp/game/model/entity/character_entity.dart';
-import 'package:deepseekapp/game/model/entity/copy_entity.dart';
-import 'package:deepseekapp/game/controller/novel_game_controller.dart';
-import 'package:deepseekapp/game/view/widget/red_dot_badge_widget.dart';
-import 'package:deepseekapp/game/view/widget/character_card_widget.dart';
-import 'package:deepseekapp/game/view/widget/copy_card_widget.dart';
-import 'package:deepseekapp/game/view/widget/ai_loading_widget.dart';
-import 'package:deepseekapp/game/view/page/copy_edit_page.dart';
+import 'package:deepseekapp/game/novel_game/model/entity/character_entity.dart';
+import 'package:deepseekapp/game/novel_game/model/entity/copy_entity.dart';
+import 'package:deepseekapp/game/novel_game/controller/novel_game_controller.dart';
+import 'package:deepseekapp/game/novel_game/view/widget/red_dot_badge_widget.dart';
+import 'package:deepseekapp/game/novel_game/view/widget/character_card_widget.dart';
+import 'package:deepseekapp/game/novel_game/view/widget/copy_card_widget.dart';
+import 'package:deepseekapp/game/novel_game/view/widget/ai_loading_widget.dart';
+import 'package:deepseekapp/game/novel_game/view/page/copy_edit_page.dart';
 
 class NovelGameMainPage extends StatefulWidget {
   final NovelGameController controller;
