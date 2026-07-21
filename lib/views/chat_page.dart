@@ -12,6 +12,10 @@ import 'history_page.dart';
 import 'settings_page.dart';
 import 'session_setting_page.dart';
 import '../novel_writing/novel_writing/view/page/novel_writing_page.dart';
+import 'widgets/message_bubble.dart';
+import 'novel_game_page.dart';
+import '../pet/pet_page.dart';
+import '../memo/memo_page.dart';
 
 /// ChatController Riverpod Provider
 final chatProvider = ChangeNotifierProvider<ChatController>(
@@ -320,18 +324,81 @@ class _ChatPageState extends ConsumerState<ChatPage> {
             ).push(MaterialPageRoute(builder: (_) => const NovelWritingPage()));
           },
         ),
-        IconButton(
+        PopupMenuButton<String>(
           icon: const Icon(
             Icons.more_horiz,
             color: Color(0xFF333333),
             size: 20,
           ),
           constraints: BoxConstraints(minWidth: 36, minHeight: 36),
-          onPressed: () {
-            Navigator.of(
-              context,
-            ).push(MaterialPageRoute(builder: (_) => const SettingsPage()));
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          elevation: 2,
+          onSelected: (value) {
+            switch (value) {
+              case 'settings':
+                Navigator.of(
+                  context,
+                ).push(MaterialPageRoute(builder: (_) => const SettingsPage()));
+              case 'pet':
+                Navigator.of(
+                  context,
+                ).push(MaterialPageRoute(builder: (_) => const PetPage()));
+              case 'memo':
+                Navigator.of(
+                  context,
+                ).push(MaterialPageRoute(builder: (_) => const MemoPage()));
+              case 'game':
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const NovelGamePage()),
+                );
+            }
           },
+          itemBuilder: (context) => [
+            const PopupMenuItem(
+              value: 'settings',
+              child: Row(
+                children: [
+                  Icon(Icons.settings, size: 18, color: Color(0xFF666666)),
+                  SizedBox(width: 8),
+                  Text('设置', style: TextStyle(fontSize: 13)),
+                ],
+              ),
+            ),
+            const PopupMenuItem(
+              value: 'pet',
+              child: Row(
+                children: [
+                  Icon(Icons.pets, size: 18, color: Color(0xFF666666)),
+                  SizedBox(width: 8),
+                  Text('宠物', style: TextStyle(fontSize: 13)),
+                ],
+              ),
+            ),
+            const PopupMenuItem(
+              value: 'memo',
+              child: Row(
+                children: [
+                  Icon(Icons.note_alt, size: 18, color: Color(0xFF666666)),
+                  SizedBox(width: 8),
+                  Text('备忘录', style: TextStyle(fontSize: 13)),
+                ],
+              ),
+            ),
+            const PopupMenuItem(
+              value: 'game',
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.videogame_asset,
+                    size: 18,
+                    color: Color(0xFF666666),
+                  ),
+                  SizedBox(width: 8),
+                  Text('游戏', style: TextStyle(fontSize: 13)),
+                ],
+              ),
+            ),
+          ],
         ),
       ],
       bottom: const PreferredSize(
@@ -469,18 +536,21 @@ class _ChatPageState extends ConsumerState<ChatPage> {
         itemCount: messages.length + (isStreamingEmpty ? 0 : 1),
         itemBuilder: (context, index) {
           if (index < messages.length) {
-            return _MessageBubble(
-              message: messages[index],
-              isEditMode: _isEditMode,
-              isSelected: _selectedIndices.contains(index),
-              onEditRequested: () => _enterEditMode(index),
-              onToggleSelection: _isEditMode
-                  ? () => _toggleSelection(index)
-                  : null,
+            return RepaintBoundary(
+              child: MessageBubble(
+                key: ValueKey(messages[index].hashCode),
+                message: messages[index],
+                isEditMode: _isEditMode,
+                isSelected: _selectedIndices.contains(index),
+                onEditRequested: () => _enterEditMode(index),
+                onToggleSelection: _isEditMode
+                    ? () => _toggleSelection(index)
+                    : null,
+              ),
             );
           }
           // 流式实时渲染
-          return const _StreamingBubble();
+          return RepaintBoundary(child: const _StreamingBubble());
         },
       ),
     );
@@ -654,350 +724,6 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                 minimumSize: const Size(32, 32),
               ),
             ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// 搜索详情弹窗（可选中复制）
-void _showSearchDetailDialog(
-  BuildContext context,
-  String title,
-  String url,
-  String snippet,
-  String content,
-) {
-  final buffer = StringBuffer();
-  if (title.isNotEmpty) buffer.writeln('标题：$title');
-  if (url.isNotEmpty) buffer.writeln('链接：$url');
-  if (snippet.isNotEmpty) buffer.writeln('\n摘要：\n$snippet');
-  if (content.isNotEmpty) buffer.writeln('\n正文：\n$content');
-  showDialog(
-    context: context,
-    builder: (ctx) => AlertDialog(
-      title: const Text('搜索详情', style: TextStyle(fontSize: 14)),
-      content: SingleChildScrollView(
-        child: SelectableText(
-          buffer.toString(),
-          style: const TextStyle(fontSize: 12, height: 1.5),
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(ctx).pop(),
-          child: const Text('关闭', style: TextStyle(fontSize: 13)),
-        ),
-      ],
-    ),
-  );
-}
-
-/// ─── 消息气泡组件 ───
-
-class _MessageBubble extends StatefulWidget {
-  final ChatMessage message;
-  final bool isEditMode;
-  final bool isSelected;
-  final VoidCallback? onEditRequested;
-  final VoidCallback? onToggleSelection;
-
-  const _MessageBubble({
-    required this.message,
-    this.isEditMode = false,
-    this.isSelected = false,
-    this.onEditRequested,
-    this.onToggleSelection,
-  });
-
-  @override
-  State<_MessageBubble> createState() => _MessageBubbleState();
-}
-
-class _MessageBubbleState extends State<_MessageBubble> {
-  bool _showThinking = false;
-  bool _showSearchResults = false; // 默认收起（内容输出结束后查看）
-
-  @override
-  Widget build(BuildContext context) {
-    final isUser = widget.message.isUser;
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Align(
-        alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            maxWidth: MediaQuery.of(context).size.width * 0.8,
-          ),
-          child: IntrinsicHeight(
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                // 复选框（编辑模式 + 非用户消息 → 左侧）
-                if (widget.isEditMode && !isUser) _buildCheckbox(),
-                // 消息内容
-                Flexible(
-                  child: GestureDetector(
-                    onTap: widget.isEditMode ? widget.onToggleSelection : null,
-                    child: Column(
-                      crossAxisAlignment: isUser
-                          ? CrossAxisAlignment.end
-                          : CrossAxisAlignment.start,
-                      children: [
-                        // 思考面板（仅非用户消息且有思考内容时显示）
-                        if (!isUser && widget.message.thinkingText != null) ...[
-                          _buildThinkingSection(),
-                          const SizedBox(height: 6),
-                        ],
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 8,
-                          ),
-                          decoration: BoxDecoration(
-                            color: isUser
-                                ? const Color(0xFF4D6BFE)
-                                : const Color(0xFFF5F5F5),
-                            borderRadius: BorderRadius.only(
-                              topLeft: const Radius.circular(12),
-                              topRight: const Radius.circular(12),
-                              bottomLeft: isUser
-                                  ? const Radius.circular(12)
-                                  : Radius.zero,
-                              bottomRight: isUser
-                                  ? Radius.zero
-                                  : const Radius.circular(12),
-                            ),
-                          ),
-                          child: SelectableText(
-                            widget.message.content,
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: isUser
-                                  ? Colors.white
-                                  : const Color(0xFF333333),
-                              height: 1.5,
-                            ),
-                          ),
-                        ),
-                        // 联网搜索结果（仅非用户消息且有搜索结果时显示，放在内容下方）
-                        if (!isUser &&
-                            widget.message.searchResults != null) ...[
-                          const SizedBox(height: 8),
-                          _buildSearchResultsSection(),
-                        ],
-                        // "···" 按钮（仅非编辑模式，置于右下角，在联网搜索气泡之下）
-                        if (!widget.isEditMode)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 6),
-                            child: Align(
-                              alignment: Alignment.centerRight,
-                              child: InkWell(
-                                onTap: widget.onEditRequested,
-                                borderRadius: BorderRadius.circular(12),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 2,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFFF0F0F0),
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  child: const Text(
-                                    '···',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: Color(0xFF999999),
-                                      height: 1.2,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
-                // 复选框（编辑模式 + 用户消息 → 右侧）
-                if (widget.isEditMode && isUser) _buildCheckbox(),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCheckbox() {
-    return Container(
-      alignment: Alignment.center,
-      padding: EdgeInsets.only(
-        left: widget.message.isUser ? 8 : 0,
-        right: widget.message.isUser ? 0 : 8,
-      ),
-      child: SizedBox(
-        width: 24,
-        height: 24,
-        child: Checkbox(
-          value: widget.isSelected,
-          onChanged: (_) => widget.onToggleSelection?.call(),
-          activeColor: const Color(0xFF4D6BFE),
-          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          visualDensity: VisualDensity.compact,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildThinkingSection() {
-    return GestureDetector(
-      onTap: () => setState(() => _showThinking = !_showThinking),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        decoration: BoxDecoration(
-          color: const Color(0xFFF5F5F5),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: const Color(0xFFE8E8E8)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(
-                  Icons.psychology,
-                  size: 14,
-                  color: Color(0xFF999999),
-                ),
-                const SizedBox(width: 4),
-                const Text(
-                  '思考过程',
-                  style: TextStyle(fontSize: 11, color: Color(0xFF999999)),
-                ),
-                const SizedBox(width: 4),
-                Icon(
-                  _showThinking
-                      ? Icons.keyboard_arrow_up
-                      : Icons.keyboard_arrow_down,
-                  size: 14,
-                  color: const Color(0xFF999999),
-                ),
-              ],
-            ),
-            if (_showThinking) ...[
-              const SizedBox(height: 6),
-              SelectableText(
-                widget.message.thinkingText!,
-                style: const TextStyle(fontSize: 11, color: Color(0xFF666666)),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// 联网搜索结果展示（可折叠，默认收起）
-  Widget _buildSearchResultsSection() {
-    final results = widget.message.searchResults!;
-    return GestureDetector(
-      onTap: () => setState(() => _showSearchResults = !_showSearchResults),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        decoration: BoxDecoration(
-          color: const Color(0xFFE8EEFF),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: const Color(0xFFB3C5FF)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.public, size: 14, color: Color(0xFF4D6BFE)),
-                const SizedBox(width: 4),
-                const Text(
-                  '搜索来源',
-                  style: TextStyle(fontSize: 11, color: Color(0xFF4D6BFE)),
-                ),
-                const Spacer(),
-                const SizedBox(width: 4),
-                Icon(
-                  _showSearchResults
-                      ? Icons.keyboard_arrow_up
-                      : Icons.keyboard_arrow_down,
-                  size: 14,
-                  color: const Color(0xFF4D6BFE),
-                ),
-              ],
-            ),
-            if (_showSearchResults) ...[
-              const SizedBox(height: 6),
-              ...results.take(5).map((r) {
-                final title =
-                    r['name']?.toString() ?? r['title']?.toString() ?? '';
-                final url = r['url']?.toString() ?? r['link']?.toString() ?? '';
-                final snippet = r['snippet']?.toString() ?? '';
-                final content = r['content']?.toString() ?? '';
-                return GestureDetector(
-                  onTap: () => _showSearchDetailDialog(
-                    context,
-                    title,
-                    url,
-                    snippet,
-                    content,
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.only(bottom: 6),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          title,
-                          style: const TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: Color(0xFF333333),
-                          ),
-                        ),
-                        if (snippet.isNotEmpty)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 2),
-                            child: Text(
-                              snippet,
-                              style: const TextStyle(
-                                fontSize: 10,
-                                color: Color(0xFF666666),
-                              ),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        if (url.isNotEmpty)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 1),
-                            child: Text(
-                              url,
-                              style: const TextStyle(
-                                fontSize: 9,
-                                color: Color(0xFF4D6BFE),
-                                decoration: TextDecoration.underline,
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                );
-              }),
-            ],
           ],
         ),
       ),
@@ -1195,13 +921,8 @@ class _StreamingBubble extends ConsumerWidget {
             final snippet = r['snippet']?.toString() ?? '';
             final content = r['content']?.toString() ?? '';
             return GestureDetector(
-              onTap: () => _showSearchDetailDialog(
-                context,
-                title,
-                url,
-                snippet,
-                content,
-              ),
+              onTap: () =>
+                  showSearchDetailDialog(context, title, url, snippet, content),
               child: Padding(
                 padding: const EdgeInsets.only(bottom: 6),
                 child: Column(

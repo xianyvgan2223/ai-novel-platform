@@ -6,7 +6,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../controllers/history_controller.dart';
 import '../models/chat_session.dart';
 import 'chat_page.dart'; // chatProvider
-import 'novel_game_page.dart';
 
 /// HistoryController Riverpod Provider
 final historyProvider = ChangeNotifierProvider<HistoryController>(
@@ -113,17 +112,6 @@ class _HistoryPageState extends ConsumerState<HistoryPage> {
         ),
       ),
       centerTitle: true,
-      actions: [
-        IconButton(
-          icon: const Icon(Icons.videogame_asset, color: Color(0xFF333333)),
-          tooltip: '游戏',
-          onPressed: () {
-            Navigator.of(
-              context,
-            ).push(MaterialPageRoute(builder: (_) => const NovelGamePage()));
-          },
-        ),
-      ],
       bottom: const PreferredSize(
         preferredSize: Size.fromHeight(1),
         child: Divider(height: 1, color: Color(0xFFEEEEEE)),

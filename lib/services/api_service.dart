@@ -75,9 +75,13 @@ class ApiService {
     required void Function() onDone,
     required Function(String error) onError,
     CancelToken? cancelToken,
+    List<Map<String, dynamic>>? tools,
   }) async {
     final body = Map<String, dynamic>.from(apiParams);
     body['messages'] = messages;
+    if (tools != null && tools.isNotEmpty) {
+      body['tools'] = tools;
+    }
 
     final isStream = apiParams['stream'] == true;
 

@@ -6,7 +6,7 @@ import 'package:path/path.dart' as p;
 
 class DatabaseHelper {
   static const _dbName = 'deepseek.db';
-  static const _dbVersion = 13;
+  static const _dbVersion = 15;
   static Database? _database;
 
   /// 单例入口，全局复用同一个数据库连接
@@ -234,6 +234,37 @@ class DatabaseHelper {
         FOREIGN KEY (outline_id) REFERENCES outline_records(id) ON DELETE CASCADE
       )
     ''');
+
+    // ── pet_data 宠物数据表（单条记录 id=1） ──
+    await db.execute('''
+      CREATE TABLE pet_data (
+        id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL DEFAULT '小宠',
+        level INTEGER NOT NULL DEFAULT 1,
+        growth_current INTEGER NOT NULL DEFAULT 0,
+        growth_max INTEGER NOT NULL DEFAULT 100,
+        mood_value INTEGER NOT NULL DEFAULT 80,
+        mood TEXT NOT NULL DEFAULT 'happy',
+        activity INTEGER NOT NULL DEFAULT 50,
+        intimacy INTEGER NOT NULL DEFAULT 30,
+        records TEXT NOT NULL DEFAULT '[]'
+      )
+    ''');
+
+    // ── memos 备忘录表 ──
+    await db.execute('''
+      CREATE TABLE memos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        content TEXT NOT NULL DEFAULT '',
+        is_completed INTEGER NOT NULL DEFAULT 0,
+        priority TEXT NOT NULL DEFAULT 'medium',
+        category TEXT NOT NULL DEFAULT '',
+        remind_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    ''');
   }
 
   static Future<void> _onUpgrade(
@@ -426,6 +457,41 @@ class DatabaseHelper {
       await addIfMissing('minor_event_min_words', 30);
       await addIfMissing('minor_event_max_words', 50);
       await addIfMissing('summary_max_words', 80);
+    }
+
+    // V13 → V14：新增 pet_data 表
+    if (oldVersion < 14) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS pet_data (
+          id INTEGER PRIMARY KEY,
+          name TEXT NOT NULL DEFAULT '小宠',
+          level INTEGER NOT NULL DEFAULT 1,
+          growth_current INTEGER NOT NULL DEFAULT 0,
+          growth_max INTEGER NOT NULL DEFAULT 100,
+          mood_value INTEGER NOT NULL DEFAULT 80,
+          mood TEXT NOT NULL DEFAULT 'happy',
+          activity INTEGER NOT NULL DEFAULT 50,
+          intimacy INTEGER NOT NULL DEFAULT 30,
+          records TEXT NOT NULL DEFAULT '[]'
+        )
+      ''');
+    }
+
+    // V14 → V15：新增 memos 表
+    if (oldVersion < 15) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS memos (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          title TEXT NOT NULL,
+          content TEXT NOT NULL DEFAULT '',
+          is_completed INTEGER NOT NULL DEFAULT 0,
+          priority TEXT NOT NULL DEFAULT 'medium',
+          category TEXT NOT NULL DEFAULT '',
+          remind_at TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+      ''');
     }
   }
 
