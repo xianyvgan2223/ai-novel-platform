@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
-import '../../../ai_battle/view/page/ai_battle_page.dart';
-import '../../../outline_generation/view/page/outline_generation_page.dart';
-import '../../../chapter_writing/view/page/chapter_list_page.dart';
-import '../../../outline_format/view/page/outline_format_page.dart';
+import 'ai_battle/view/page/ai_battle_page.dart';
+import 'outline_generation/view/page/outline_generation_page.dart';
+import 'chapter_writing/view/page/chapter_list_page.dart';
+import 'outline_format/view/page/outline_format_page.dart';
 
-/// 写小说页面
+/// 写小说模块入口页（功能导航）
 class NovelWritingPage extends StatelessWidget {
   const NovelWritingPage({super.key});
 

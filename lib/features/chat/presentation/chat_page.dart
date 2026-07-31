@@ -11,7 +11,7 @@ import '../domain/chat_session.dart';
 import 'history_page.dart';
 import 'settings_page.dart';
 import 'session_setting_page.dart';
-import '../../novel_writing/novel_main/view/page/novel_writing_page.dart';
+import '../../novel_writing/novel_writing_page.dart';
 import 'widgets/message_bubble.dart';
 import '../../game/game_hub_page.dart';
 
