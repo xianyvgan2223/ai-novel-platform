@@ -4,7 +4,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_displaymode/flutter_displaymode.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'views/chat_page.dart';
+import 'features/chat/presentation/chat_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
