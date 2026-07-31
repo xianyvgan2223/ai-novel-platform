@@ -1,10 +1,10 @@
 import 'package:dio/dio.dart';
 import 'package:deepseekapp/core/network/api_service.dart';
 import 'package:deepseekapp/core/config/user_setting_service.dart';
-import '../../shared/models/outline_setting.dart';
-import '../../shared/models/outline_record.dart';
-import '../../shared/models/db/outline_db_helper.dart';
-import '../../shared/models/db/outline_record_db_helper.dart';
+import '../../shared/domain/outline_setting.dart';
+import '../../shared/domain/outline_record.dart';
+import '../../shared/data/outline_db_helper.dart';
+import '../../shared/data/outline_record_db_helper.dart';
 
 /// 大纲生成提示词模板 — 分步式生成（Chain-of-Thought）
 ///

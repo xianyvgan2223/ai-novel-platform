@@ -1,23 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
-import 'package:deepseekapp/core/network/api_service.dart';
-import 'package:deepseekapp/core/config/user_setting_service.dart';
-import '../../shared/models/outline_chapter.dart';
-import '../../shared/models/outline_record.dart';
-import '../../shared/models/outline_setting.dart';
-import '../../shared/models/db/outline_db_helper.dart';
-import '../../shared/models/db/outline_chapter_db_helper.dart';
-import '../../shared/models/db/outline_record_db_helper.dart';
+import '../service/chapter_write_service.dart';
+import '../../shared/domain/outline_record.dart';
+import '../../shared/domain/outline_chapter.dart';
+import '../../shared/data/outline_chapter_db_helper.dart';
+import '../../shared/data/outline_record_db_helper.dart';
 
 /// 章节写作控制器
 class ChapterWriteController {
   final OutlineRecord outline;
-  final _apiService = ApiService();
+  final ChapterWriteService _service;
 
   /// 大纲文本内容（可变，与 DB 同步后更新）
   String outlineContent;
 
-  ChapterWriteController(this.outline) : outlineContent = outline.content;
+  ChapterWriteController(this.outline, {ChapterWriteService? service})
+    : _service = service ?? ChapterWriteService(),
+      outlineContent = outline.content;
 
   List<OutlineChapter> chapters = [];
   bool isLoading = true;
@@ -52,8 +51,7 @@ class ChapterWriteController {
     await OutlineChapterDbHelper().batchInsert(
       newChapters.map((c) => c.toMap()).toList(),
     );
-    final newRows = await OutlineChapterDbHelper().getByOutlineId(outline.id!);
-    chapters = newRows.map((m) => OutlineChapter.fromMap(m)).toList();
+    await _reloadChapters();
   }
 
   /// 将章节标题/概要的修改同步到大纲记录文本中
@@ -139,10 +137,7 @@ class ChapterWriteController {
         await OutlineChapterDbHelper().batchInsert(
           chapters.map((c) => c.toMap()).toList(),
         );
-        final newRows = await OutlineChapterDbHelper().getByOutlineId(
-          outline.id!,
-        );
-        chapters = newRows.map((m) => OutlineChapter.fromMap(m)).toList();
+        await _reloadChapters();
       }
     } catch (_) {}
     isLoading = false;
@@ -155,39 +150,8 @@ class ChapterWriteController {
     VoidCallback onUpdate,
   ) async {
     if (ch.id == null) return;
-    final settings = await OutlineDbHelper().getSettings();
-    if (settings == null) return;
-
-    final prevContent = await _loadPrevSummary(ch);
-
-    final prompt =
-        '''
-你是一位小说作家。请根据以下大纲设定，完整写出指定事件的详细章节内容。
-
-【小说设定】
-类型：${outline.genre}
-主题：${outline.theme}
-主角：${outline.protagonist}
-世界观：${outline.worldview}
-
-【大纲结构】
-${outlineContent}
-
-【当前事件】${ch.eventTitle}
-【事件概要】${ch.eventSummary}
-
-【前文摘要】${prevContent}
-
-要求：
-1. 以文学性强的叙述方式展开，包含场景描写、对话、心理活动
-2. 字数 2000-3000 字
-3. 结尾自然衔接下一个事件
-4. 只写当前事件的内容，不要超出范围
-5. 直接输出正文，不要添加注释说明
-''';
-
-    final apiKey = (await UserSettingService.getSettings()).apiKey;
-    if (apiKey.isEmpty) {
+    final settings = await _service.loadSettings();
+    if (settings.apiKey.isEmpty) {
       if (context.mounted) {
         ScaffoldMessenger.of(
           context,
@@ -195,6 +159,14 @@ ${outlineContent}
       }
       return;
     }
+
+    final prevContent = await _loadPrevSummary(ch);
+    final prompt = ChapterWritePromptTemplate.buildWritePrompt(
+      outline: outline,
+      outlineContent: outlineContent,
+      ch: ch,
+      prevContent: prevContent,
+    );
 
     isWriting = true;
     writingId = ch.id;
@@ -205,20 +177,19 @@ ${outlineContent}
     await OutlineChapterDbHelper().updateStatus(ch.id!, 'generating');
 
     try {
-      final setting = OutlineSetting.fromMap(settings);
-      await _apiService.streamChat(
-        apiKey: apiKey,
+      await _service.streamWrite(
+        apiKey: settings.apiKey,
         apiParams: {
-          'model': setting.model,
-          'temperature': setting.temperature,
-          'max_tokens': setting.maxTokens,
+          'model': settings.outlineSetting.model,
+          'temperature': settings.outlineSetting.temperature,
+          'max_tokens': settings.outlineSetting.maxTokens,
           'stream': true,
         },
         messages: [
           {
             'role': 'system',
-            'content': setting.chapterSystemPrompt.isNotEmpty
-                ? setting.chapterSystemPrompt
+            'content': settings.outlineSetting.chapterSystemPrompt.isNotEmpty
+                ? settings.outlineSetting.chapterSystemPrompt
                 : '你是一个专业的小说作家。',
           },
           {'role': 'user', 'content': prompt},
@@ -277,6 +248,45 @@ ${outlineContent}
     }
   }
 
+  /// 清空某章节已生成的内容，恢复为待生成状态
+  Future<void> resetChapter(OutlineChapter ch) async {
+    await OutlineChapterDbHelper().updateContent(ch.id!, '');
+    final idx = chapters.indexWhere((c) => c.id == ch.id);
+    if (idx != -1) {
+      chapters[idx] = chapters[idx].copyWith(content: '', status: 'pending');
+    }
+  }
+
+  /// 保存手动编辑后的章节内容
+  Future<void> saveChapterContent(OutlineChapter ch, String content) async {
+    await OutlineChapterDbHelper().updateContent(ch.id!, content);
+    final idx = chapters.indexWhere((c) => c.id == ch.id);
+    if (idx != -1) {
+      chapters[idx] = chapters[idx].copyWith(
+        content: content,
+        status: 'completed',
+      );
+    }
+  }
+
+  /// 修改章节标题/概要，并同步回大纲记录
+  Future<void> updateChapterSummary(
+    OutlineChapter ch,
+    String title,
+    String summary,
+  ) async {
+    await OutlineChapterDbHelper().updateSummary(ch.id!, title, summary);
+    final oldCh = chapters.firstWhere((c) => c.id == ch.id);
+    await syncEventToOutline(oldCh, title, summary);
+    final idx = chapters.indexWhere((c) => c.id == ch.id);
+    if (idx != -1) {
+      chapters[idx] = chapters[idx].copyWith(
+        eventTitle: title,
+        eventSummary: summary,
+      );
+    }
+  }
+
   void stopWrite() {
     _cancelToken?.cancel();
     _cancelToken = null;
@@ -284,6 +294,11 @@ ${outlineContent}
 
   void dispose() {
     stopWrite();
+  }
+
+  Future<void> _reloadChapters() async {
+    final rows = await OutlineChapterDbHelper().getByOutlineId(outline.id!);
+    chapters = rows.map((m) => OutlineChapter.fromMap(m)).toList();
   }
 
   List<OutlineChapter> _parseEvents(String content) {

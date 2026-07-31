@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import '../service/outline_service.dart';
-import '../../shared/models/outline_setting.dart';
-import '../../shared/models/outline_record.dart';
+import '../../shared/domain/outline_setting.dart';
+import '../../shared/domain/outline_record.dart';
 
 /// 大纲生成控制器，管理业务逻辑与状态
 ///

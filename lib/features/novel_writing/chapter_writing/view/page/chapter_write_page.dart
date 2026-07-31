@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
-import '../../../shared/models/outline_record.dart';
-import '../../../shared/models/outline_chapter.dart';
-import '../../../shared/models/db/outline_chapter_db_helper.dart';
+import '../../../shared/domain/outline_record.dart';
+import '../../../shared/domain/outline_chapter.dart';
 import 'outline_setting_page.dart';
 import '../../controller/chapter_write_controller.dart';
 
@@ -110,14 +109,7 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
                         onEdit: (c) => _openEditPage(c),
                         onEditOutline: (c) => _showEditOutlineDialog(c),
                         onDelete: () async {
-                          await OutlineChapterDbHelper().updateContent(
-                            ch.id!,
-                            '',
-                          );
-                          _controller.chapters[index] = ch.copyWith(
-                            content: '',
-                            status: 'pending',
-                          );
+                          await _controller.resetChapter(ch);
                           setState(() {});
                         },
                       );
@@ -339,23 +331,8 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
               final title = titleCtrl.text.trim();
               final summary = summaryCtrl.text.trim();
               if (title.isEmpty && summary.isEmpty) return;
-              final oldCh = _controller.chapters.firstWhere(
-                (c) => c.id == ch.id,
-              );
-              await OutlineChapterDbHelper().updateSummary(
-                ch.id!,
-                title,
-                summary,
-              );
-              await _controller.syncEventToOutline(oldCh, title, summary);
-              final idx = _controller.chapters.indexWhere((c) => c.id == ch.id);
-              if (idx != -1) {
-                _controller.chapters[idx] = _controller.chapters[idx].copyWith(
-                  eventTitle: title,
-                  eventSummary: summary,
-                );
-                setState(() {});
-              }
+              await _controller.updateChapterSummary(ch, title, summary);
+              if (mounted) setState(() {});
               if (ctx.mounted) Navigator.of(ctx).pop();
             },
             child: const Text(
@@ -404,15 +381,8 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
         builder: (_) => _ChapterEditPage(
           chapter: ch,
           onSaved: (newContent) async {
-            await OutlineChapterDbHelper().updateContent(ch.id!, newContent);
-            final idx = _controller.chapters.indexWhere((c) => c.id == ch.id);
-            if (idx != -1) {
-              _controller.chapters[idx] = _controller.chapters[idx].copyWith(
-                content: newContent,
-                status: 'completed',
-              );
-              setState(() {});
-            }
+            await _controller.saveChapterContent(ch, newContent);
+            if (mounted) setState(() {});
           },
         ),
       ),

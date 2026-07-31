@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import '../../../shared/models/outline_record.dart';
-import '../../../shared/models/db/outline_record_db_helper.dart';
+import '../../../shared/domain/outline_record.dart';
+import '../../../shared/data/outline_record_db_helper.dart';
 import 'chapter_write_page.dart';
 
 /// 选择大纲 → 进入章节写作页面

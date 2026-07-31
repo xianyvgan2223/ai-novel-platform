@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import '../../../shared/models/outline_setting.dart';
-import '../../../shared/models/db/outline_db_helper.dart';
+import '../../../shared/domain/outline_setting.dart';
+import '../../../shared/data/outline_db_helper.dart';
 
 /// 大纲生成设置页面 — 温度、最大长度、模型选择、系统提示、字数配置
 class OutlineSettingPage extends StatefulWidget {
