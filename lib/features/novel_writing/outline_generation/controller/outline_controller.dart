@@ -13,11 +13,11 @@ import '../../shared/domain/outline_record.dart';
 /// 采用多步生成策略（Chain-of-Thought + 分批精写）：
 /// 1. 定调：生成书名 + 核心概念（JSON 结构化输出，失败自动重试）
 /// 2. 骨架：粗骨架规划（全部大事件仅标题+定位，锁定全局轨迹）
-///    → 按约 1/10（封顶 5 个）分批精写大事件 → 批次间抽取伏笔账本（含伏笔/角色状态/悬念）
+///    → 按约 1/10（最少 2 个、封顶 5 个）分批精写大事件 → 按批间隔抽取伏笔账本（含伏笔/角色状态/悬念）
 /// 3. 展开：并行逐块展开大/小事件细节（每块最多 5 个大事件，限流并发）
 ///
 /// 可靠性特性：
-/// - 步骤 1/2 解析失败自动重试（最多 2 次、指数退避）
+/// - 步骤 1/2 解析失败自动重试（最多 2 次、指数退避）；步骤 3 块级请求网络失败自动重试
 /// - 每步结果本地落盘，支持从失败步骤断点续跑
 /// - 步骤 3 各块并行请求，UI 按序合并展示
 class OutlineController extends ChangeNotifier {
@@ -45,8 +45,11 @@ class OutlineController extends ChangeNotifier {
   static const int _maxEventsPerChunk = 5;
   static const int _maxConcurrentChunks = 3;
   static const int _maxRetries = 2;
+  static const int _maxChunkRetries = 2; // 展开块未收到内容时的网络失败自动重试次数
   static const int _maxContinuations = 5; // 展开块因 max_tokens 截断时的最大自动续写次数
   static const int _maxJsonTokens = 16000; // 结构化步骤截断重试时的 max_tokens 上限
+  static const int _ledgerInterval = 2; // 每 N 批抽取一次伏笔账本（末批必定抽取）
+  static const int _continuationTailChars = 1500; // 续写时携带的缓冲尾部长度上限
   static const Duration _throttleInterval = Duration(milliseconds: 300);
   static const String _progressFileName = 'outline_progress.json';
 
@@ -56,6 +59,7 @@ class OutlineController extends ChangeNotifier {
   final List<_StepStat> _stepStats = [];
 
   String _liveText = ''; // 正在流式输出的文本（多块时按序合并）
+  final List<OutlineStepBubble> _bubbles = []; // 已提交的展示气泡（步骤/尝试级快照）
   String _stepPreview = ''; // 步骤1/2完成后的格式化结果（书名概念 + 三幕骨架），展开阶段前持续展示
   bool _cancelled = false;
   String? _step1Text; // 步骤 1 的展示文本（书名+概念）
@@ -65,7 +69,8 @@ class OutlineController extends ChangeNotifier {
   // ─── 步骤 2 分批精写状态 ─────────────────────────────────────
   List<_Step2Batch> _step2Batches = []; // 本轮按幕顺序切好的批次
   int _step2BatchCount = 0; // 批次数（用于进度标签）
-  int _step2SubStepCount = 1; // 步骤 2 子调用数 = 1（粗骨架）+ 批次×2
+  int _ledgerBatchCount = 0; // 需抽取账本的批次数
+  int _step2SubStepCount = 1; // 步骤 2 子调用数 = 1（粗骨架）+ 精写批次 + 账本批次
   int _refinedBatchCount = 0; // 已完成（精写+账本）的批次数，断点续跑从此继续
   final List<Map<String, dynamic>> _ledgerForeshadows = []; // 伏笔账本：伏笔列表
   final List<String> _ledgerCharacters = []; // 伏笔账本：角色状态
@@ -99,6 +104,12 @@ class OutlineController extends ChangeNotifier {
     return base;
   }
 
+  /// 已提交的展示气泡（步骤/尝试级内容快照，失败重试时也会保留）
+  List<OutlineStepBubble> get bubbles => List.unmodifiable(_bubbles);
+
+  /// 当前正在流式输出的文本（多气泡视图的实时气泡使用）
+  String get liveText => _liveText;
+
   /// 进度（0~1）
   double get progress {
     if (totalSteps <= 0) return 0;
@@ -120,13 +131,17 @@ class OutlineController extends ChangeNotifier {
   String? get lastStepSummary =>
       _stepStats.isEmpty ? null : _stepStats.last.summary;
 
-  /// 预估 AI 调用次数（步骤1 + 粗骨架 + 批次×2 + 展开块数）
+  /// 预估 AI 调用次数（步骤1 + 粗骨架 + 精写批次 + 账本批次 + 展开块数）
   int get estimatedApiCalls {
     final batchSize = _calcBatchSize(majorEventCount);
     final batchCount = batchSize <= 0
         ? 0
         : (majorEventCount / batchSize).ceil();
-    return 2 + batchCount * 2 + (majorEventCount / _maxEventsPerChunk).ceil();
+    final ledgerCount = _countLedgerBatches(batchCount);
+    return 2 +
+        batchCount +
+        ledgerCount +
+        (majorEventCount / _maxEventsPerChunk).ceil();
   }
 
   /// 是否存在可续跑的进度草稿（同步判断，文件路径已知时）
@@ -245,7 +260,16 @@ class OutlineController extends ChangeNotifier {
       _outlineSetting = settings.outlineSetting;
       _baseParams = {'model': settings.outlineSetting.model, 'stream': true};
 
-      totalSteps = 3 + (majorEventCount / _maxEventsPerChunk).ceil();
+      final estBatchSize = _calcBatchSize(majorEventCount);
+      final estBatchCount = estBatchSize <= 0
+          ? 0
+          : (majorEventCount / estBatchSize).ceil();
+      final estLedgerCount = _countLedgerBatches(estBatchCount);
+      totalSteps =
+          3 +
+          estBatchCount +
+          estLedgerCount +
+          (majorEventCount / _maxEventsPerChunk).ceil();
       stepLabels = ['生成书名和核心概念', '规划三幕粗骨架', '展开细节'];
 
       final systemPrompt = OutlinePromptTemplate.buildSystemPrompt(
@@ -291,6 +315,7 @@ class OutlineController extends ChangeNotifier {
         _step1Text = '书名：《${r!.title}》\n\n${r.concept}';
         _stepPreview = _step1Text!;
         _liveText = '';
+        _bubbles.add(OutlineStepBubble(label: '书名与核心概念', content: _step1Text!));
         title = r.title;
         _stepStats.add(
           _StepStat(
@@ -419,7 +444,10 @@ class OutlineController extends ChangeNotifier {
           },
         );
         await completer.future;
-        if (_cancelled) return null;
+        if (_cancelled) {
+          _preserveFailedOutput(accumulated, reasoningAccum, attempt: attempt);
+          return null;
+        }
 
         final parsed = _extractJson(accumulated);
         if (parsed == null) {
@@ -440,30 +468,45 @@ class OutlineController extends ChangeNotifier {
         }
         throw _StepParseException(failureMessage);
       } on DioException catch (e) {
-        if (_cancelled) return null;
+        if (_cancelled) {
+          _preserveFailedOutput(accumulated, reasoningAccum, attempt: attempt);
+          return null;
+        }
         if (attempt < _maxRetries) {
+          _preserveFailedOutput(accumulated, reasoningAccum, attempt: attempt);
           attempt++;
           await _retryWait(attempt);
           continue;
         }
+        _preserveFailedOutput(accumulated, reasoningAccum, attempt: attempt);
         error = '请求失败：${e.message}';
         return null;
       } on _StepParseException catch (e) {
-        if (_cancelled) return null;
+        if (_cancelled) {
+          _preserveFailedOutput(accumulated, reasoningAccum, attempt: attempt);
+          return null;
+        }
         if (attempt < _maxRetries) {
+          _preserveFailedOutput(accumulated, reasoningAccum, attempt: attempt);
           attempt++;
           await _retryWait(attempt);
           continue;
         }
+        _preserveFailedOutput(accumulated, reasoningAccum, attempt: attempt);
         error = e.message;
         return null;
       } catch (e) {
-        if (_cancelled) return null;
+        if (_cancelled) {
+          _preserveFailedOutput(accumulated, reasoningAccum, attempt: attempt);
+          return null;
+        }
         if (attempt < _maxRetries) {
+          _preserveFailedOutput(accumulated, reasoningAccum, attempt: attempt);
           attempt++;
           await _retryWait(attempt);
           continue;
         }
+        _preserveFailedOutput(accumulated, reasoningAccum, attempt: attempt);
         error = e.toString().replaceFirst('Exception: ', '');
         return null;
       } finally {
@@ -478,6 +521,29 @@ class OutlineController extends ChangeNotifier {
     notifyListeners();
     await Future.delayed(Duration(seconds: attempt));
   }
+
+  /// 步骤 1/2 失败或取消时，把本次尝试的模型输出（思考过程 + 生成内容）提交为气泡。
+  /// 多次重试的每次思考都会被保留，不再被清除。
+  void _preserveFailedOutput(
+    String content,
+    String reasoning, {
+    required int attempt,
+  }) {
+    if (content.trim().isEmpty && reasoning.trim().isEmpty) return;
+    _bubbles.add(
+      OutlineStepBubble(
+        label: '${_currentStepLabel()} · 第${attempt + 1}次',
+        content: _mergeStructuredLiveText(content, reasoning),
+        isError: true,
+      ),
+    );
+    _liveText = '';
+    notifyListeners();
+  }
+
+  /// 当前步骤的显示标签（用于失败气泡命名）
+  String _currentStepLabel() =>
+      stepLabels.length > currentStep ? stepLabels[currentStep] : '生成';
 
   /// 从文本中提取 JSON（容忍 markdown 代码围栏及前后杂文）
   Map<String, dynamic>? _extractJson(String text) {
@@ -523,7 +589,10 @@ class OutlineController extends ChangeNotifier {
       acts.add(_Act(name: name, events: events));
     }
     if (acts.length != 3) return null;
-    if (total != expectedCount) return null;
+    // 总数允许小幅偏差（±max(1, 期望/3)，上限 3），
+    // 避免模型计数偏差导致「粗骨架生成失败」必现
+    final tolerance = ((expectedCount / 3).ceil()).clamp(1, 3);
+    if (total < 3 || (total - expectedCount).abs() > tolerance) return null;
     return _Step2Result(acts: acts);
   }
 
@@ -563,7 +632,14 @@ class OutlineController extends ChangeNotifier {
         return false;
       }
       _step2Json = r;
-      final totalChars = r!.acts.fold<int>(
+      final totalEvents = r!.acts.fold<int>(
+        0,
+        (sum, a) => sum + a.events.length,
+      );
+      if (totalEvents != majorEventCount) {
+        warning = '生成的大事件数为 $totalEvents，与设定 $majorEventCount 略有差异，已按实际数量继续生成';
+      }
+      final totalChars = r.acts.fold<int>(
         0,
         (sum, a) => sum + a.events.fold<int>(0, (s, e) => s + e.summary.length),
       );
@@ -575,6 +651,9 @@ class OutlineController extends ChangeNotifier {
         ),
       );
       _stepPreview = '${_step1Text ?? ''}\n\n${_renderSkeleton()}';
+      _bubbles.add(
+        OutlineStepBubble(label: '三幕粗骨架', content: _renderSkeleton()),
+      );
       await _persistProgress(phase: 2);
       notifyListeners();
     }
@@ -584,7 +663,8 @@ class OutlineController extends ChangeNotifier {
     // ── 2b：按幕顺序切批次（每批约总数 1/10，封顶 5 个） ──
     _step2Batches = _buildBatches(_step2Json!.acts);
     _step2BatchCount = _step2Batches.length;
-    _step2SubStepCount = 1 + _step2BatchCount * 2;
+    _ledgerBatchCount = _countLedgerBatches(_step2BatchCount);
+    _step2SubStepCount = 1 + _step2BatchCount + _ledgerBatchCount;
     final estChunks = (majorEventCount / _maxEventsPerChunk).ceil();
     totalSteps = 2 + _step2SubStepCount + estChunks;
     stepLabels = [
@@ -595,13 +675,14 @@ class OutlineController extends ChangeNotifier {
     ];
     final totalBatches = _step2Batches.length;
 
-    // ── 2c：逐批「精写 + 抽取伏笔账本」 ──
+    // ── 2c：逐批「精写 + 间隔抽取伏笔账本」 ──
+    var subStepIndex = 2; // 步骤 2 内部子步骤序号（0/1 为书名概念、粗骨架）
     for (int b = _refinedBatchCount; b < totalBatches; b++) {
       if (_cancelled || error != null) break;
       final batch = _step2Batches[b];
 
       // 精写本批大事件（粒度由「大事件粒度定义」约束，保证不退化）
-      currentStep = 2 + b * 2;
+      currentStep = subStepIndex++;
       _liveText = '正在精写第 ${b + 1}/$totalBatches 批大事件...';
       notifyListeners();
       final t0 = DateTime.now();
@@ -640,46 +721,48 @@ class OutlineController extends ChangeNotifier {
       );
       notifyListeners();
 
-      // 抽取本批伏笔账本（伏笔/角色状态/悬念，供后续批次与展开延续）
-      currentStep = 2 + b * 2 + 1;
-      _liveText = '正在抽取第 ${b + 1}/$totalBatches 批的伏笔账本...';
-      notifyListeners();
-      final t1 = DateTime.now();
-      final ledger = await _runStructuredStep<_LedgerResult>(
-        systemPrompt: OutlinePromptTemplate.jsonSystemPrompt,
-        userPrompt: OutlinePromptTemplate.buildLedgerPrompt(
-          batchContent: _renderRefinedBatchContent(batch),
-          prevLedgerText: _renderLedgerText(),
-        ),
-        maxTokens: 2048,
-        temperature: 0.3,
-        failureMessage: '伏笔账本抽取失败',
-        validate: _parseLedger,
-      );
-      if (_cancelled || error != null) {
-        await _persistProgress(phase: 2);
-        loading = false;
+      // 按间隔抽取伏笔账本（伏笔/角色状态/悬念，供后续批次与展开延续）
+      if (_needsLedger(b, totalBatches)) {
+        currentStep = subStepIndex++;
+        _liveText = '正在抽取第 ${b + 1}/$totalBatches 批的伏笔账本...';
         notifyListeners();
-        return false;
-      }
-      if (ledger != null) {
-        _ledgerForeshadows.addAll(ledger.foreshadows);
-        for (final c in ledger.characterStates) {
-          if (!_ledgerCharacters.contains(c)) _ledgerCharacters.add(c);
+        final t1 = DateTime.now();
+        final ledger = await _runStructuredStep<_LedgerResult>(
+          systemPrompt: OutlinePromptTemplate.jsonSystemPrompt,
+          userPrompt: OutlinePromptTemplate.buildLedgerPrompt(
+            batchContent: _renderRefinedBatchContent(batch),
+            prevLedgerText: _renderLedgerText(),
+          ),
+          maxTokens: 2048,
+          temperature: 0.3,
+          failureMessage: '伏笔账本抽取失败',
+          validate: _parseLedger,
+        );
+        if (_cancelled || error != null) {
+          await _persistProgress(phase: 2);
+          loading = false;
+          notifyListeners();
+          return false;
         }
-        for (final u in ledger.unresolved) {
-          if (!_ledgerUnresolved.contains(u)) _ledgerUnresolved.add(u);
+        if (ledger != null) {
+          _ledgerForeshadows.addAll(ledger.foreshadows);
+          for (final c in ledger.characterStates) {
+            if (!_ledgerCharacters.contains(c)) _ledgerCharacters.add(c);
+          }
+          for (final u in ledger.unresolved) {
+            if (!_ledgerUnresolved.contains(u)) _ledgerUnresolved.add(u);
+          }
         }
+        _stepStats.add(
+          _StepStat(
+            '抽取伏笔账本 (${b + 1}/$totalBatches)',
+            DateTime.now().difference(t1).inSeconds,
+            _ledgerForeshadows.length * 20,
+          ),
+        );
       }
       _refinedBatchCount++;
       _stepPreview = '${_step1Text ?? ''}\n\n${_renderSkeleton()}';
-      _stepStats.add(
-        _StepStat(
-          '抽取伏笔账本 (${b + 1}/$totalBatches)',
-          DateTime.now().difference(t1).inSeconds,
-          _ledgerForeshadows.length * 20,
-        ),
-      );
       await _persistProgress(phase: 2);
       notifyListeners();
     }
@@ -712,10 +795,26 @@ class OutlineController extends ChangeNotifier {
     return batches;
   }
 
-  /// 批次大小：约总数的 1/10，限制在 1~5 个之间
+  /// 批次大小：约总数的 1/10，限制在 2~5 个之间
+  /// （最小 2 个一批，避免小数量时批次过多导致调用数翻倍）
   int _calcBatchSize(int total) {
     final s = (total / 10).ceil();
-    return s < 1 ? 1 : (s > 5 ? 5 : s);
+    return s < 2 ? 2 : (s > 5 ? 5 : s);
+  }
+
+  /// 该批是否需要抽取伏笔账本：按 [_ledgerInterval] 间隔抽取，末批必定抽取。
+  /// 只依赖批次下标与总批次数，可确定性还原，断点续跑不受影响。
+  bool _needsLedger(int batchIndex, int totalBatches) =>
+      batchIndex == totalBatches - 1 || (batchIndex + 1) % _ledgerInterval == 0;
+
+  /// [totalBatches] 个批次中需要抽取账本的批次数
+  int _countLedgerBatches(int totalBatches) {
+    if (totalBatches <= 0) return 0;
+    var count = 0;
+    for (int b = 0; b < totalBatches; b++) {
+      if (_needsLedger(b, totalBatches)) count++;
+    }
+    return count;
   }
 
   /// 把精写结果回填到骨架对应位置
@@ -826,11 +925,11 @@ class OutlineController extends ChangeNotifier {
     return buf.toString().trim();
   }
 
-  /// 生成批次进度标签（每个批次两格：精写 + 抽取账本）
+  /// 生成批次进度标签（每批一格精写，需抽账本的批额外一格抽取）
   List<String> _buildBatchLabels(int totalBatches) => [
     for (int i = 0; i < totalBatches; i++) ...[
       '精写大事件 (${i + 1}/$totalBatches)',
-      '抽取伏笔账本 (${i + 1}/$totalBatches)',
+      if (_needsLedger(i, totalBatches)) '抽取伏笔账本 (${i + 1}/$totalBatches)',
     ],
   ];
 
@@ -995,58 +1094,78 @@ class OutlineController extends ChangeNotifier {
         _liveText = _mergeChunkLiveText();
         notifyListeners();
       }
-      final completer = Completer<void>();
       final messages = <Map<String, dynamic>>[
         {'role': 'system', 'content': systemPrompt},
         {'role': 'user', 'content': userPrompt},
       ];
       if (continuation > 0) {
+        // 续写时仅携带缓冲尾部 + 明确续写起点，避免全量重发导致上下文膨胀
         messages.addAll([
-          {
-            'role': 'assistant',
-            'content': chunk.buffer.isEmpty ? '（尚无内容）' : chunk.buffer,
-          },
+          {'role': 'assistant', 'content': _continuationTail(chunk.buffer)},
           {
             'role': 'user',
             'content':
-                '请直接从刚才中断的位置继续输出后面的内容，'
-                '不要重复已经生成的部分，不要添加解释性文字。',
+                '……（省略号之前为已生成内容的结尾片段，其余已生成内容已省略，'
+                '请勿重复任何已生成的内容）请从这里继续往后写，'
+                '保持输出格式与结尾片段一致，不要添加解释性文字。',
           },
         ]);
       }
       String roundFinish = '';
-      await _outlineService.streamGenerate(
-        apiKey: _apiKey,
-        apiParams: {
-          ..._baseParams,
-          'temperature': temperature,
-          'max_tokens': maxTokens,
-          'stream': true,
-        },
-        messages: messages,
-        cancelToken: token,
-        onChunk: (chunkData) {
-          final choices = chunkData['choices'] as List?;
-          if (choices == null || choices.isEmpty) return;
-          final delta = choices[0]['delta'] as Map<String, dynamic>?;
-          final content = delta?['content'] as String?;
-          if (content != null && content.isNotEmpty) {
-            chunk.buffer += content;
+      var attempt = 0;
+      while (true) {
+        if (_cancelled) return false;
+        final roundStartLen = chunk.buffer.length;
+        final completer = Completer<void>();
+        try {
+          await _outlineService.streamGenerate(
+            apiKey: _apiKey,
+            apiParams: {
+              ..._baseParams,
+              'temperature': temperature,
+              'max_tokens': maxTokens,
+              'stream': true,
+            },
+            messages: messages,
+            cancelToken: token,
+            onChunk: (chunkData) {
+              final choices = chunkData['choices'] as List?;
+              if (choices == null || choices.isEmpty) return;
+              final delta = choices[0]['delta'] as Map<String, dynamic>?;
+              final content = delta?['content'] as String?;
+              if (content != null && content.isNotEmpty) {
+                chunk.buffer += content;
+                _liveText = _mergeChunkLiveText();
+                _throttledNotify();
+                _throttledScroll();
+              }
+              final fr = choices[0]['finish_reason'] as String?;
+              if (fr != null && fr.isNotEmpty) roundFinish = fr;
+            },
+            onDone: () {
+              if (!completer.isCompleted) completer.complete();
+            },
+            onError: (msg) {
+              if (!completer.isCompleted) completer.completeError(msg);
+            },
+          );
+          await completer.future;
+        } catch (_) {
+          if (_cancelled) return false;
+          // 已收到部分内容时重试会造成重复输出，不再重试；
+          // 仅对「未收到任何内容」的瞬时网络失败做退避重试
+          final receivedContent = chunk.buffer.length > roundStartLen;
+          if (!receivedContent && attempt < _maxChunkRetries) {
+            attempt++;
+            await _retryWait(attempt);
             _liveText = _mergeChunkLiveText();
-            _throttledNotify();
-            _throttledScroll();
+            notifyListeners();
+            continue;
           }
-          final fr = choices[0]['finish_reason'] as String?;
-          if (fr != null && fr.isNotEmpty) roundFinish = fr;
-        },
-        onDone: () {
-          if (!completer.isCompleted) completer.complete();
-        },
-        onError: (msg) {
-          if (!completer.isCompleted) completer.completeError(msg);
-        },
-      );
-      await completer.future;
+          rethrow;
+        }
+        break;
+      }
       if (_cancelled) return false;
 
       finalFinish = roundFinish;
@@ -1056,8 +1175,19 @@ class OutlineController extends ChangeNotifier {
     }
     chunk.continuations = continuation;
     chunk.continuing = false;
+    _liveText = _mergeChunkLiveText();
     notifyListeners();
     return finalFinish == 'length';
+  }
+
+  /// 续写提示词只携带缓冲尾部：省略标记 + 最近 [_continuationTailChars] 个字符，
+  /// 并明确告知模型省略号之前的内容已生成、请勿重复
+  String _continuationTail(String buffer) {
+    if (buffer.isEmpty) return '（尚无内容）';
+    if (buffer.length <= _continuationTailChars) return buffer;
+    final omitted = buffer.length - _continuationTailChars;
+    return '……[此处省略已生成的 $omitted 个字符，请勿重复省略号之前的内容]……\n'
+        '${buffer.substring(buffer.length - _continuationTailChars)}';
   }
 
   /// 结构化步骤（步骤1/2）的实时展示：思考过程 + 生成内容
@@ -1080,7 +1210,7 @@ class OutlineController extends ChangeNotifier {
     return parts.join('\n\n');
   }
 
-  /// 将连续完成的块按序刷入 rawText
+  /// 将连续完成的块按序刷入 rawText，并为每块提交一个展示气泡
   void _flushCompletedChunks() {
     while (_flushIndex < _chunks.length && _chunks[_flushIndex].done) {
       final c = _chunks[_flushIndex];
@@ -1092,6 +1222,14 @@ class OutlineController extends ChangeNotifier {
       } else {
         rawText = '$rawText\n\n$segment';
       }
+      _bubbles.add(
+        OutlineStepBubble(
+          label: c.totalChunks > 1
+              ? '${c.actName} · ${c.chunkIndex + 1}/${c.totalChunks}'
+              : c.actName,
+          content: segment,
+        ),
+      );
       _flushIndex++;
     }
     _liveText = _mergeChunkLiveText();
@@ -1198,6 +1336,7 @@ class OutlineController extends ChangeNotifier {
     rawText = '';
     title = '';
     _liveText = '';
+    _bubbles.clear();
     _cancelled = false;
     currentStep = 0;
     totalSteps = 0;
@@ -1209,6 +1348,7 @@ class OutlineController extends ChangeNotifier {
     _stepPreview = '';
     _step2Batches = [];
     _step2BatchCount = 0;
+    _ledgerBatchCount = 0;
     _step2SubStepCount = 1;
     _refinedBatchCount = 0;
     _ledgerForeshadows.clear();
@@ -1330,6 +1470,10 @@ class OutlineController extends ChangeNotifier {
     }
     _completedChunkCount = data['completedChunks'] as int? ?? 0;
     rawText = data['rawText'] as String? ?? '';
+    // 续跑恢复：把已有内容提交为一个历史气泡，后续新内容会追加为独立气泡
+    if (displayText.isNotEmpty) {
+      _bubbles.add(OutlineStepBubble(label: '已生成内容', content: displayText));
+    }
   }
 }
 
@@ -1466,5 +1610,18 @@ class _LedgerResult {
     required this.foreshadows,
     required this.characterStates,
     required this.unresolved,
+  });
+}
+
+/// 生成过程展示气泡：步骤/尝试级内容快照（思考 + 生成内容）
+class OutlineStepBubble {
+  final String label;
+  final String content;
+  final bool isError;
+
+  const OutlineStepBubble({
+    required this.label,
+    required this.content,
+    this.isError = false,
   });
 }

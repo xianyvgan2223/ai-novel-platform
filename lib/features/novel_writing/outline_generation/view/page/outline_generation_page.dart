@@ -190,25 +190,6 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
             children: [
               _buildInputSection(),
               const SizedBox(height: 12),
-              if (_hasDraft && !c.loading) ...[
-                SizedBox(
-                  width: double.infinity,
-                  height: 40,
-                  child: OutlinedButton.icon(
-                    onPressed: _onResume,
-                    icon: const Icon(Icons.play_circle_outline, size: 18),
-                    label: const Text('继续上次未完成的生成'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: const Color(0xFF4D6BFE),
-                      side: const BorderSide(color: Color(0xFF4D6BFE)),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-              ],
               SizedBox(
                 width: double.infinity,
                 height: 44,
@@ -305,7 +286,9 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
                   ),
                 ),
               ],
-              if (c.rawText.isNotEmpty || c.loading) ...[
+              if (c.bubbles.isNotEmpty ||
+                  c.displayText.isNotEmpty ||
+                  c.loading) ...[
                 const SizedBox(height: 16),
                 if (c.title.isNotEmpty)
                   Padding(
@@ -319,23 +302,47 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
                       ),
                     ),
                   ),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF8F9FF),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: const Color(0xFFE8ECF4)),
-                  ),
-                  child: SelectableText(
-                    c.displayText.isEmpty ? '正在生成...' : c.displayText,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      height: 1.5,
-                      color: Color(0xFF444444),
+                // 已提交的多气泡（步骤结果 / 失败尝试的思考与输出）
+                for (final b in c.bubbles)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: _buildBubble(
+                      label: b.label,
+                      content: b.content,
+                      isError: b.isError,
                     ),
                   ),
-                ),
+                // 回退：无气泡但有历史/预览内容（如断点续跑恢复）
+                if (c.bubbles.isEmpty &&
+                    c.displayText.isNotEmpty &&
+                    c.liveText.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: _buildBubble(
+                      label: null,
+                      content: c.displayText,
+                      isError: false,
+                    ),
+                  ),
+                // 实时流式气泡
+                if (c.liveText.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: _buildBubble(
+                      label: '生成中',
+                      content: c.liveText,
+                      isError: false,
+                    ),
+                  )
+                else if (c.loading)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: _buildBubble(
+                      label: '生成中',
+                      content: '正在生成...',
+                      isError: false,
+                    ),
+                  ),
                 if (c.loading) ...[
                   const SizedBox(height: 8),
                   ClipRRect(
@@ -376,6 +383,25 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
                       ),
                     ),
                 ],
+              ],
+              if (_hasDraft && !c.loading) ...[
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  height: 40,
+                  child: OutlinedButton.icon(
+                    onPressed: _onResume,
+                    icon: const Icon(Icons.play_circle_outline, size: 18),
+                    label: const Text('继续上次未完成的生成'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF4D6BFE),
+                      side: const BorderSide(color: Color(0xFF4D6BFE)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
+                ),
               ],
             ],
           ),
@@ -636,6 +662,65 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
           padding: EdgeInsets.zero,
         ),
       ],
+    );
+  }
+
+  /// 渲染单个生成内容气泡
+  Widget _buildBubble({
+    String? label,
+    required String content,
+    required bool isError,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isError ? const Color(0xFFFFF3F3) : const Color(0xFFF8F9FF),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isError ? const Color(0xFFFFD6D6) : const Color(0xFFE8ECF4),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (label != null && label.isNotEmpty) ...[
+            Row(
+              children: [
+                Icon(
+                  isError ? Icons.error_outline : Icons.auto_awesome,
+                  size: 13,
+                  color: isError
+                      ? const Color(0xFFE5484D)
+                      : const Color(0xFF4D6BFE),
+                ),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: isError
+                          ? const Color(0xFFE5484D)
+                          : const Color(0xFF4D6BFE),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+          ],
+          SelectableText(
+            content.isEmpty ? '（无内容）' : content,
+            style: const TextStyle(
+              fontSize: 12,
+              height: 1.5,
+              color: Color(0xFF444444),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
