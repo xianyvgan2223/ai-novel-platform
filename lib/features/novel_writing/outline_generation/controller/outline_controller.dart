@@ -49,7 +49,6 @@ class OutlineController extends ChangeNotifier {
   static const int _maxContinuations = 5; // 展开块因 max_tokens 截断时的最大自动续写次数
   static const int _maxJsonTokens = 16000; // 结构化步骤截断重试时的 max_tokens 上限
   static const int _ledgerInterval = 2; // 每 N 批抽取一次伏笔账本（末批必定抽取）
-  static const int _continuationTailChars = 1500; // 续写时携带的缓冲尾部长度上限
   static const Duration _throttleInterval = Duration(milliseconds: 300);
   static const String _progressFileName = 'outline_progress.json';
 
@@ -1099,15 +1098,17 @@ class OutlineController extends ChangeNotifier {
         {'role': 'user', 'content': userPrompt},
       ];
       if (continuation > 0) {
-        // 续写时仅携带缓冲尾部 + 明确续写起点，避免全量重发导致上下文膨胀
+        // 续写时重发完整已生成内容，保证模型掌握完整上下文、衔接不断裂
         messages.addAll([
-          {'role': 'assistant', 'content': _continuationTail(chunk.buffer)},
+          {
+            'role': 'assistant',
+            'content': chunk.buffer.isEmpty ? '（尚无内容）' : chunk.buffer,
+          },
           {
             'role': 'user',
             'content':
-                '……（省略号之前为已生成内容的结尾片段，其余已生成内容已省略，'
-                '请勿重复任何已生成的内容）请从这里继续往后写，'
-                '保持输出格式与结尾片段一致，不要添加解释性文字。',
+                '请直接从刚才中断的位置继续输出后面的内容，'
+                '不要重复已经生成的部分，不要添加解释性文字。',
           },
         ]);
       }
@@ -1178,16 +1179,6 @@ class OutlineController extends ChangeNotifier {
     _liveText = _mergeChunkLiveText();
     notifyListeners();
     return finalFinish == 'length';
-  }
-
-  /// 续写提示词只携带缓冲尾部：省略标记 + 最近 [_continuationTailChars] 个字符，
-  /// 并明确告知模型省略号之前的内容已生成、请勿重复
-  String _continuationTail(String buffer) {
-    if (buffer.isEmpty) return '（尚无内容）';
-    if (buffer.length <= _continuationTailChars) return buffer;
-    final omitted = buffer.length - _continuationTailChars;
-    return '……[此处省略已生成的 $omitted 个字符，请勿重复省略号之前的内容]……\n'
-        '${buffer.substring(buffer.length - _continuationTailChars)}';
   }
 
   /// 结构化步骤（步骤1/2）的实时展示：思考过程 + 生成内容
