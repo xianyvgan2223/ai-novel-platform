@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import '../../controller/outline_controller.dart';
@@ -16,6 +17,31 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
   final _controller = OutlineController();
   final _majorEventCountController = TextEditingController();
   final _minorEventCountController = TextEditingController();
+  bool _hasDraft = false;
+
+  static const _inspirations =
+      <({String theme, String protagonist, String worldview})>[
+        (
+          theme: '废土世界中 AI 觉醒并追寻人性',
+          protagonist: '曾经的顶级黑客「零」，失去记忆后在世界裂隙中挣扎求生',
+          worldview: '核战后的地球被 AI 穹顶覆盖，人类生活在隔离舱中',
+        ),
+        (
+          theme: '现代都市中的古老妖物与守护者',
+          protagonist: '表面是普通大学生的灵力传承者「苏禾」',
+          worldview: '现代都市暗藏妖界入口，维持两界平衡的古老契约即将失效',
+        ),
+        (
+          theme: '星辰大海中的文明接力',
+          protagonist: '年轻舰长「陆沉舟」，背负旧纪元全部文明的数据库',
+          worldview: '人类文明消亡后，意识上传至深空舰队寻找新家园',
+        ),
+        (
+          theme: '武侠世界的机关术复兴',
+          protagonist: '被逐出师门的机关天才「唐小柒」',
+          worldview: '机关术没落的武林，机械傀儡与内力并存的江湖',
+        ),
+      ];
 
   static const _predefinedGenres = [
     '玄幻',
@@ -34,6 +60,7 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
     _controller.addListener(_onChanged);
     _majorEventCountController.text = '${_controller.majorEventCount}';
     _minorEventCountController.text = '${_controller.minorEventCount}';
+    _refreshDraft();
   }
 
   @override
@@ -45,7 +72,64 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
     super.dispose();
   }
 
-  void _onChanged() => setState(() {});
+  void _onChanged() {
+    setState(() {});
+    final msg = _controller.consumeMessage();
+    if (msg != null && mounted) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(content: Text(msg), duration: const Duration(seconds: 2)),
+        );
+    }
+  }
+
+  Future<void> _refreshDraft() async {
+    final has = await _controller.checkPendingDraft();
+    if (mounted) setState(() => _hasDraft = has);
+  }
+
+  Future<void> _onResume() async {
+    await _controller.resume();
+    await _refreshDraft();
+  }
+
+  void _randomInspiration() {
+    final idea = _inspirations[Random().nextInt(_inspirations.length)];
+    _controller.themeController.text = idea.theme;
+    _controller.protagonistController.text = idea.protagonist;
+    _controller.worldViewController.text = idea.worldview;
+    setState(() {});
+  }
+
+  Future<void> _onCancelPressed() async {
+    await _controller.cancel();
+    if (!mounted) return;
+    await _refreshDraft();
+    if (!mounted) return;
+    if (_controller.rawText.trim().isEmpty) return;
+    final save = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('取消生成'),
+        content: const Text('已生成部分内容，要保存到历史大纲吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('不保存'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    if (save == true) {
+      await _controller.savePartial();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -83,7 +167,7 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
       ),
       floatingActionButton: c.loading
           ? FloatingActionButton.extended(
-              onPressed: () => c.cancel(),
+              onPressed: _onCancelPressed,
               backgroundColor: Colors.red,
               foregroundColor: Colors.white,
               icon: const Icon(Icons.stop, size: 20),
@@ -106,11 +190,35 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
             children: [
               _buildInputSection(),
               const SizedBox(height: 12),
+              if (_hasDraft && !c.loading) ...[
+                SizedBox(
+                  width: double.infinity,
+                  height: 40,
+                  child: OutlinedButton.icon(
+                    onPressed: _onResume,
+                    icon: const Icon(Icons.play_circle_outline, size: 18),
+                    label: const Text('继续上次未完成的生成'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF4D6BFE),
+                      side: const BorderSide(color: Color(0xFF4D6BFE)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
               SizedBox(
                 width: double.infinity,
                 height: 44,
                 child: ElevatedButton.icon(
-                  onPressed: c.loading ? null : () => c.generate(),
+                  onPressed: c.loading
+                      ? null
+                      : () async {
+                          await c.generate();
+                          await _refreshDraft();
+                        },
                   icon: c.loading
                       ? const SizedBox(
                           width: 18,
@@ -166,13 +274,44 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
                   ),
                 ),
               ],
+              if (c.warning != null) ...[
+                const SizedBox(height: 8),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.amber.shade200),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.warning_amber_rounded,
+                        size: 16,
+                        color: Colors.amber.shade800,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          c.warning!,
+                          style: TextStyle(
+                            color: Colors.amber.shade800,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               if (c.rawText.isNotEmpty || c.loading) ...[
                 const SizedBox(height: 16),
                 if (c.title.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 12),
                     child: Text(
-                      '${c.title}',
+                      c.title,
                       style: const TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
@@ -197,28 +336,46 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
                     ),
                   ),
                 ),
-                if (c.loading)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const SizedBox(
-                          width: 14,
-                          height: 14,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          '${c.stepLabel} (${c.currentStep + 1}/${c.totalSteps})',
+                if (c.loading) ...[
+                  const SizedBox(height: 8),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: c.progress,
+                      minHeight: 4,
+                      backgroundColor: const Color(0xFFE8ECF4),
+                      color: const Color(0xFF4D6BFE),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          c.progressText,
                           style: const TextStyle(
                             fontSize: 13,
                             color: Color(0xFF999999),
                           ),
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
+                  if (c.lastStepSummary != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        '最近完成：${c.lastStepSummary}',
+                        style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                      ),
+                    ),
+                ],
               ],
             ],
           ),
@@ -239,13 +396,30 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            '小说设定',
-            style: TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w600,
-              color: Color(0xFF333333),
-            ),
+          Row(
+            children: [
+              const Text(
+                '小说设定',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF333333),
+                ),
+              ),
+              const Spacer(),
+              TextButton.icon(
+                style: TextButton.styleFrom(
+                  foregroundColor: const Color(0xFF4D6BFE),
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                onPressed: _randomInspiration,
+                icon: const Icon(Icons.casino, size: 16),
+                label: const Text('随机灵感', style: TextStyle(fontSize: 13)),
+              ),
+            ],
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
@@ -341,7 +515,7 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
             '大事件数：',
             c.majorEventCount,
             1,
-            50,
+            30,
             (v) => c.majorEventCount = v,
             _majorEventCountController,
           ),
@@ -350,9 +524,14 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
             '小事件数：',
             c.minorEventCount,
             1,
-            20,
+            10,
             (v) => c.minorEventCount = v,
             _minorEventCountController,
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '预计约 ${c.estimatedApiCalls} 次 AI 调用，大事件数较多时耗时较长',
+            style: TextStyle(fontSize: 11, color: Colors.grey[500]),
           ),
         ],
       ),
