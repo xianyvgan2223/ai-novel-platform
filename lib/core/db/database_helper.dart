@@ -6,7 +6,7 @@ import 'package:path/path.dart' as p;
 
 class DatabaseHelper {
   static const _dbName = 'deepseek.db';
-  static const _dbVersion = 18;
+  static const _dbVersion = 19;
   static Database? _database;
 
   /// 单例入口，全局复用同一个数据库连接
@@ -185,7 +185,8 @@ class DatabaseHelper {
         major_event_max_words INTEGER NOT NULL DEFAULT 100,
         minor_event_min_words INTEGER NOT NULL DEFAULT 30,
         minor_event_max_words INTEGER NOT NULL DEFAULT 50,
-        summary_max_words INTEGER NOT NULL DEFAULT 80
+        summary_max_words INTEGER NOT NULL DEFAULT 80,
+        enable_thinking INTEGER NOT NULL DEFAULT 1
       )
     ''');
     await db.insert('outline_settings', {
@@ -567,6 +568,16 @@ class DatabaseHelper {
     if (oldVersion < 18) {
       await db.execute('DROP TABLE IF EXISTS pet_data');
       await db.execute('DROP TABLE IF EXISTS memos');
+    }
+
+    // V18 → V19：outline_settings 新增 enable_thinking 列（思考模式开关）
+    if (oldVersion < 19) {
+      final columns = await db.rawQuery('PRAGMA table_info(outline_settings)');
+      if (!columns.any((c) => c['name'] == 'enable_thinking')) {
+        await db.execute(
+          "ALTER TABLE outline_settings ADD COLUMN enable_thinking INTEGER NOT NULL DEFAULT 1",
+        );
+      }
     }
   }
 

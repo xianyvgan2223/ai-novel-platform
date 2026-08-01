@@ -14,7 +14,7 @@ import '../../shared/domain/outline_record.dart';
 /// 1. 定调：生成书名 + 核心概念（JSON 结构化输出，失败自动重试）
 /// 2. 骨架：粗骨架规划（全部大事件仅标题+定位，锁定全局轨迹）
 ///    → 按约 1/10（最少 2 个、封顶 5 个）分批精写大事件 → 按批间隔抽取伏笔账本（含伏笔/角色状态/悬念）
-/// 3. 展开：并行逐块展开大/小事件细节（每块最多 5 个大事件，限流并发）
+/// 3. 展开：并行逐块展开大/小事件细节（每块最多 3 个大事件，限流并发）
 ///
 /// 可靠性特性：
 /// - 步骤 1/2 解析失败自动重试（最多 2 次、指数退避）；步骤 3 块级请求网络失败自动重试
@@ -42,12 +42,11 @@ class OutlineController extends ChangeNotifier {
   CancelToken? _cancelToken;
 
   // ─── 多步生成状态 ────────────────────────────────────────────
-  static const int _maxEventsPerChunk = 5;
+  static const int _maxEventsPerChunk = 3; // 每个展开块包含的大事件数
   static const int _maxConcurrentChunks = 3;
   static const int _maxRetries = 2;
   static const int _maxChunkRetries = 2; // 展开块未收到内容时的网络失败自动重试次数
   static const int _maxContinuations = 5; // 展开块因 max_tokens 截断时的最大自动续写次数
-  static const int _maxJsonTokens = 16000; // 结构化步骤截断重试时的 max_tokens 上限
   static const int _ledgerInterval = 2; // 每 N 批抽取一次伏笔账本（末批必定抽取）
   static const Duration _throttleInterval = Duration(milliseconds: 300);
   static const String _progressFileName = 'outline_progress.json';
@@ -289,7 +288,7 @@ class OutlineController extends ChangeNotifier {
             protagonist: protagonistController.text,
             worldview: worldViewController.text,
           ),
-          maxTokens: 512,
+          maxTokens: _outlineSetting.maxTokens,
           temperature: 0.3,
           failureMessage: '书名和核心概念生成失败：模型输出无法解析',
           validate: (map) {
@@ -389,7 +388,6 @@ class OutlineController extends ChangeNotifier {
     required T? Function(Map<String, dynamic> json) validate,
   }) async {
     var attempt = 0;
-    var currentMaxTokens = maxTokens;
     while (true) {
       if (_cancelled) return null;
       final token = CancelToken();
@@ -405,9 +403,11 @@ class OutlineController extends ChangeNotifier {
           apiParams: {
             ..._baseParams,
             'temperature': temperature,
-            'max_tokens': currentMaxTokens,
+            'max_tokens': maxTokens,
             'stream': true,
             'response_format': {'type': 'json_object'},
+            if (!_outlineSetting.enableThinking)
+              'thinking': {'type': 'disabled'},
           },
           messages: [
             {'role': 'system', 'content': systemPrompt},
@@ -450,12 +450,6 @@ class OutlineController extends ChangeNotifier {
 
         final parsed = _extractJson(accumulated);
         if (parsed == null) {
-          // 输出被 max_tokens 截断导致 JSON 不完整：自动翻倍上限重试
-          if (finishReason == 'length' && currentMaxTokens < _maxJsonTokens) {
-            currentMaxTokens = (currentMaxTokens * 2) > _maxJsonTokens
-                ? _maxJsonTokens
-                : currentMaxTokens * 2;
-          }
           throw _StepParseException('模型输出不是合法 JSON');
         }
         final result = validate(parsed);
@@ -472,12 +466,22 @@ class OutlineController extends ChangeNotifier {
           return null;
         }
         if (attempt < _maxRetries) {
-          _preserveFailedOutput(accumulated, reasoningAccum, attempt: attempt);
+          _preserveFailedOutput(
+            accumulated,
+            reasoningAccum,
+            attempt: attempt,
+            reason: '请求失败：${e.message}',
+          );
           attempt++;
           await _retryWait(attempt);
           continue;
         }
-        _preserveFailedOutput(accumulated, reasoningAccum, attempt: attempt);
+        _preserveFailedOutput(
+          accumulated,
+          reasoningAccum,
+          attempt: attempt,
+          reason: '请求失败：${e.message}',
+        );
         error = '请求失败：${e.message}';
         return null;
       } on _StepParseException catch (e) {
@@ -486,12 +490,22 @@ class OutlineController extends ChangeNotifier {
           return null;
         }
         if (attempt < _maxRetries) {
-          _preserveFailedOutput(accumulated, reasoningAccum, attempt: attempt);
+          _preserveFailedOutput(
+            accumulated,
+            reasoningAccum,
+            attempt: attempt,
+            reason: e.message,
+          );
           attempt++;
           await _retryWait(attempt);
           continue;
         }
-        _preserveFailedOutput(accumulated, reasoningAccum, attempt: attempt);
+        _preserveFailedOutput(
+          accumulated,
+          reasoningAccum,
+          attempt: attempt,
+          reason: e.message,
+        );
         error = e.message;
         return null;
       } catch (e) {
@@ -500,12 +514,22 @@ class OutlineController extends ChangeNotifier {
           return null;
         }
         if (attempt < _maxRetries) {
-          _preserveFailedOutput(accumulated, reasoningAccum, attempt: attempt);
+          _preserveFailedOutput(
+            accumulated,
+            reasoningAccum,
+            attempt: attempt,
+            reason: e.toString().replaceFirst('Exception: ', ''),
+          );
           attempt++;
           await _retryWait(attempt);
           continue;
         }
-        _preserveFailedOutput(accumulated, reasoningAccum, attempt: attempt);
+        _preserveFailedOutput(
+          accumulated,
+          reasoningAccum,
+          attempt: attempt,
+          reason: e.toString().replaceFirst('Exception: ', ''),
+        );
         error = e.toString().replaceFirst('Exception: ', '');
         return null;
       } finally {
@@ -522,17 +546,26 @@ class OutlineController extends ChangeNotifier {
   }
 
   /// 步骤 1/2 失败或取消时，把本次尝试的模型输出（思考过程 + 生成内容）提交为气泡。
-  /// 多次重试的每次思考都会被保留，不再被清除。
+  /// 多次重试的每次思考都会被保留，不再被清除；[reason] 为本次失败原因。
   void _preserveFailedOutput(
     String content,
     String reasoning, {
     required int attempt,
+    String? reason,
   }) {
-    if (content.trim().isEmpty && reasoning.trim().isEmpty) return;
+    if (content.trim().isEmpty &&
+        reasoning.trim().isEmpty &&
+        (reason == null || reason.trim().isEmpty)) {
+      return;
+    }
+    final body = _mergeStructuredLiveText(content, reasoning);
     _bubbles.add(
       OutlineStepBubble(
         label: '${_currentStepLabel()} · 第${attempt + 1}次',
-        content: _mergeStructuredLiveText(content, reasoning),
+        content: [
+          if (reason != null && reason.trim().isNotEmpty) '【失败原因】$reason',
+          if (body.isNotEmpty) body,
+        ].join('\n\n'),
         isError: true,
       ),
     );
@@ -619,7 +652,7 @@ class OutlineController extends ChangeNotifier {
           minorEventCount: minorEventCount,
           titleAndConcept: _step1Text!,
         ),
-        maxTokens: _estimateCoarseTokens(),
+        maxTokens: _outlineSetting.maxTokens,
         temperature: 0.3,
         failureMessage: '粗骨架生成失败：三幕结构或事件数量与设定（$majorEventCount）不一致',
         validate: (map) => _parseStep2(map, expectedCount: majorEventCount),
@@ -698,7 +731,7 @@ class OutlineController extends ChangeNotifier {
           batchContent: _renderBatchContent(batch),
           ledgerText: _renderLedgerText(),
         ),
-        maxTokens: _estimateBatchTokens(batch.coarseEvents.length),
+        maxTokens: _outlineSetting.maxTokens,
         temperature: _outlineSetting.temperature,
         failureMessage: '第 ${b + 1} 批大事件精写失败：数量或字段与设定不符',
         validate: (map) =>
@@ -732,7 +765,7 @@ class OutlineController extends ChangeNotifier {
             batchContent: _renderRefinedBatchContent(batch),
             prevLedgerText: _renderLedgerText(),
           ),
-          maxTokens: 2048,
+          maxTokens: _outlineSetting.maxTokens,
           temperature: 0.3,
           failureMessage: '伏笔账本抽取失败',
           validate: _parseLedger,
@@ -1036,7 +1069,7 @@ class OutlineController extends ChangeNotifier {
           actIndex: chunk.actIndex + 1,
           globalSummary: _buildGlobalSummary(),
         ),
-        maxTokens: _estimateStep3Tokens(),
+        maxTokens: _outlineSetting.maxTokens,
         temperature: _outlineSetting.temperature,
         token: token,
         chunk: chunk,
@@ -1126,6 +1159,8 @@ class OutlineController extends ChangeNotifier {
               'temperature': temperature,
               'max_tokens': maxTokens,
               'stream': true,
+              if (!_outlineSetting.enableThinking)
+                'thinking': {'type': 'disabled'},
             },
             messages: messages,
             cancelToken: token,
@@ -1268,29 +1303,6 @@ class OutlineController extends ChangeNotifier {
     _lastScrollTime = now;
     scrollToBottom();
   }
-
-  // ─── 分步参数估算 ────────────────────────────────────────────
-
-  /// 粗骨架 max_tokens：标题 + 一句话定位
-  int _estimateCoarseTokens() {
-    final raw = majorEventCount * 40 * 2;
-    return _clampTok(raw, 1024, 4096);
-  }
-
-  /// 单批精写 max_tokens：按本批大事件字数估算
-  int _estimateBatchTokens(int batchLen) {
-    final perEvent = _outlineSetting.majorEventMaxWords + 20;
-    return _clampTok(perEvent * batchLen * 2, 2048, 6000);
-  }
-
-  int _estimateStep3Tokens() {
-    final perEvent =
-        _outlineSetting.majorEventMaxWords +
-        minorEventCount * _outlineSetting.minorEventMaxWords;
-    return _clampTok(perEvent * _maxEventsPerChunk * 2, 4096, 8000);
-  }
-
-  int _clampTok(int v, int lo, int hi) => v < lo ? lo : (v > hi ? hi : v);
 
   // ─── 内部工具 ────────────────────────────────────────────────
 
