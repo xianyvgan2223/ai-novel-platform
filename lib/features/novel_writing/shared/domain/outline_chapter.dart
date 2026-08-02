@@ -8,6 +8,7 @@ class OutlineChapter {
   final String eventSummary;
   final String content;
   final String status; // 'pending' | 'generating' | 'completed'
+  final String aiSummary; // AI 提炼的整章小结（供下一章开头承接）
   final String createdAt;
   final String updatedAt;
 
@@ -20,6 +21,7 @@ class OutlineChapter {
     this.eventSummary = '',
     this.content = '',
     this.status = 'pending',
+    this.aiSummary = '',
     String? createdAt,
     String? updatedAt,
   })  : createdAt = createdAt ?? DateTime.now().toIso8601String(),
@@ -33,6 +35,7 @@ class OutlineChapter {
     'event_summary': eventSummary,
     'content': content,
     'status': status,
+    'ai_summary': aiSummary,
     'created_at': createdAt,
     'updated_at': updatedAt,
   };
@@ -46,6 +49,7 @@ class OutlineChapter {
     eventSummary: map['event_summary'] as String? ?? '',
     content: map['content'] as String? ?? '',
     status: map['status'] as String? ?? 'pending',
+    aiSummary: map['ai_summary'] as String? ?? '',
     createdAt: map['created_at'] as String?,
     updatedAt: map['updated_at'] as String?,
   );
@@ -59,6 +63,7 @@ class OutlineChapter {
     String? eventSummary,
     String? content,
     String? status,
+    String? aiSummary,
     String? createdAt,
     String? updatedAt,
   }) =>
@@ -71,6 +76,7 @@ class OutlineChapter {
         eventSummary: eventSummary ?? this.eventSummary,
         content: content ?? this.content,
         status: status ?? this.status,
+        aiSummary: aiSummary ?? this.aiSummary,
         createdAt: createdAt ?? this.createdAt,
         updatedAt: updatedAt ?? this.updatedAt,
       );

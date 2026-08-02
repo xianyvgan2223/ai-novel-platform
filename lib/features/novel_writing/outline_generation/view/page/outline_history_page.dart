@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../../shared/domain/outline_record.dart';
 import '../../../shared/data/outline_record_db_helper.dart';
+import '../../../outline_format/service/outline_format_service.dart';
 
 /// 历史生成大纲列表页面
 class OutlineHistoryPage extends StatefulWidget {
@@ -165,6 +167,8 @@ class _OutlineEditPageState extends State<_OutlineEditPage> {
         'protagonist': r.protagonist,
         'worldview': r.worldview,
       });
+      // 大纲内容被修改，后台重新提炼伏笔清单，避免注入过期信息
+      unawaited(_refreshForeshadows(r.id!, newContent));
       widget.onSaved();
       if (mounted) {
         ScaffoldMessenger.of(
@@ -173,6 +177,27 @@ class _OutlineEditPageState extends State<_OutlineEditPage> {
       }
     }
     if (mounted) Navigator.of(context).pop();
+  }
+
+  /// 后台重新提炼伏笔清单（不阻塞、失败静默）
+  Future<void> _refreshForeshadows(int id, String content) async {
+    try {
+      final service = OutlineFormatService();
+      final settings = await service.loadSettings();
+      if (settings.apiKey.isEmpty) return;
+      final foreshadows = await service.extractForeshadows(
+        apiKey: settings.apiKey,
+        apiParams: {
+          'model': settings.outlineSetting.model,
+          'temperature': 0.3,
+          'max_tokens': 800,
+        },
+        outlineContent: content,
+      );
+      if (foreshadows.isNotEmpty) {
+        await OutlineRecordDbHelper().update(id, {'foreshadows': foreshadows});
+      }
+    } catch (_) {}
   }
 
   @override

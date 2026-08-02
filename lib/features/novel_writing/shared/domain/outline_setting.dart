@@ -6,6 +6,7 @@ class OutlineSetting {
   final String systemPrompt;
   final String chapterSystemPrompt;
   final bool enableThinking; // 是否启用深度思考（默认开启）
+  final bool enableStoryState; // 章节写作是否启用剧情状态账本（默认关闭，开启后每章多一次轻量调用）
 
   // 字数配置
   final int conceptMinWords; // 核心概念简介最少字数（默认 30）
@@ -23,6 +24,7 @@ class OutlineSetting {
     this.systemPrompt = '',
     this.chapterSystemPrompt = '',
     this.enableThinking = true,
+    this.enableStoryState = false,
     this.conceptMinWords = 30,
     this.conceptMaxWords = 50,
     this.majorEventMinWords = 50,
@@ -39,6 +41,7 @@ class OutlineSetting {
     'system_prompt': systemPrompt,
     'chapter_system_prompt': chapterSystemPrompt,
     'enable_thinking': enableThinking ? 1 : 0,
+    'enable_story_state': enableStoryState ? 1 : 0,
     'concept_min_words': conceptMinWords,
     'concept_max_words': conceptMaxWords,
     'major_event_min_words': majorEventMinWords,
@@ -57,6 +60,7 @@ class OutlineSetting {
     // sqflite 将 INTEGER 列读为 int(0/1)；列缺失（旧库）时默认开启
     enableThinking:
         map['enable_thinking'] == null || (map['enable_thinking'] as int?) == 1,
+    enableStoryState: (map['enable_story_state'] as int?) == 1,
     conceptMinWords: map['concept_min_words'] as int? ?? 30,
     conceptMaxWords: map['concept_max_words'] as int? ?? 50,
     majorEventMinWords: map['major_event_min_words'] as int? ?? 50,
@@ -73,6 +77,7 @@ class OutlineSetting {
     String? systemPrompt,
     String? chapterSystemPrompt,
     bool? enableThinking,
+    bool? enableStoryState,
     int? conceptMinWords,
     int? conceptMaxWords,
     int? majorEventMinWords,
@@ -87,6 +92,7 @@ class OutlineSetting {
     systemPrompt: systemPrompt ?? this.systemPrompt,
     chapterSystemPrompt: chapterSystemPrompt ?? this.chapterSystemPrompt,
     enableThinking: enableThinking ?? this.enableThinking,
+    enableStoryState: enableStoryState ?? this.enableStoryState,
     conceptMinWords: conceptMinWords ?? this.conceptMinWords,
     conceptMaxWords: conceptMaxWords ?? this.conceptMaxWords,
     majorEventMinWords: majorEventMinWords ?? this.majorEventMinWords,

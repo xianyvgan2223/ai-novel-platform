@@ -30,6 +30,8 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
   final TextEditingController _summaryMaxCtrl = TextEditingController();
 
   bool _loading = true;
+  bool _enableThinking = true;
+  bool _enableStoryState = false;
 
   @override
   void initState() {
@@ -55,6 +57,8 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
         _minorEventMinCtrl.text = '${setting.minorEventMinWords}';
         _minorEventMaxCtrl.text = '${setting.minorEventMaxWords}';
         _summaryMaxCtrl.text = '${setting.summaryMaxWords}';
+        _enableThinking = setting.enableThinking;
+        _enableStoryState = setting.enableStoryState;
       }
     } catch (_) {}
     if (_systemCtrl.text.trim().isEmpty) {
@@ -96,6 +100,8 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
       minorEventMinWords: _intVal(_minorEventMinCtrl, 30),
       minorEventMaxWords: _intVal(_minorEventMaxCtrl, 50),
       summaryMaxWords: _intVal(_summaryMaxCtrl, 80),
+      enableThinking: _enableThinking,
+      enableStoryState: _enableStoryState,
     );
     await OutlineDbHelper().saveSettings(setting.toMap());
     if (mounted) {
@@ -391,6 +397,43 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
                     ),
                   ),
                   style: const TextStyle(fontSize: 14, height: 1.5),
+                ),
+                const SizedBox(height: 24),
+
+                // ════════════════════════════════════════
+                //  剧情状态账本开关
+                // ════════════════════════════════════════
+                Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            '剧情状态账本',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF333333),
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '每写一章后自动提炼角色状态、伏笔与悬念，注入后续章节，提升章节关联度（每章额外一次轻量调用）',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[500],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Switch(
+                      value: _enableStoryState,
+                      activeTrackColor: const Color(0xFF4D6BFE),
+                      onChanged: (v) => setState(() => _enableStoryState = v),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 24),
 

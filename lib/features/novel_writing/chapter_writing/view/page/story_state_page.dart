@@ -1,0 +1,704 @@
+import 'dart:convert';
+import 'package:flutter/material.dart';
+import '../../../shared/domain/character_profile.dart';
+import '../../../shared/data/outline_record_db_helper.dart';
+
+/// 剧情状态账本查看/编辑页
+///
+/// - 人物档案：姓名 / 描述 / 能力 / 性格。描述与能力可由 AI 随章节提炼更新，
+///   性格仅允许在这里由用户修改（AI 提炼不会覆盖）。
+/// - 剧情状态：AI 随章节累积的文本账本，可手动编辑。
+class StoryStatePage extends StatefulWidget {
+  final int outlineId;
+  const StoryStatePage({super.key, required this.outlineId});
+
+  @override
+  State<StoryStatePage> createState() => _StoryStatePageState();
+}
+
+class _StoryStatePageState extends State<StoryStatePage> {
+  List<CharacterProfile> _characters = [];
+  final _storyStateCtrl = TextEditingController();
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _storyStateCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    try {
+      final row = await OutlineRecordDbHelper().getById(widget.outlineId);
+      if (row != null) {
+        _characters = _parseCharacters(row['characters'] as String? ?? '');
+        _storyStateCtrl.text = row['story_state'] as String? ?? '';
+      }
+    } catch (_) {}
+    if (mounted) setState(() => _loading = false);
+  }
+
+  Future<void> _save() async {
+    final chars = _characters.where((c) => c.name.trim().isNotEmpty).toList();
+    await OutlineRecordDbHelper().update(widget.outlineId, {
+      'characters': jsonEncode(chars.map((c) => c.toJson()).toList()),
+      'story_state': _storyStateCtrl.text,
+    });
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('账本已保存'), duration: Duration(seconds: 1)),
+      );
+      Navigator.of(context).pop();
+    }
+  }
+
+  List<CharacterProfile> _parseCharacters(String jsonText) {
+    if (jsonText.trim().isEmpty) return [];
+    try {
+      final decoded = jsonDecode(jsonText);
+      if (decoded is! List) return [];
+      return decoded
+          .whereType<Map<String, dynamic>>()
+          .map(CharacterProfile.fromJson)
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// 剧情状态放大编辑弹窗
+  void _showStoryStateEnlargeDialog() {
+    final editCtrl = TextEditingController(text: _storyStateCtrl.text);
+    final screenHeight = MediaQuery.of(context).size.height;
+    final screenWidth = MediaQuery.of(context).size.width;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        titlePadding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+        contentPadding: const EdgeInsets.fromLTRB(4, 6, 4, 0),
+        actionsPadding: const EdgeInsets.fromLTRB(4, 0, 4, 4),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+        title: const Text(
+          '剧情状态',
+          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+        ),
+        content: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: screenHeight * 0.72,
+            maxWidth: screenWidth * 0.92,
+          ),
+          child: TextField(
+            controller: editCtrl,
+            maxLines: null,
+            expands: true,
+            textAlignVertical: TextAlignVertical.top,
+            decoration: const InputDecoration(
+              border: InputBorder.none,
+              contentPadding: EdgeInsets.fromLTRB(4, 2, 4, 2),
+              filled: true,
+              fillColor: Color(0xFFFAFAFA),
+            ),
+            style: const TextStyle(fontSize: 10, height: 1.6),
+          ),
+        ),
+        actions: [
+          TextButton(
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              WidgetsBinding.instance.addPostFrameCallback(
+                (_) => editCtrl.dispose(),
+              );
+            },
+            child: const Text('取消', style: TextStyle(fontSize: 12)),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            onPressed: () {
+              _storyStateCtrl.text = editCtrl.text;
+              Navigator.of(ctx).pop();
+              WidgetsBinding.instance.addPostFrameCallback(
+                (_) => editCtrl.dispose(),
+              );
+            },
+            child: const Text(
+              '确定',
+              style: TextStyle(fontSize: 12, color: Color(0xFF4D6BFE)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF7F8FA),
+      appBar: AppBar(
+        title: const Text(
+          '剧情状态账本',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+        ),
+        backgroundColor: Colors.white,
+        elevation: 0.5,
+        centerTitle: true,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Color(0xFF333333)),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: TextButton(
+              onPressed: _loading ? null : _save,
+              style: TextButton.styleFrom(
+                foregroundColor: const Color(0xFF4D6BFE),
+                textStyle: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              child: const Text('保存'),
+            ),
+          ),
+        ],
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                _buildOverviewCard(),
+                const SizedBox(height: 20),
+                _buildSectionHeader(
+                  title: '人物档案',
+                  subtitle: '描述与能力由 AI 随章节更新；性格仅由你修改，AI 不会覆盖',
+                  trailing: OutlinedButton.icon(
+                    onPressed: () => setState(() {
+                      _characters = [..._characters, const CharacterProfile()];
+                    }),
+                    icon: const Icon(Icons.add, size: 16),
+                    label: const Text('添加人物'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF4D6BFE),
+                      side: const BorderSide(color: Color(0xFF4D6BFE)),
+                      visualDensity: VisualDensity.compact,
+                      textStyle: const TextStyle(fontSize: 12),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                if (_characters.isEmpty)
+                  _buildEmptyCard('暂无人物档案，可添加人物，或先写一章由系统自动提取')
+                else
+                  ..._characters.asMap().entries.map(
+                    (entry) => Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: _CharacterEditor(
+                        key: ValueKey('char_${entry.key}_${entry.value.name}'),
+                        character: entry.value,
+                        onChanged: (c) => setState(() {
+                          _characters[entry.key] = c;
+                        }),
+                        onDelete: () => setState(() {
+                          _characters.removeAt(entry.key);
+                        }),
+                      ),
+                    ),
+                  ),
+                const SizedBox(height: 8),
+                _buildSectionHeader(
+                  title: '剧情状态',
+                  subtitle: 'AI 每章完成后自动更新：角色处境 / 时间地点 / 伏笔 / 悬念 / 冲突',
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFE8ECF4)),
+                  ),
+                  child: TextField(
+                    controller: _storyStateCtrl,
+                    maxLines: 12,
+                    style: const TextStyle(fontSize: 10, height: 1.6),
+                    decoration: InputDecoration(
+                      hintText: '暂无剧情状态，写完第一章后自动生成',
+                      hintStyle: TextStyle(
+                        fontSize: 10,
+                        color: Colors.grey[400],
+                      ),
+                      border: InputBorder.none,
+                      contentPadding: EdgeInsets.zero,
+                      suffixIcon: IconButton(
+                        onPressed: _showStoryStateEnlargeDialog,
+                        icon: const Icon(Icons.open_in_full, size: 14),
+                        color: const Color(0xFF999999),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(
+                          minWidth: 28,
+                          minHeight: 28,
+                        ),
+                        tooltip: '放大编辑',
+                      ),
+                      suffixIconConstraints: const BoxConstraints(
+                        minWidth: 28,
+                        minHeight: 28,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 32),
+              ],
+            ),
+    );
+  }
+
+  Widget _buildOverviewCard() {
+    final charCount = _characters.length;
+    final stateLength = _storyStateCtrl.text.trim().length;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE8ECF4)),
+      ),
+      child: Row(
+        children: [
+          _buildStat(charCount, '人物'),
+          _buildDivider(),
+          _buildStat(stateLength, '剧情状态字数'),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStat(int value, String label) {
+    return Expanded(
+      child: Column(
+        children: [
+          Text(
+            '$value',
+            style: const TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF333333),
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(label, style: TextStyle(fontSize: 12, color: Colors.grey[500])),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDivider() {
+    return Container(width: 1, height: 34, color: const Color(0xFFEEEEEE));
+  }
+
+  Widget _buildSectionHeader({
+    required String title,
+    required String subtitle,
+    Widget? trailing,
+  }) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Container(
+          width: 3,
+          height: 16,
+          decoration: BoxDecoration(
+            color: const Color(0xFF4D6BFE),
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF333333),
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                subtitle,
+                style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+              ),
+            ],
+          ),
+        ),
+        ?trailing,
+      ],
+    );
+  }
+
+  Widget _buildEmptyCard(String message) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 28),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE8ECF4)),
+      ),
+      child: Column(
+        children: [
+          Icon(Icons.person_outline, size: 32, color: Colors.grey[300]),
+          const SizedBox(height: 10),
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 单个可编辑人物卡片
+class _CharacterEditor extends StatefulWidget {
+  final CharacterProfile character;
+  final ValueChanged<CharacterProfile> onChanged;
+  final VoidCallback onDelete;
+
+  const _CharacterEditor({
+    super.key,
+    required this.character,
+    required this.onChanged,
+    required this.onDelete,
+  });
+
+  @override
+  State<_CharacterEditor> createState() => _CharacterEditorState();
+}
+
+class _CharacterEditorState extends State<_CharacterEditor> {
+  late final TextEditingController _nameCtrl;
+  late final TextEditingController _descCtrl;
+  late final TextEditingController _abilCtrl;
+  late final TextEditingController _persCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameCtrl = TextEditingController(text: widget.character.name);
+    _descCtrl = TextEditingController(text: widget.character.description);
+    _abilCtrl = TextEditingController(text: widget.character.abilities);
+    _persCtrl = TextEditingController(text: widget.character.personality);
+  }
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _descCtrl.dispose();
+    _abilCtrl.dispose();
+    _persCtrl.dispose();
+    super.dispose();
+  }
+
+  void _emit() {
+    widget.onChanged(
+      CharacterProfile(
+        name: _nameCtrl.text.trim(),
+        description: _descCtrl.text.trim(),
+        abilities: _abilCtrl.text.trim(),
+        personality: _persCtrl.text.trim(),
+        isProtagonist: widget.character.isProtagonist,
+      ),
+    );
+  }
+
+  /// 放大编辑弹窗：大屏编辑后写回目标输入框
+  void _showEnlargeDialog({
+    required TextEditingController targetCtrl,
+    required String label,
+  }) {
+    final editCtrl = TextEditingController(text: targetCtrl.text);
+    final screenHeight = MediaQuery.of(context).size.height;
+    final screenWidth = MediaQuery.of(context).size.width;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        titlePadding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+        contentPadding: const EdgeInsets.fromLTRB(4, 6, 4, 0),
+        actionsPadding: const EdgeInsets.fromLTRB(4, 0, 4, 4),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+        title: Text(
+          label,
+          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+        ),
+        content: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: screenHeight * 0.72,
+            maxWidth: screenWidth * 0.92,
+          ),
+          child: TextField(
+            controller: editCtrl,
+            maxLines: null,
+            expands: true,
+            textAlignVertical: TextAlignVertical.top,
+            decoration: const InputDecoration(
+              border: InputBorder.none,
+              contentPadding: EdgeInsets.fromLTRB(4, 2, 4, 2),
+              filled: true,
+              fillColor: Color(0xFFFAFAFA),
+            ),
+            style: const TextStyle(fontSize: 10, height: 1.6),
+          ),
+        ),
+        actions: [
+          TextButton(
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              WidgetsBinding.instance.addPostFrameCallback(
+                (_) => editCtrl.dispose(),
+              );
+            },
+            child: const Text('取消', style: TextStyle(fontSize: 12)),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            onPressed: () {
+              targetCtrl.text = editCtrl.text;
+              _emit();
+              Navigator.of(ctx).pop();
+              WidgetsBinding.instance.addPostFrameCallback(
+                (_) => editCtrl.dispose(),
+              );
+            },
+            child: const Text(
+              '确定',
+              style: TextStyle(fontSize: 12, color: Color(0xFF4D6BFE)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final initial = _nameCtrl.text.trim().isEmpty
+        ? '?'
+        : _nameCtrl.text.trim().characters.first;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE8ECF4)),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0x0D000000),
+            blurRadius: 4,
+            offset: const Offset(0, 1),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 18,
+                backgroundColor: const Color(0xFFEDF0FF),
+                child: Text(
+                  initial,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF4D6BFE),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: TextField(
+                  controller: _nameCtrl,
+                  onChanged: (_) => _emit(),
+                  style: const TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF333333),
+                  ),
+                  decoration: InputDecoration(
+                    hintText: '姓名',
+                    hintStyle: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey[400],
+                    ),
+                    isDense: true,
+                    border: InputBorder.none,
+                    suffixIcon: IconButton(
+                      onPressed: () => _showEnlargeDialog(
+                        targetCtrl: _nameCtrl,
+                        label: '姓名',
+                      ),
+                      icon: const Icon(Icons.open_in_full, size: 14),
+                      color: const Color(0xFF999999),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(
+                        minWidth: 28,
+                        minHeight: 28,
+                      ),
+                      tooltip: '放大编辑',
+                    ),
+                    suffixIconConstraints: const BoxConstraints(
+                      minWidth: 28,
+                      minHeight: 28,
+                    ),
+                  ),
+                ),
+              ),
+              IconButton(
+                onPressed: widget.onDelete,
+                icon: Icon(
+                  Icons.delete_outline,
+                  size: 20,
+                  color: Colors.grey[400],
+                ),
+                tooltip: '删除人物',
+                visualDensity: VisualDensity.compact,
+              ),
+            ],
+          ),
+          if (widget.character.isProtagonist) ...[
+            const SizedBox(height: 4),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: const Color(0xFFEDF0FF),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: const Text(
+                '主角 · 档案直接注入每章',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF4D6BFE),
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(height: 4),
+          _buildField(
+            label: '描述',
+            hint: '外貌 / 身份 / 背景',
+            controller: _descCtrl,
+            maxLines: 2,
+          ),
+          const SizedBox(height: 10),
+          _buildField(
+            label: '能力',
+            hint: '天赋 / 技能 / 成长',
+            controller: _abilCtrl,
+            maxLines: 2,
+          ),
+          const SizedBox(height: 10),
+          _buildField(
+            label: '性格（仅你修改）',
+            hint: 'AI 提炼不会覆盖此字段',
+            controller: _persCtrl,
+            maxLines: 2,
+            accent: true,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildField({
+    required String label,
+    required String hint,
+    required TextEditingController controller,
+    required int maxLines,
+    bool accent = false,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w500,
+            color: accent ? const Color(0xFF4D6BFE) : Colors.grey[600],
+          ),
+        ),
+        const SizedBox(height: 4),
+        TextField(
+          controller: controller,
+          onChanged: (_) => _emit(),
+          maxLines: maxLines,
+          style: const TextStyle(fontSize: 10, height: 1.5),
+          decoration: InputDecoration(
+            hintText: hint,
+            hintStyle: TextStyle(fontSize: 10, color: Colors.grey[400]),
+            isDense: true,
+            filled: true,
+            fillColor: const Color(0xFFFAFAFB),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 10,
+              vertical: 8,
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(color: Colors.grey[200]!),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(color: Color(0xFF4D6BFE)),
+            ),
+            suffixIcon: IconButton(
+              onPressed: () =>
+                  _showEnlargeDialog(targetCtrl: controller, label: label),
+              icon: const Icon(Icons.open_in_full, size: 14),
+              color: const Color(0xFF999999),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+              tooltip: '放大编辑',
+            ),
+            suffixIconConstraints: const BoxConstraints(
+              minWidth: 28,
+              minHeight: 28,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}

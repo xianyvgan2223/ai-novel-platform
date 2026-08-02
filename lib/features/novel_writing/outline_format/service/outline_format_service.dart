@@ -122,4 +122,32 @@ class OutlineFormatService {
   Future<void> saveRecord(OutlineRecord record) async {
     await OutlineRecordDbHelper().insert(record.toMap());
   }
+
+  /// 从大纲内容提炼伏笔清单 — 非流式轻量调用。
+  /// 供用户修改大纲内容后重提炼，避免注入过期/缺失的伏笔信息。
+  Future<String> extractForeshadows({
+    required String apiKey,
+    required Map<String, dynamic> apiParams,
+    required String outlineContent,
+  }) async {
+    final response = await _apiService.chat(
+      apiKey: apiKey,
+      apiParams: apiParams,
+      messages: [
+        {
+          'role': 'system',
+          'content':
+              '你是小说大纲伏笔提炼助手。请从给定的大纲中提取所有已埋设的长线/短线伏笔、悬念与回收点，'
+              '输出纯文本清单，每条一行，形如：「伏笔内容（埋设位置 / 计划回收时机）」。'
+              '只输出清单本身，不要多余说明；若没有明显伏笔，输出「（暂无）」。',
+        },
+        {'role': 'user', 'content': outlineContent},
+      ],
+    );
+    final choices = response['choices'] as List?;
+    if (choices == null || choices.isEmpty) return '';
+    final msg = choices[0]['message'] as Map<String, dynamic>?;
+    final content = msg?['content'] as String? ?? '';
+    return content.trim();
+  }
 }

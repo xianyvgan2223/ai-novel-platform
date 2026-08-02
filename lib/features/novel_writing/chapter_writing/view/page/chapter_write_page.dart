@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../../shared/domain/outline_record.dart';
 import '../../../shared/domain/outline_chapter.dart';
 import 'outline_setting_page.dart';
+import 'story_state_page.dart';
 import '../../controller/chapter_write_controller.dart';
 
 /// 大纲转章节写作页面
@@ -56,6 +57,18 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
         ),
         actions: [
           IconButton(
+            icon: const Icon(Icons.menu_book, color: Color(0xFF4D6BFE)),
+            tooltip: '剧情状态账本',
+            onPressed: () {
+              if (widget.outline.id == null) return;
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => StoryStatePage(outlineId: widget.outline.id!),
+                ),
+              );
+            },
+          ),
+          IconButton(
             icon: const Icon(Icons.settings_outlined, color: Color(0xFF666666)),
             tooltip: 'AI 设置',
             onPressed: () {
@@ -80,7 +93,7 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
                   child: Text(
                     _controller.isAllCompleted
                         ? '✅ 所有事件已完成'
-                        : '${_controller.completedCount}/${_controller.chapters.length} 个事件已完成',
+                        : '${_controller.completedCount}/${_controller.writableCount} 个事件已完成',
                     style: const TextStyle(
                       fontSize: 13,
                       color: Color(0xFF666666),
@@ -96,6 +109,7 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
                       final ch = _controller.chapters[index];
                       return _ChapterTile(
                         chapter: ch,
+                        locked: !_controller.isWritable(ch),
                         isWriting: _controller.writingId == ch.id,
                         writingContent: _controller.writingId == ch.id
                             ? _controller.writingText
@@ -393,6 +407,7 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
 /// 单个事件卡片
 class _ChapterTile extends StatelessWidget {
   final OutlineChapter chapter;
+  final bool locked; // 前序章节未全部完成时锁定「写」按钮，强制顺序生成
   final bool isWriting;
   final String writingContent;
   final VoidCallback onWrite;
@@ -403,6 +418,7 @@ class _ChapterTile extends StatelessWidget {
 
   const _ChapterTile({
     required this.chapter,
+    required this.locked,
     required this.isWriting,
     required this.writingContent,
     required this.onWrite,
@@ -416,6 +432,60 @@ class _ChapterTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final isMajor = chapter.eventType == 'major';
     final isCompleted = chapter.status == 'completed';
+
+    // 大事件不可写：仅作为阶段标题展示（含概述，可修改大纲）
+    if (isMajor) {
+      return Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF8F9FF),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: const Color(0xFFE8ECF4)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.flag, size: 20, color: Color(0xFF4D6BFE)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    chapter.eventTitle,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF333333),
+                    ),
+                  ),
+                ),
+                GestureDetector(
+                  onTap: () => onEditOutline(chapter),
+                  child: const Text(
+                    '修改大纲',
+                    style: TextStyle(fontSize: 11, color: Color(0xFF4D6BFE)),
+                  ),
+                ),
+              ],
+            ),
+            if (chapter.eventSummary.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(
+                chapter.eventSummary,
+                style: const TextStyle(
+                  fontSize: 11,
+                  height: 1.4,
+                  color: Color(0xFF999999),
+                ),
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ],
+        ),
+      );
+    }
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -472,10 +542,14 @@ class _ChapterTile extends StatelessWidget {
                 SizedBox(
                   height: 28,
                   child: ElevatedButton(
-                    onPressed: onWrite,
+                    onPressed: locked ? null : onWrite,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF4D6BFE),
-                      foregroundColor: Colors.white,
+                      backgroundColor: locked
+                          ? const Color(0xFFE8ECF4)
+                          : const Color(0xFF4D6BFE),
+                      foregroundColor: locked
+                          ? const Color(0xFF999999)
+                          : Colors.white,
                       padding: const EdgeInsets.symmetric(horizontal: 12),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(4),
@@ -511,6 +585,23 @@ class _ChapterTile extends StatelessWidget {
                 height: 1.4,
                 color: Colors.grey[300],
               ),
+            ),
+          ],
+          if (locked && !isCompleted && !isWriting) ...[
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                const Icon(
+                  Icons.lock_outline,
+                  size: 12,
+                  color: Color(0xFFBBBBBB),
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  '需先完成前面的章节才能生成',
+                  style: TextStyle(fontSize: 11, color: Color(0xFFBBBBBB)),
+                ),
+              ],
             ),
           ],
           if (isCompleted && !isWriting) ...[

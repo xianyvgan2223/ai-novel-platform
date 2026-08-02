@@ -6,7 +6,7 @@ import 'package:path/path.dart' as p;
 
 class DatabaseHelper {
   static const _dbName = 'deepseek.db';
-  static const _dbVersion = 19;
+  static const _dbVersion = 22;
   static Database? _database;
 
   /// 单例入口，全局复用同一个数据库连接
@@ -186,7 +186,8 @@ class DatabaseHelper {
         minor_event_min_words INTEGER NOT NULL DEFAULT 30,
         minor_event_max_words INTEGER NOT NULL DEFAULT 50,
         summary_max_words INTEGER NOT NULL DEFAULT 80,
-        enable_thinking INTEGER NOT NULL DEFAULT 1
+        enable_thinking INTEGER NOT NULL DEFAULT 1,
+        enable_story_state INTEGER NOT NULL DEFAULT 0
       )
     ''');
     await db.insert('outline_settings', {
@@ -215,6 +216,9 @@ class DatabaseHelper {
         protagonist TEXT NOT NULL DEFAULT '',
         worldview TEXT NOT NULL DEFAULT '',
         content TEXT NOT NULL DEFAULT '',
+        foreshadows TEXT NOT NULL DEFAULT '',
+        story_state TEXT NOT NULL DEFAULT '',
+        characters TEXT NOT NULL DEFAULT '',
         created_at TEXT NOT NULL
       )
     ''');
@@ -230,6 +234,7 @@ class DatabaseHelper {
         event_summary TEXT NOT NULL DEFAULT '',
         content TEXT NOT NULL DEFAULT '',
         status TEXT NOT NULL DEFAULT 'pending',
+        ai_summary TEXT NOT NULL DEFAULT '',
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         FOREIGN KEY (outline_id) REFERENCES outline_records(id) ON DELETE CASCADE
@@ -576,6 +581,48 @@ class DatabaseHelper {
       if (!columns.any((c) => c['name'] == 'enable_thinking')) {
         await db.execute(
           "ALTER TABLE outline_settings ADD COLUMN enable_thinking INTEGER NOT NULL DEFAULT 1",
+        );
+      }
+    }
+
+    // V19 → V20：outline_records 新增 foreshadows（伏笔清单）/ story_state（剧情状态账本）列，
+    // outline_settings 新增 enable_story_state 列（章节剧情状态开关）
+    if (oldVersion < 20) {
+      var columns = await db.rawQuery('PRAGMA table_info(outline_records)');
+      if (!columns.any((c) => c['name'] == 'foreshadows')) {
+        await db.execute(
+          "ALTER TABLE outline_records ADD COLUMN foreshadows TEXT NOT NULL DEFAULT ''",
+        );
+      }
+      if (!columns.any((c) => c['name'] == 'story_state')) {
+        await db.execute(
+          "ALTER TABLE outline_records ADD COLUMN story_state TEXT NOT NULL DEFAULT ''",
+        );
+      }
+      columns = await db.rawQuery('PRAGMA table_info(outline_settings)');
+      if (!columns.any((c) => c['name'] == 'enable_story_state')) {
+        await db.execute(
+          "ALTER TABLE outline_settings ADD COLUMN enable_story_state INTEGER NOT NULL DEFAULT 0",
+        );
+      }
+    }
+
+    // V20 → V21：outline_chapters 新增 ai_summary 列（AI 提炼的整章小结）
+    if (oldVersion < 21) {
+      final columns = await db.rawQuery('PRAGMA table_info(outline_chapters)');
+      if (!columns.any((c) => c['name'] == 'ai_summary')) {
+        await db.execute(
+          "ALTER TABLE outline_chapters ADD COLUMN ai_summary TEXT NOT NULL DEFAULT ''",
+        );
+      }
+    }
+
+    // V21 → V22：outline_records 新增 characters 列（人物档案 JSON，性格仅用户可改）
+    if (oldVersion < 22) {
+      final columns = await db.rawQuery('PRAGMA table_info(outline_records)');
+      if (!columns.any((c) => c['name'] == 'characters')) {
+        await db.execute(
+          "ALTER TABLE outline_records ADD COLUMN characters TEXT NOT NULL DEFAULT ''",
         );
       }
     }

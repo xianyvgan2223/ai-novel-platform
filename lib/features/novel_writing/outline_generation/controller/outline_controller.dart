@@ -1314,6 +1314,8 @@ class OutlineController extends ChangeNotifier {
       protagonist: protagonistController.text,
       worldview: worldViewController.text,
       content: rawText,
+      // 持久化伏笔账本，供「大纲转章节」写正文时注入【伏笔清单】
+      foreshadows: _renderLedgerText(),
     );
   }
 

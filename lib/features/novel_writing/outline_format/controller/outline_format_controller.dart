@@ -140,6 +140,23 @@ class OutlineFormatController extends ChangeNotifier {
           ? firstLine.replaceAll(RegExp(r'^(书名：|《|》|\s)*'), '').trim()
           : (title.isNotEmpty ? title : '未命名');
 
+      // 从格式化后的大纲中提炼伏笔清单（失败或未配置 Key 时保持为空）
+      String foreshadows = '';
+      try {
+        final settings = await _service.loadSettings();
+        if (settings.apiKey.isNotEmpty) {
+          foreshadows = await _service.extractForeshadows(
+            apiKey: settings.apiKey,
+            apiParams: {
+              'model': settings.outlineSetting.model,
+              'temperature': 0.3,
+              'max_tokens': 800,
+            },
+            outlineContent: content,
+          );
+        }
+      } catch (_) {}
+
       final record = OutlineRecord(
         title: recordTitle,
         genre: '',
@@ -147,6 +164,7 @@ class OutlineFormatController extends ChangeNotifier {
         protagonist: '',
         worldview: '',
         content: content,
+        foreshadows: foreshadows,
       );
 
       await _service.saveRecord(record);

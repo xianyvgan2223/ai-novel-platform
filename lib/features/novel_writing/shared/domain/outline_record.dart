@@ -7,6 +7,9 @@ class OutlineRecord {
   final String protagonist;
   final String worldview;
   final String content;
+  final String foreshadows; // 伏笔清单（一键生成时的账本，供章节写作注入）
+  final String storyState; // 剧情状态账本（随章节写作逐步累积）
+  final String characters; // 人物档案 JSON（描述/能力/性格，性格仅用户可改）
   final String createdAt;
 
   OutlineRecord({
@@ -17,6 +20,9 @@ class OutlineRecord {
     this.protagonist = '',
     this.worldview = '',
     this.content = '',
+    this.foreshadows = '',
+    this.storyState = '',
+    this.characters = '',
     String? createdAt,
   }) : createdAt = createdAt ?? DateTime.now().toIso8601String();
 
@@ -27,6 +33,9 @@ class OutlineRecord {
     'protagonist': protagonist,
     'worldview': worldview,
     'content': content,
+    'foreshadows': foreshadows,
+    'story_state': storyState,
+    'characters': characters,
     'created_at': createdAt,
   };
 
@@ -38,6 +47,9 @@ class OutlineRecord {
     protagonist: map['protagonist'] as String? ?? '',
     worldview: map['worldview'] as String? ?? '',
     content: map['content'] as String? ?? '',
+    foreshadows: map['foreshadows'] as String? ?? '',
+    storyState: map['story_state'] as String? ?? '',
+    characters: map['characters'] as String? ?? '',
     createdAt: map['created_at'] as String?,
   );
 

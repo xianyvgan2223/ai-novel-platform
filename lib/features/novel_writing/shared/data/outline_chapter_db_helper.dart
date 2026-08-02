@@ -86,6 +86,20 @@ class OutlineChapterDbHelper {
     );
   }
 
+  /// 更新 AI 提炼的整章小结
+  Future<void> updateAiSummary(int id, String aiSummary) async {
+    final db = await database;
+    await db.update(
+      'outline_chapters',
+      {
+        'ai_summary': aiSummary,
+        'updated_at': DateTime.now().toIso8601String(),
+      },
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
   /// 删除某个大纲的所有章节
   Future<void> deleteByOutlineId(int outlineId) async {
     final db = await database;
