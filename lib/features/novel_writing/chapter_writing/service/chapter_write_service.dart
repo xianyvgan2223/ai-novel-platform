@@ -14,7 +14,20 @@ class ChapterWritePromptTemplate {
     required String outlineContent,
     required OutlineChapter ch,
     required String prevContent,
+    OutlineChapter? parentMajor,
+    String prevEventTitle = '',
+    String nextEventTitle = '',
   }) {
+    final isMinor = ch.eventType == 'minor';
+    final parentSection = parentMajor != null && isMinor
+        ? '\n【所属大事件】${parentMajor.eventTitle}\n${parentMajor.eventSummary}'
+        : '';
+    final prevSection = prevEventTitle.isEmpty
+        ? ''
+        : '\n【前一事件】$prevEventTitle';
+    final nextSection = nextEventTitle.isEmpty
+        ? ''
+        : '\n【下一事件】$nextEventTitle';
     return '''
 你是一位小说作家。请根据以下大纲设定，完整写出指定事件的详细章节内容。
 
@@ -29,15 +42,19 @@ ${outlineContent}
 
 【当前事件】${ch.eventTitle}
 【事件概要】${ch.eventSummary}
+$parentSection
+$prevSection
+$nextSection
 
 【前文摘要】${prevContent}
 
 要求：
-1. 以文学性强的叙述方式展开，包含场景描写、对话、心理活动
-2. 字数 2000-3000 字
-3. 结尾自然衔接下一个事件
-4. 只写当前事件的内容，不要超出范围
-5. 直接输出正文，不要添加注释说明
+1. 本章内容必须严格围绕【当前事件】与【事件概要】展开，禁止偏离大纲或编造大纲中不存在的情节
+2. 以文学性强的叙述方式展开，包含场景描写、对话、心理活动
+3. 字数 2000-3000 字
+4. 结尾自然衔接【下一事件】（若存在）
+5. 只写当前事件的内容，不要超出范围
+6. 直接输出正文，不要添加注释说明
 ''';
   }
 }

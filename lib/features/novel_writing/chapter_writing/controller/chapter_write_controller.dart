@@ -119,18 +119,21 @@ class ChapterWriteController {
     try {
       final rows = await OutlineChapterDbHelper().getByOutlineId(outline.id!);
       if (rows.isNotEmpty) {
-        chapters = rows.map((m) => OutlineChapter.fromMap(m)).toList();
+        // 以最新大纲内容为准重新解析，与 DB 中的旧数据比较
         final freshChapters = _parseEvents(outlineContent);
-        if (freshChapters.length != chapters.length) {
-          needsResync = true;
+        final dirty =
+            freshChapters.length != rows.length ||
+            freshChapters.asMap().entries.any((entry) {
+              final c = OutlineChapter.fromMap(rows[entry.key]);
+              return c.eventTitle != entry.value.eventTitle ||
+                  c.eventIndex != entry.value.eventIndex;
+            });
+        if (dirty) {
+          // 大纲已更新：自动重同步章节结构（保留已完成的正文内容），
+          // 确保事件列表始终与大纲标题一致
+          await resync();
         } else {
-          for (int i = 0; i < chapters.length; i++) {
-            if (chapters[i].eventTitle != freshChapters[i].eventTitle ||
-                chapters[i].eventIndex != freshChapters[i].eventIndex) {
-              needsResync = true;
-              break;
-            }
-          }
+          chapters = rows.map((m) => OutlineChapter.fromMap(m)).toList();
         }
       } else {
         chapters = _parseEvents(outlineContent);
@@ -166,6 +169,9 @@ class ChapterWriteController {
       outlineContent: outlineContent,
       ch: ch,
       prevContent: prevContent,
+      parentMajor: _findParentMajor(ch),
+      prevEventTitle: _findAdjacentTitle(ch, -1),
+      nextEventTitle: _findAdjacentTitle(ch, 1),
     );
 
     isWriting = true;
@@ -308,8 +314,9 @@ class ChapterWriteController {
 
     for (final line in lines) {
       final trimmed = line.trim();
+      // 大事件标题行：允许可选的 ══ 包裹（模型输出常省略）、编号为数字或占位符 X
       final majorMatch = RegExp(
-        r'══\s*(大事件\d*|事件\d*|Major\s*\d*)\s*[：:]\s*(.+?)\s*══',
+        r'^\s*═*\s*(大事件\s*[0-9Xx]*|事件\s*[0-9Xx]*|Major\s*[0-9Xx]*)\s*[：:]\s*(.+?)\s*═*\s*$',
       ).firstMatch(trimmed);
       if (majorMatch != null) {
         eventIndex++;
@@ -327,8 +334,9 @@ class ChapterWriteController {
       if (trimmed.startsWith('══') && trimmed.endsWith('══')) {
         continue;
       }
+      // 小事件标题行：允许 ○ / - / • / * 等符号（模型输出不固定），编号为数字或占位符 X
       final minorMatch = RegExp(
-        r'[○\-]\s*(小事件\d*|事件\d*)\s*[：:]\s*(.+?)$',
+        r'^\s*[○\-•*]?\s*(小事件\s*[0-9Xx]*|事件\s*[0-9Xx]*)\s*[：:]\s*(.+?)\s*$',
       ).firstMatch(trimmed);
       if (minorMatch != null) {
         eventIndex++;
@@ -348,10 +356,14 @@ class ChapterWriteController {
           !trimmed.startsWith('══') &&
           !trimmed.startsWith('○') &&
           !trimmed.startsWith('-')) {
+        // 跳过可能的幕标题（如「第一幕：开端」），避免污染上一事件概要
+        if (RegExp(r'^第[一二三四五六0-9]+幕').hasMatch(trimmed)) continue;
         final last = result.last;
-        if (last.eventSummary.isEmpty && !trimmed.contains('第')) {
-          result[result.length - 1] = last.copyWith(eventSummary: trimmed);
-        }
+        // 累积多行概要（模型输出的事件概述常为多行）
+        final summary = last.eventSummary.isEmpty
+            ? trimmed
+            : '${last.eventSummary}\n$trimmed';
+        result[result.length - 1] = last.copyWith(eventSummary: summary);
       }
     }
 
@@ -385,5 +397,23 @@ class ChapterWriteController {
               '【${c.eventTitle}】\n${c.content.substring(0, c.content.length > 200 ? 200 : c.content.length)}...',
         )
         .join('\n\n');
+  }
+
+  /// 查找当前事件所属的大事件（若当前事件本身是大事件则返回自身）
+  OutlineChapter? _findParentMajor(OutlineChapter ch) {
+    final idx = chapters.indexWhere((c) => c.id == ch.id);
+    if (idx == -1) return null;
+    for (int i = idx; i >= 0; i--) {
+      if (chapters[i].eventType == 'major') return chapters[i];
+    }
+    return null;
+  }
+
+  /// 查找当前事件相邻的上一/下一事件标题（offset 为 -1/1）
+  String _findAdjacentTitle(OutlineChapter ch, int offset) {
+    final idx = chapters.indexWhere((c) => c.id == ch.id);
+    final target = idx + offset;
+    if (idx == -1 || target < 0 || target >= chapters.length) return '';
+    return chapters[target].eventTitle;
   }
 }

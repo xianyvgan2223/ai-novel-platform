@@ -541,7 +541,7 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
             '大事件数：',
             c.majorEventCount,
             1,
-            30,
+            null, // 无上限，数量多时生成耗时相应变长
             (v) => c.majorEventCount = v,
             _majorEventCountController,
           ),
@@ -591,7 +591,7 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
     String label,
     int value,
     int min,
-    int max,
+    int? max,
     ValueChanged<int> onChanged,
     TextEditingController controller,
   ) {
@@ -644,7 +644,7 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
             controller: controller,
             onChanged: (v) {
               final n = int.tryParse(v);
-              if (n != null && n >= min && n <= max) {
+              if (n != null && n >= min && (max == null || n <= max)) {
                 setState(() => onChanged(n));
               }
             },
@@ -652,7 +652,7 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
         ),
         IconButton(
           icon: const Icon(Icons.add_circle_outline),
-          onPressed: value < max
+          onPressed: max == null || value < max
               ? () => setState(() {
                   onChanged(value + 1);
                   controller.text = '${value + 1}';
