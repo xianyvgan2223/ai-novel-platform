@@ -119,14 +119,16 @@ class ApiService {
       final stream = response.data.stream as Stream<List<int>>;
       final buffer = StringBuffer();
 
-      await for (final chunk in stream) {
+      // 用流式解码器逐段解码：多字节字符（中文/emoji）被 TCP 分片切开时，
+      // 解码器会自动拼完整，避免 utf8.decode(chunk) 抛 Unfinished UTF-8 异常
+      await for (final textChunk in utf8.decoder.bind(stream)) {
         // 检查是否被外部取消
         if (cancelToken != null && cancelToken.isCancelled) {
           onDone();
           return;
         }
 
-        buffer.write(utf8.decode(chunk));
+        buffer.write(textChunk);
 
         final text = buffer.toString();
         final lines = text.split('\n');
