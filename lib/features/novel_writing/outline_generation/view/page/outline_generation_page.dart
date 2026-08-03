@@ -2,12 +2,16 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import '../../controller/outline_controller.dart';
+import '../../../shared/domain/outline_record.dart';
 import 'outline_setting_page.dart';
 import 'outline_history_page.dart';
 
 /// 一键生成小说大纲页面（流式输出）
 class OutlineGenerationPage extends StatefulWidget {
-  const OutlineGenerationPage({super.key});
+  /// 从历史大纲「重新生成」时带入的小说设定，页面加载后回填到输入区，由用户手动点击生成
+  final OutlineRecord? initialRecord;
+
+  const OutlineGenerationPage({super.key, this.initialRecord});
 
   @override
   State<OutlineGenerationPage> createState() => _OutlineGenerationPageState();
@@ -58,9 +62,28 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
   void initState() {
     super.initState();
     _controller.addListener(_onChanged);
+    _applyInitialRecord();
     _majorEventCountController.text = '${_controller.majorEventCount}';
     _minorEventCountController.text = '${_controller.minorEventCount}';
     _refreshDraft();
+  }
+
+  /// 将历史大纲的小说设定回填到输入区
+  void _applyInitialRecord() {
+    final init = widget.initialRecord;
+    if (init == null) return;
+    if (init.genre.trim().isNotEmpty) {
+      _controller.genreController.text = init.genre.trim();
+    }
+    if (init.theme.trim().isNotEmpty) {
+      _controller.themeController.text = init.theme.trim();
+    }
+    if (init.protagonist.trim().isNotEmpty) {
+      _controller.protagonistController.text = init.protagonist.trim();
+    }
+    if (init.worldview.trim().isNotEmpty) {
+      _controller.worldViewController.text = init.worldview.trim();
+    }
   }
 
   @override
@@ -449,14 +472,45 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
-            value: _predefinedGenres.contains(c.genreController.text)
+            // 用 initialValue 而非已废弃的 value；外部改动时 FormField 会同步内部值
+            initialValue: _predefinedGenres.contains(c.genreController.text)
                 ? c.genreController.text
-                : '__custom__',
+                : (c.genreController.text.trim().isEmpty
+                      ? '__custom__'
+                      : c.genreController.text),
             decoration: _inputDecoration('小说类型'),
             items: [
               ..._predefinedGenres.map(
                 (g) => DropdownMenuItem(value: g, child: Text(g)),
               ),
+              // 自定义类型：回显已输入的值，避免确认后只能看到「自定义」字样。
+              // 注意：下拉按钮闭合态在无界宽度下布局所有 item，
+              // 子项不能用 Flexible/Expanded（会触发 unbounded flex 布局异常导致空白），
+              // 因此用 mainAxisSize.min + ConstrainedBox 控制省略号。
+              if (!_predefinedGenres.contains(c.genreController.text) &&
+                  c.genreController.text.trim().isNotEmpty)
+                DropdownMenuItem(
+                  value: c.genreController.text,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.edit,
+                        size: 16,
+                        color: Color(0xFF4D6BFE),
+                      ),
+                      const SizedBox(width: 6),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 160),
+                        child: Text(
+                          c.genreController.text,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               const DropdownMenuItem(
                 value: '__custom__',
                 child: Row(
@@ -742,7 +796,11 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
   Future<String?> _showCustomGenreDialog(BuildContext context) async {
     return showDialog<String>(
       context: context,
-      builder: (ctx) => const _CustomGenreDialog(),
+      // 键盘弹出时把整个弹窗上移，避免输入框被键盘遮挡、看不到自己输入的内容
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+        child: const _CustomGenreDialog(),
+      ),
     );
   }
 }
@@ -892,56 +950,58 @@ class _CustomGenreDialogState extends State<_CustomGenreDialog> {
       insetPadding: const EdgeInsets.symmetric(horizontal: 24),
       child: Padding(
         padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              '自定义小说类型',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _controller,
-              autofocus: true,
-              decoration: InputDecoration(
-                hintText: '输入自定义类型（如：赛博朋克、末日废土...）',
-                hintStyle: const TextStyle(
-                  fontSize: 14,
-                  color: Color(0xFFBBBBBB),
-                ),
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
-                ),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                '自定义小说类型',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
               ),
-              style: const TextStyle(fontSize: 14),
-            ),
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              height: 44,
-              child: ElevatedButton(
-                onPressed: () {
-                  Navigator.of(context).pop(_controller.text.trim());
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF4D6BFE),
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
+              const SizedBox(height: 12),
+              TextField(
+                controller: _controller,
+                autofocus: true,
+                decoration: InputDecoration(
+                  hintText: '输入自定义类型（如：赛博朋克、末日废土...）',
+                  hintStyle: const TextStyle(
+                    fontSize: 14,
+                    color: Color(0xFFBBBBBB),
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
                   ),
                 ),
-                child: const Text(
-                  '确定',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                style: const TextStyle(fontSize: 14),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                height: 44,
+                child: ElevatedButton(
+                  onPressed: () {
+                    Navigator.of(context).pop(_controller.text.trim());
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF4D6BFE),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  child: const Text(
+                    '确定',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

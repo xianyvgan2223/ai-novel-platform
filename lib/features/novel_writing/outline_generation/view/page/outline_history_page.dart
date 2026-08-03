@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import '../../../shared/domain/outline_record.dart';
 import '../../../shared/data/outline_record_db_helper.dart';
 import '../../../outline_format/service/outline_format_service.dart';
+import 'outline_generation_page.dart';
 
 /// 历史生成大纲列表页面
 class OutlineHistoryPage extends StatefulWidget {
@@ -142,6 +144,7 @@ class _OutlineEditPage extends StatefulWidget {
 
 class _OutlineEditPageState extends State<_OutlineEditPage> {
   late final TextEditingController _contentCtrl;
+  final ScrollController _scrollCtrl = ScrollController();
 
   @override
   void initState() {
@@ -152,7 +155,19 @@ class _OutlineEditPageState extends State<_OutlineEditPage> {
   @override
   void dispose() {
     _contentCtrl.dispose();
+    _scrollCtrl.dispose();
     super.dispose();
+  }
+
+  /// 将本记录的小说设定带入「一键生成大纲」页面重新生成：
+  /// 不关闭当前历史详情页（历史记录不会被替换），生成的新记录会作为新历史保存。
+  Future<void> _regenerate() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => OutlineGenerationPage(initialRecord: widget.record),
+      ),
+    );
+    widget.onSaved();
   }
 
   Future<void> _save() async {
@@ -227,52 +242,76 @@ class _OutlineEditPageState extends State<_OutlineEditPage> {
           ),
         ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (r.title.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Text(
-                  '${r.title}',
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
+      body: CupertinoScrollbar(
+        controller: _scrollCtrl,
+        thumbVisibility: true,
+        thickness: 6,
+        radius: const Radius.circular(3),
+        child: SingleChildScrollView(
+          controller: _scrollCtrl,
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (r.title.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Text(
+                    '${r.title}',
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              _infoRow('类型', r.genre),
+              _infoRow('主题', r.theme),
+              _infoRow('主角', r.protagonist),
+              _infoRow('世界观', r.worldview),
+              _infoRow('生成时间', r.formattedDate),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                height: 40,
+                child: OutlinedButton.icon(
+                  onPressed: _regenerate,
+                  icon: const Icon(Icons.auto_awesome, size: 18),
+                  label: const Text('重新生成大纲'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFF4D6BFE),
+                    side: const BorderSide(color: Color(0xFF4D6BFE)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
                   ),
                 ),
               ),
-            _infoRow('类型', r.genre),
-            _infoRow('主题', r.theme),
-            _infoRow('主角', r.protagonist),
-            _infoRow('世界观', r.worldview),
-            _infoRow('生成时间', r.formattedDate),
-            const SizedBox(height: 16),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF8F9FF),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFFE8ECF4)),
-              ),
-              child: TextField(
-                controller: _contentCtrl,
-                maxLines: null,
-                style: const TextStyle(
-                  fontSize: 12,
-                  height: 1.5,
-                  color: Color(0xFF444444),
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF8F9FF),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFE8ECF4)),
                 ),
-                decoration: const InputDecoration(
-                  border: InputBorder.none,
-                  contentPadding: EdgeInsets.zero,
-                  isDense: true,
+                child: TextField(
+                  controller: _contentCtrl,
+                  maxLines: null,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    height: 1.5,
+                    color: Color(0xFF444444),
+                  ),
+                  decoration: const InputDecoration(
+                    border: InputBorder.none,
+                    contentPadding: EdgeInsets.zero,
+                    isDense: true,
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

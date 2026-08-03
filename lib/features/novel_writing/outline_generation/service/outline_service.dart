@@ -187,6 +187,9 @@ $prevLedgerText
   ///
   /// [globalSummary] 全局摘要：书名 + 核心概念 + 完整三幕骨架，
   /// 让每个展开块都能看到全局上下文，避免跨幕角色行为/伏笔矛盾。
+  /// [previousContent] 紧邻的前一块已展开的详细内容：本块必须严格承接其结尾状态，
+  /// 禁止重复已发生情节，保证跨块小事件因果连贯。
+  /// [laterContent] 紧接着的下一块待展开大事件：本块结尾须为其铺垫与过渡，避免生硬跳转。
   static String buildStep3Prompt({
     required String genre,
     required String theme,
@@ -198,11 +201,28 @@ $prevLedgerText
     required String actContent, // 步骤2中该块的原始内容（含大事件标题+概述）
     required int actIndex, // 1-based 幕索引（1/2/3）
     required String globalSummary, // 全局摘要（书名+概念+完整三幕骨架）
+    String previousContent = '', // 前文已展开的详细内容（本块必须严格承接）
+    String laterContent = '', // 后文待展开的大事件（本块须为其做好铺垫过渡）
   }) {
     final actNames = ['开端', '发展', '高潮&结局'];
     final actName = actIndex >= 1 && actIndex <= 3
         ? actNames[actIndex - 1]
         : '第$actIndex幕';
+
+    final previousSection = previousContent.trim().isEmpty
+        ? ''
+        : '''
+=== 前一块已展开的详细内容（必须严格承接，禁止重复或矛盾） ===
+$previousContent
+
+''';
+    final laterSection = laterContent.trim().isEmpty
+        ? ''
+        : '''
+=== 紧接着的下一块大事件（本块结尾须为其铺垫与过渡） ===
+$laterContent
+
+''';
 
     return '''
 请展开第$actIndex幕（$actName）的详细内容。
@@ -216,7 +236,7 @@ $prevLedgerText
 === 全局框架（保证与全局设定、其他幕保持一致） ===
 $globalSummary
 
-=== 当前幕已有的大事件框架 ===
+${previousSection}${laterSection}=== 当前幕已有的大事件框架 ===
 $actContent
 
 请为上述每个大事件展开配套的小事件（共$minorEventCount个小事件每个），严格遵循以下格式：
@@ -241,7 +261,12 @@ $actContent
 - 只输出当前这一幕的内容，不要输出其他幕
 - 保持大事件标题和概述与已有框架一致
 - 小事件要有递进关系，禁止平铺流水账
-- 参照全局框架中其他幕的人物状态与伏笔，避免前后矛盾''';
+- 参照全局框架中其他幕的人物状态与伏笔，避免前后矛盾
+- 承接前文：若提供了「前一块已展开的详细内容」，本块开头必须紧接其最后一场戏的结尾状态
+  （人物所处位置、伤势/体力、情绪、已获得的信息、当前在场的角色），
+  禁止重复前文已发生的情节（如再次「初次见面」「第一次对峙」）
+- 铺垫后文：若提供了「紧接着的下一块大事件」，本块结尾要为其埋下伏笔、做好状态过渡，
+  保证前后事件因果连贯、过渡自然''';
   }
 }
 

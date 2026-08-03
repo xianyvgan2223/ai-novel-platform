@@ -14,12 +14,14 @@ import '../../shared/domain/outline_record.dart';
 /// 1. 定调：生成书名 + 核心概念（JSON 结构化输出，失败自动重试）
 /// 2. 骨架：粗骨架规划（全部大事件仅标题+定位，锁定全局轨迹）
 ///    → 按约 1/10（最少 2 个、封顶 5 个）分批精写大事件 → 按批间隔抽取伏笔账本（含伏笔/角色状态/悬念）
-/// 3. 展开：并行逐块展开大/小事件细节（每块最多 3 个大事件，限流并发）
+/// 3. 展开：顺序逐块展开大/小事件细节（每块最多 3 个大事件），
+///    每块注入「前文已展开的详细内容 + 后文待展开的大事件」，
+///    保证跨块小事件因果承接、状态不漂移、伏笔连续
 ///
 /// 可靠性特性：
 /// - 步骤 1/2 解析失败自动重试（最多 2 次、指数退避）；步骤 3 块级请求网络失败自动重试
 /// - 每步结果本地落盘，支持从失败步骤断点续跑
-/// - 步骤 3 各块并行请求，UI 按序合并展示
+/// - 步骤 3 各块顺序生成（注入前文/后文上下文），UI 按序合并展示
 class OutlineController extends ChangeNotifier {
   // ─── 输入控制器 ──────────────────────────────────────────────
   final genreController = TextEditingController(text: '玄幻');
@@ -43,7 +45,9 @@ class OutlineController extends ChangeNotifier {
 
   // ─── 多步生成状态 ────────────────────────────────────────────
   static const int _maxEventsPerChunk = 3; // 每个展开块包含的大事件数
-  static const int _maxConcurrentChunks = 3;
+  // 展开块并发数。为保障跨块小事件连贯性（每块需注入前文已展开内容），
+  // 目前固定为顺序执行（1）；保留并行基础设施，未来如需提速可调大并配合边界状态预规划。
+  static const int _maxConcurrentChunks = 1;
   static const int _maxRetries = 2;
   static const int _maxChunkRetries = 2; // 展开块未收到内容时的网络失败自动重试次数
   static const int _maxContinuations = 5; // 展开块因 max_tokens 截断时的最大自动续写次数
@@ -82,6 +86,7 @@ class OutlineController extends ChangeNotifier {
   DateTime _lastNotifyTime = DateTime.fromMillisecondsSinceEpoch(0);
   DateTime _lastScrollTime = DateTime.fromMillisecondsSinceEpoch(0);
   File? _progressFile;
+  Future<void>? _runFuture; // 当前正在执行的生成流程，启动新流程前需等待其彻底结束
 
   // 并行展开状态
   List<_ExpandChunk> _chunks = [];
@@ -232,6 +237,7 @@ class OutlineController extends ChangeNotifier {
       notifyListeners();
       return;
     }
+    await _waitForPreviousRun();
     _resetState();
     await _deleteProgress();
     await _runAll();
@@ -240,12 +246,44 @@ class OutlineController extends ChangeNotifier {
   Future<void> resume() async {
     final data = await _loadProgress();
     if (data == null) return;
+    await _waitForPreviousRun();
     _resetState();
     _applyProgress(data);
     await _runAll();
   }
 
+  /// 等待上一次生成流程彻底结束，再启动新流程。
+  ///
+  /// 取消生成后，旧流程的流式请求仍可能在后台收尾（刚取消的请求完成、
+  /// 已收到的部分内容会被当作失败尝试处理）。若不等旧流程退出就重置
+  /// [_cancelled] 并启动新流程，旧流程会把中断的旧内容与新内容并发生成，
+  /// 导致本次输出混杂了上次中断的内容。
+  Future<void> _waitForPreviousRun() async {
+    final prev = _runFuture;
+    if (prev == null) return;
+    _cancelled = true;
+    for (final t in List.of(_activeTokens)) {
+      t.cancel();
+    }
+    _activeTokens.clear();
+    _cancelToken?.cancel();
+    _cancelToken = null;
+    try {
+      await prev;
+    } catch (_) {}
+  }
+
   Future<void> _runAll() async {
+    final future = _doRunAll();
+    _runFuture = future;
+    try {
+      await future;
+    } finally {
+      if (identical(_runFuture, future)) _runFuture = null;
+    }
+  }
+
+  Future<void> _doRunAll() async {
     try {
       final settings = await _outlineService.loadSettings();
       if (settings.apiKey.isEmpty) {
@@ -977,6 +1015,7 @@ class OutlineController extends ChangeNotifier {
       final events = acts[i].events;
       final groups = _groupList(events, _maxEventsPerChunk);
       for (int j = 0; j < groups.length; j++) {
+        final chunkStartIndex = globalIndex + 1; // 本块首个大事件的全局序号
         final content = groups[j]
             .map((e) {
               globalIndex++;
@@ -992,6 +1031,8 @@ class OutlineController extends ChangeNotifier {
             chunkIndex: j,
             totalChunks: groups.length,
             isActStart: j == 0,
+            globalStartIndex: chunkStartIndex,
+            globalEndIndex: globalIndex, // 本块最后一个大事件的全局序号
           ),
         );
       }
@@ -1055,6 +1096,20 @@ class OutlineController extends ChangeNotifier {
         ? stepLabels[labelIndex]
         : '展开细节';
     try {
+      // 前文已展开的详细内容：只注入紧邻的前一块完整文本，
+      // 保证本块开头承接其结尾状态、不重复不矛盾；更早的内容由全局骨架兜底。
+      // 断点续跑恢复时前一块 buffer 为空，回退到 rawText 中已刷入的文本。
+      String previousContent = '';
+      if (index > 0) {
+        final prev = _chunks[index - 1];
+        previousContent = prev.buffer.trim().isNotEmpty
+            ? (prev.isActStart
+                  ? '${prev.header}\n${prev.buffer.trim()}'
+                  : prev.buffer.trim())
+            : _rawTextWithoutTitle().trim();
+      }
+      // 紧接着的后一块大事件（若有）：只注入下一块，聚焦最近的过渡目标
+      final nextChunk = index + 1 < _chunks.length ? _chunks[index + 1] : null;
       final truncated = await _streamChunk(
         systemPrompt: systemPrompt,
         userPrompt: OutlinePromptTemplate.buildStep3Prompt(
@@ -1068,6 +1123,13 @@ class OutlineController extends ChangeNotifier {
           actContent: chunk.content,
           actIndex: chunk.actIndex + 1,
           globalSummary: _buildGlobalSummary(),
+          previousContent: previousContent,
+          laterContent: nextChunk == null
+              ? ''
+              : _renderLaterSkeleton(
+                  nextChunk.globalStartIndex,
+                  nextChunk.globalEndIndex,
+                ),
         ),
         maxTokens: _outlineSetting.maxTokens,
         temperature: _outlineSetting.temperature,
@@ -1285,6 +1347,36 @@ class OutlineController extends ChangeNotifier {
       }
     }
     return buf.toString().trim();
+  }
+
+  /// 渲染指定全局序号范围内的大事件粗骨架（标题+定位），
+  /// 当前只渲染「紧接着的下一块」，供展开提示词做「向后铺垫、平滑过渡」。
+  String _renderLaterSkeleton(int fromGlobalIndex, int toGlobalIndex) {
+    final acts = _step2Json?.acts ?? const <_Act>[];
+    final buf = StringBuffer();
+    var idx = 0;
+    for (final act in acts) {
+      for (final e in act.events) {
+        idx++;
+        if (idx < fromGlobalIndex || idx > toGlobalIndex) continue;
+        buf.writeln('大事件$idx：${e.title}');
+        buf.writeln(e.summary);
+        buf.writeln();
+      }
+    }
+    return buf.toString().trim();
+  }
+
+  /// 去掉 rawText 开头的书名+概念前缀，返回已刷入的展开块文本。
+  /// 断点续跑时前序块 buffer 为空，用此方法从落盘内容重建「前文上下文」。
+  String _rawTextWithoutTitle() {
+    var s = rawText;
+    final prefix = _step1Text ?? '';
+    if (prefix.isNotEmpty && s.startsWith(prefix)) {
+      s = s.substring(prefix.length);
+      if (s.startsWith('\n\n')) s = s.substring(2);
+    }
+    return s;
   }
 
   // ─── 流式节流 ────────────────────────────────────────────────
@@ -1573,6 +1665,8 @@ class _ExpandChunk {
   final int chunkIndex;
   final int totalChunks;
   final bool isActStart;
+  final int globalStartIndex; // 本块首个大事件的全局序号（1-based）
+  final int globalEndIndex; // 本块最后一个大事件的全局序号（1-based，含）
   String buffer = '';
   bool done = false;
   bool truncated = false;
@@ -1587,6 +1681,8 @@ class _ExpandChunk {
     required this.chunkIndex,
     required this.totalChunks,
     required this.isActStart,
+    required this.globalStartIndex,
+    required this.globalEndIndex,
   });
 }
 
