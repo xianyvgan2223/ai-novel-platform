@@ -150,7 +150,7 @@ class OutlineFormatController extends ChangeNotifier {
             apiParams: {
               'model': settings.outlineSetting.model,
               'temperature': 0.3,
-              'max_tokens': 800,
+              'max_tokens': settings.outlineSetting.maxTokens,
             },
             outlineContent: content,
           );

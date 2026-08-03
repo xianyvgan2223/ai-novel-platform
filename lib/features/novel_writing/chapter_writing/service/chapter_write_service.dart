@@ -1,7 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:deepseekapp/core/network/api_service.dart';
 import 'package:deepseekapp/core/config/user_setting_service.dart';
-import '../../shared/domain/outline_setting.dart';
+import '../../shared/domain/chapter_setting.dart';
 import '../../shared/domain/outline_record.dart';
 import '../../shared/domain/outline_chapter.dart';
 import '../../shared/domain/character_profile.dart';
@@ -44,7 +44,7 @@ class ChapterWritePromptTemplate {
   /// [storyState] 剧情状态账本（开启后随章节累积）
   /// [characters] 直接注入的人物档案（主角等关键人物）；其他人物由模型调用工具按需查询
   /// [foreshadows] 一键生成时的伏笔清单
-  /// [gapCount] 当前事件之前未完成的事件数量（乱序提示）
+  /// [minWords]/[maxWords] 单章字数范围（来自章节设置，默认 2000-3000）
   static String buildWritePrompt({
     required OutlineRecord outline,
     required String outlineExcerpt,
@@ -58,10 +58,10 @@ class ChapterWritePromptTemplate {
     String storyState = '',
     String characters = '',
     String foreshadows = '',
-    int gapCount = 0,
+    int minWords = 2000,
+    int maxWords = 3000,
   }) {
     final isMinor = ch.eventType == 'minor';
-    final isMajor = ch.eventType == 'major';
     final parentSection = parentMajor != null && isMinor
         ? '\n【所属大事件】${parentMajor.eventTitle}\n${parentMajor.eventSummary}'
         : '';
@@ -72,13 +72,16 @@ class ChapterWritePromptTemplate {
     final lastOfMajorHint = isLastOfMajor
         ? '；当前事件是所属大事件的最后一个事件，结尾必须为后续事件留出衔接（场景过渡、伏笔暗示或冲突升级），严禁在此处收尾或完结整个故事'
         : '';
-    // 大事件写「阶段总结/过渡」章节，与其下小事件的详写章节区分，避免内容重叠
-    final roleInstruction = isMajor
-        ? '''- 本章是「阶段总结/过渡」章节：概括本阶段（当前大事件覆盖的范围）的进展、核心冲突与人物变化，承上启下
-- 不要展开小事件的具体情节细节（其下小事件将单独成章详写），避免与后续章节内容重复
-- 字数 1500-2500 字'''
-        : '''- 以文学性强的叙述方式展开，包含场景描写、对话、心理活动
-- 字数 2000-3000 字''';
+    // 章节字数范围来自设置；最少字数大于最多字数时退化为按最少数约束
+    final wordCountText = minWords <= maxWords
+        ? (minWords == maxWords ? '字数 $minWords 字' : '字数 $minWords-$maxWords 字')
+        : '字数 $minWords 字';
+    // 仅小事件详写为章节正文；大事件是结构节点，不单独生成章节。
+    // 明确限定文风：平实自然、克制修辞，避免模型堆砌比喻导致每章都像散文
+    final roleInstruction = '''- 以自然流畅的叙述方式展开，包含场景描写、对话、心理活动
+- 语言平实克制，贴近通俗小说文风；整章比喻、排比等修辞手法不超过 1-2 处，禁止堆砌辞藻、空泛抒情
+- 用具体的动作、环境细节和人物对话推进情节，不要用比喻或抽象修辞来渲染气氛
+- $wordCountText''';
     final prevEndingSection = prevEnding.isEmpty
         ? ''
         : '\n\n【上一章小结】\n$prevEnding';
@@ -91,9 +94,6 @@ class ChapterWritePromptTemplate {
     final foreshadowsSection = foreshadows.trim().isEmpty
         ? ''
         : '\n\n【伏笔清单】\n${foreshadows.trim()}';
-    final gapWarning = gapCount > 0
-        ? '\n- ⚠️ 注意：有 $gapCount 个前序事件尚未生成，上文可能不连续，请以【前文内容】与【上一章小结】中已有的内容为准，不要自行脑补缺失情节'
-        : '';
     final charactersRule = characters.trim().isEmpty
         ? ''
         : '\n- 人物行为、言谈必须符合【人物档案】中设定的性格与能力，禁止擅自改变角色性格';
@@ -124,7 +124,7 @@ $roleInstruction
 - 结尾自然衔接【后续事件】中的下一个事件（若存在）$lastOfMajorHint
 - 若当前事件涉及【伏笔清单】中的伏笔，按其计划埋设或回收；清单未涉及的不要强行引入
 - 角色状态、位置与悬念需与【全局剧情状态】保持连续一致$charactersRule
-- 剧情中涉及主角以外的其他人物时，先调用 get_character_profiles 工具查询其人物档案，再结合档案写作；未查询到的人物不要凭空设定其外貌、能力或性格$gapWarning
+- 剧情中涉及主角以外的其他人物时，先调用 get_character_profiles 工具查询其人物档案，再结合档案写作；未查询到的人物不要凭空设定其外貌、能力或性格
 - 只写当前事件的内容，不要超出范围
 - 直接输出正文，不要添加注释说明
 ''';
@@ -139,16 +139,16 @@ class ChapterWriteService {
   ChapterWriteService({ApiService? apiService})
     : _apiService = apiService ?? ApiService();
 
-  /// 加载全局设置（API Key 等）和大纲专属设置
-  Future<({String apiKey, OutlineSetting outlineSetting})>
+  /// 加载全局设置（API Key 等）和章节专属设置
+  Future<({String apiKey, ChapterSetting chapterSetting})>
   loadSettings() async {
     final global = await UserSettingService.getSettings();
-    OutlineSetting outlineSetting = const OutlineSetting();
+    ChapterSetting chapterSetting = const ChapterSetting();
     try {
-      final row = await OutlineDbHelper().getSettings();
-      if (row != null) outlineSetting = OutlineSetting.fromMap(row);
+      final row = await OutlineDbHelper().getChapterSettings();
+      if (row != null) chapterSetting = ChapterSetting.fromMap(row);
     } catch (_) {}
-    return (apiKey: global.apiKey, outlineSetting: outlineSetting);
+    return (apiKey: global.apiKey, chapterSetting: chapterSetting);
   }
 
   /// 调用流式章节生成 API
@@ -174,22 +174,20 @@ class ChapterWriteService {
     );
   }
 
-  /// 剧情状态账本提炼 — 非流式轻量调用（JSON 结构化输出）。
+  /// 剧情状态账本提炼 — 构建请求消息（流式调用由控制器执行，过程可实时查看）。
   ///
   /// 根据前序状态 + 当前人物档案 + 本章正文，输出：
   /// - story_state：剧情状态（角色处境/时间地点/伏笔/悬念/冲突）
   /// - characters：人物档案（姓名/描述/能力），**不含性格**——性格仅由用户维护，
   ///   模型不输出该字段，控制器在代码层按姓名回填保留。
   /// 返回 JSON 字符串，解析失败由调用方兜底。
-  Future<String> extractStoryState({
-    required String apiKey,
-    required Map<String, dynamic> apiParams,
+  List<Map<String, dynamic>> buildStoryStateMessages({
     required String prevState,
     required List<CharacterProfile> characters,
     required String eventTitle,
     required String eventSummary,
     required String chapterContent,
-  }) async {
+  }) {
     final characterText = characters.isEmpty
         ? '（暂无）'
         : characters
@@ -198,89 +196,129 @@ class ChapterWriteService {
                     '· ${c.name}\n  描述：${c.description}\n  能力：${c.abilities}',
               )
               .join('\n');
-    final response = await _apiService.chat(
-      apiKey: apiKey,
-      apiParams: {
-        ...apiParams,
-        'response_format': {'type': 'json_object'},
+    return [
+      {
+        'role': 'system',
+        'content':
+            '你是小说剧情状态与人物档案提炼助手。根据前序剧情状态、当前人物档案与本章正文，'
+            '输出更新后的**最新剧情状态**与**人物档案**，以严格的 JSON 格式输出，不要输出 JSON 以外的任何文字。\n'
+            '剧情状态需覆盖并按以下五个分区输出，每个分区占一行（标题+内容），分区之间空一行：\n'
+            '【角色处境】各主要角色当前处境与变化\n'
+            '【时间地点】当前时间与地点\n'
+            '【伏笔】已埋设尚未回收的伏笔\n'
+            '【悬念】尚未解决的悬念\n'
+            '【冲突】未解决的冲突\n'
+            '某分区没有内容时写「无」，不要合并、省略或改写分区标题。\n'
+            '人物档案：每位角色给出 name（姓名）、description（外貌/身份/背景/现状描述）、'
+            'abilities（能力，含本章新增或变化的能力）。\n'
+            '档案提炼规则：description 与 abilities 只提炼人物自身的**稳定设定**'
+            '（外貌/身份/背景/能力名称、类型、特点与强弱定位），'
+            '禁止写入具体情节片段、战例或能力施展场景举例'
+            '（如"凭借一根树枝点杀丧尸"这类具体事例），避免后续章节生成时照搬这些例子。\n'
+            '性格规则：当前人物档案中**已存在**的人物，禁止输出 personality 字段，'
+            '禁止修改或推断其性格（性格由用户维护）；对于当前人物档案中**未出现的新人物**，'
+            '可依据正文推断其性格并填入 personality 字段（仅此首次提炼，之后由用户维护）。\n'
+            '输出格式：{"story_state": "剧情状态纯文本", "characters": [{"name": "...", "description": "...", "abilities": "...", "personality": "..."}]}',
       },
-      messages: [
-        {
-          'role': 'system',
-          'content':
-              '你是小说剧情状态与人物档案提炼助手。根据前序剧情状态、当前人物档案与本章正文，'
-              '输出更新后的**最新剧情状态**与**人物档案**，以严格的 JSON 格式输出，不要输出 JSON 以外的任何文字。\n'
-              '剧情状态需覆盖：1) 各主要角色当前处境与变化 2) 当前时间与地点 3) 已埋设尚未回收的伏笔 '
-              '4) 尚未解决的悬念 5) 未解决的冲突。\n'
-              '人物档案：每位角色给出 name（姓名）、description（外貌/身份/背景/现状描述）、'
-              'abilities（能力，含本章新增或变化的能力）。\n'
-              '性格规则：当前人物档案中**已存在**的人物，禁止输出 personality 字段，'
-              '禁止修改或推断其性格（性格由用户维护）；对于当前人物档案中**未出现的新人物**，'
-              '可依据正文推断其性格并填入 personality 字段（仅此首次提炼，之后由用户维护）。\n'
-              '输出格式：{"story_state": "剧情状态纯文本", "characters": [{"name": "...", "description": "...", "abilities": "...", "personality": "..."}]}',
-        },
-        {
-          'role': 'user',
-          'content':
-              '【前序剧情状态】\n${prevState.isEmpty ? '（暂无）' : prevState}\n\n'
-              '【当前人物档案】\n$characterText\n\n'
-              '【本章事件】$eventTitle\n'
-              '【本章概要】$eventSummary\n\n'
-              '【本章正文】\n$chapterContent',
-        },
-      ],
-    );
-    final choices = response['choices'] as List?;
-    if (choices == null || choices.isEmpty) return '';
-    final msg = choices[0]['message'] as Map<String, dynamic>?;
-    final content = msg?['content'] as String? ?? '';
-    return content.trim();
+      {
+        'role': 'user',
+        'content':
+            '【前序剧情状态】\n${prevState.isEmpty ? '（暂无）' : prevState}\n\n'
+            '【当前人物档案】\n$characterText\n\n'
+            '【本章事件】$eventTitle\n'
+            '【本章概要】$eventSummary\n\n'
+            '【本章正文】\n$chapterContent',
+      },
+    ];
   }
 
-  /// 主角人物档案提炼 — 非流式轻量调用（JSON 结构化输出）。
-  /// 从「主角完整人设 + 大纲内容」提炼并**补全优化**主角描述（缺失部分结合大纲补全），
-  /// 性格留空由用户维护。
-  Future<String> extractProtagonist({
+  /// 非流式对话（兜底）— 流式不可用/失败时回退。返回 message.content，失败返回空串。
+  Future<String> chatOnce({
     required String apiKey,
     required Map<String, dynamic> apiParams,
+    required List<Map<String, dynamic>> messages,
+  }) async {
+    try {
+      final response = await _apiService.chat(
+        apiKey: apiKey,
+        apiParams: apiParams,
+        messages: messages,
+      );
+      final choices = response['choices'] as List?;
+      if (choices == null || choices.isEmpty) return '';
+      final msg = choices[0]['message'] as Map<String, dynamic>?;
+      return (msg?['content'] as String? ?? '').trim();
+    } catch (_) {
+      return '';
+    }
+  }
+
+  /// 主角人物档案提炼 — 构建请求消息（流式调用由控制器执行，过程可实时查看）。
+  /// 从「主角完整人设 + 大纲内容」提炼并**补全优化**主角描述（缺失部分结合大纲补全），
+  /// 若人设/大纲中明确提到性格则一并提炼录入（仅首次种入，之后由用户维护）。
+  /// 提炼完成后由控制器再执行一轮 AI 审查（见 [buildProtagonistReviewMessages]）。
+  List<Map<String, dynamic>> buildProtagonistMessages({
     required String protagonistSetting,
     required String outlineContent,
-  }) async {
-    final concept = outlineContent.length > 1200
-        ? outlineContent.substring(0, 1200)
+  }) {
+    final concept = outlineContent.length > 3000
+        ? outlineContent.substring(0, 3000)
         : outlineContent;
-    final response = await _apiService.chat(
-      apiKey: apiKey,
-      apiParams: {
-        ...apiParams,
-        'response_format': {'type': 'json_object'},
+    return [
+      {
+        'role': 'system',
+        'content':
+            '你是小说人物档案提炼助手。请根据主角完整人设与大纲内容，提炼并**补全优化**主角的人物档案，'
+            '输出 JSON。\n'
+            'name：主角姓名；\n'
+            'description：主角完整描述（外貌/身份/背景/当前处境），若人设中描述缺失或不完整，'
+            '结合大纲内容合理补全优化；只写稳定的设定，不要写入具体情节或战例\n'
+            'abilities：主角能力与特长（含成长潜力），只描述能力本身的名称、类型、特点与强弱定位，'
+            '**禁止**举例能力的施展场景或战绩（如"凭借一根树枝点杀丧尸"这类具体事例），'
+            '避免章节生成时照搬这些例子；\n'
+            'personality：主角性格。若人设或大纲中明确描述了性格（如性格、脾气、处世方式等），'
+            '如实提炼录入；完全没有提及则输出空字符串，不要自行编造。\n'
+            '不要输出 JSON 以外的任何文字。\n'
+            '输出格式：{"protagonist": {"name": "...", "description": "...", "abilities": "...", "personality": "..."}}',
       },
-      messages: [
-        {
-          'role': 'system',
-          'content':
-              '你是小说人物档案提炼助手。请根据主角完整人设与大纲内容，提炼并**补全优化**主角的人物档案，'
-              '输出 JSON。\n'
-              'name：主角姓名；\n'
-              'description：主角完整描述（外貌/身份/背景/当前处境），若人设中描述缺失或不完整，'
-              '结合大纲内容合理补全优化；\n'
-              'abilities：主角能力与特长（含成长潜力）。\n'
-              '不要输出性格字段，性格由用户维护；不要输出 JSON 以外的任何文字。\n'
-              '输出格式：{"protagonist": {"name": "...", "description": "...", "abilities": "..."}}',
-        },
-        {
-          'role': 'user',
-          'content':
-              '【主角完整人设】\n$protagonistSetting\n\n'
-              '【大纲内容（供参考补全描述）】\n${concept.isEmpty ? '（无）' : concept}',
-        },
-      ],
-    );
-    final choices = response['choices'] as List?;
-    if (choices == null || choices.isEmpty) return '';
-    final msg = choices[0]['message'] as Map<String, dynamic>?;
-    final content = msg?['content'] as String? ?? '';
-    return content.trim();
+      {
+        'role': 'user',
+        'content':
+            '【主角完整人设】\n$protagonistSetting\n\n'
+            '【大纲内容（供参考补全描述）】\n${concept.isEmpty ? '（无）' : concept}',
+      },
+    ];
+  }
+
+  /// 主角人物档案 AI 审查 — 构建请求消息（流式调用由控制器执行）。
+  /// 在提炼完成后执行：依据提炼约束复核档案是否合理，将不合理处修正。
+  /// 输出格式：【审查意见】+【修正后档案】（JSON，结构同提炼结果）。
+  List<Map<String, dynamic>> buildProtagonistReviewMessages({
+    required String protagonistSetting,
+    required String profileJson,
+  }) {
+    return [
+      {
+        'role': 'system',
+        'content':
+            '你是小说人物档案审校助手。请审校给定的主角人物档案 JSON，检查并修正不合理之处。\n'
+            '审校规则（必须遵循提炼约束）：\n'
+            '- description 只描述人物稳定设定（外貌/身份/背景/当前处境），不得写入具体情节片段或战例\n'
+            '- abilities 只描述能力本身的名称、类型、特点与强弱定位，'
+            '**禁止**能力施展场景举例或战绩（如"凭借一根树枝点杀丧尸"这类具体事例），'
+            '避免后续章节生成时照搬\n'
+            '- personality 如实反映人设中明确描述的性格；人设未提及则输出空字符串，不要编造\n'
+            '- 修正逻辑矛盾、与主角人设或大纲冲突的内容；不得新增大纲中不存在的能力或设定\n'
+            '输出格式：先输出【审查意见】：简要逐条列出修正点（无需修改则写"未发现明显不合理之处"）；'
+            '再换行输出【修正后档案】：修正后的 JSON，结构与原档案一致，不要输出其他内容。',
+      },
+      {
+        'role': 'user',
+        'content':
+            '【主角完整人设】\n$protagonistSetting\n\n'
+            '【待审校的人物档案 JSON】\n$profileJson',
+      },
+    ];
   }
 
   /// 整章提炼 — 非流式轻量调用。
@@ -299,7 +337,7 @@ class ChapterWriteService {
         {
           'role': 'system',
           'content':
-              '你是小说章节提炼助手。请把给定的章节正文压缩为一份简明小结（200字以内），'
+              '你是小说章节提炼助手。请把给定的章节正文压缩为一份简明小结（800字以内），'
               '保留：本章核心进展、结尾处的场景/时间/人物状态、结尾抛出的悬念或伏笔。'
               '只输出小结本身，纯文本，不要任何多余说明。',
         },
@@ -317,5 +355,45 @@ class ChapterWriteService {
     final msg = choices[0]['message'] as Map<String, dynamic>?;
     final content = msg?['content'] as String? ?? '';
     return content.trim();
+  }
+
+  /// AI 审查修正 — 构建请求消息（流式调用由控制器执行，过程可实时查看）。
+  /// 在章节生成完成与账本提炼之间执行：只修正正文中逻辑不通、前后矛盾、
+  /// 细节与上文不符等不合理之处，**不改变**伏笔、剧情走向、人物设定与大纲情节；
+  /// 输出修正后的**完整正文**（正文无需修改时原样输出）。
+  List<Map<String, dynamic>> buildReviewMessages({
+    required String eventTitle,
+    required String eventSummary,
+    required String prevEnding,
+    required String storyState,
+    required String characters,
+    required String foreshadows,
+    required String chapterContent,
+  }) {
+    return [
+      {
+        'role': 'system',
+        'content':
+            '你是小说章节审校助手。请审校给定的章节正文，找出并修正其中不合理之处。\n'
+            '审校范围：逻辑不通、前后矛盾、细节与上文不符（时间/地点/人物状态/能力发挥）、'
+            '表述错误、明显不合常识等。\n'
+            '绝对不得改变：剧情走向与大纲规定的情节、伏笔的埋设与回收安排、'
+            '人物设定与能力设定、叙事视角与文风。\n'
+            '输出格式：先输出【审查意见】：简要逐条列出发现并修正的问题点'
+            '（若正文无需修改则写"未发现明显不合理之处"）；'
+            '再换行输出【修正后正文】：修正后的完整正文。不要输出其他任何内容。',
+      },
+      {
+        'role': 'user',
+        'content':
+            '【本章事件】$eventTitle\n'
+            '【事件概要】$eventSummary\n\n'
+            '【上一章小结】\n${prevEnding.isEmpty ? '（无）' : prevEnding}\n\n'
+            '【全局剧情状态】\n${storyState.trim().isEmpty ? '（无）' : storyState.trim()}\n\n'
+            '【人物档案】\n${characters.trim().isEmpty ? '（无）' : characters.trim()}\n\n'
+            '【伏笔清单】\n${foreshadows.trim().isEmpty ? '（无）' : foreshadows.trim()}\n\n'
+            '【正文】\n$chapterContent',
+      },
+    ];
   }
 }

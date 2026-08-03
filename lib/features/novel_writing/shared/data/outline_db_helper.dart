@@ -26,4 +26,22 @@ class OutlineDbHelper {
       whereArgs: [1],
     );
   }
+
+  /// 读取章节写作设置（与大纲设置独立存储）
+  Future<Map<String, dynamic>?> getChapterSettings() async {
+    final db = await database;
+    final results = await db.query('chapter_settings', limit: 1);
+    return results.isNotEmpty ? results.first : null;
+  }
+
+  /// 保存章节写作设置
+  Future<void> saveChapterSettings(Map<String, dynamic> settings) async {
+    final db = await database;
+    await db.update(
+      'chapter_settings',
+      settings,
+      where: 'id = ?',
+      whereArgs: [1],
+    );
+  }
 }

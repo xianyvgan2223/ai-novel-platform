@@ -670,7 +670,7 @@ class ChatController extends ChangeNotifier {
         apiParams: {
           'model': setting.model,
           'temperature': 0.3,
-          'max_tokens': 500,
+          'max_tokens': setting.maxTokens,
         },
         messages: summaryMessages,
       );

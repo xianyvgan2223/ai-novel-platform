@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../../../shared/domain/character_profile.dart';
 import '../../../shared/data/outline_record_db_helper.dart';
+import '../../controller/chapter_write_controller.dart';
 
 /// 剧情状态账本查看/编辑页
 ///
@@ -10,7 +11,12 @@ import '../../../shared/data/outline_record_db_helper.dart';
 /// - 剧情状态：AI 随章节累积的文本账本，可手动编辑。
 class StoryStatePage extends StatefulWidget {
   final int outlineId;
-  const StoryStatePage({super.key, required this.outlineId});
+  final ChapterWriteController controller;
+  const StoryStatePage({
+    super.key,
+    required this.outlineId,
+    required this.controller,
+  });
 
   @override
   State<StoryStatePage> createState() => _StoryStatePageState();
@@ -20,6 +26,7 @@ class _StoryStatePageState extends State<StoryStatePage> {
   List<CharacterProfile> _characters = [];
   final _storyStateCtrl = TextEditingController();
   bool _loading = true;
+  bool _generatingProtagonist = false;
 
   @override
   void initState() {
@@ -42,6 +49,20 @@ class _StoryStatePageState extends State<StoryStatePage> {
       }
     } catch (_) {}
     if (mounted) setState(() => _loading = false);
+  }
+
+  /// 手动从大纲生成主角档案（提炼 + AI 审查），生成完成后刷新列表
+  Future<void> _generateProtagonist() async {
+    if (_generatingProtagonist) return;
+    setState(() => _generatingProtagonist = true);
+    final result = await widget.controller.generateProtagonistProfile();
+    await _load();
+    if (mounted) {
+      setState(() => _generatingProtagonist = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(result), duration: const Duration(seconds: 1)),
+      );
+    }
   }
 
   Future<void> _save() async {
@@ -145,6 +166,81 @@ class _StoryStatePageState extends State<StoryStatePage> {
     );
   }
 
+  /// 把剧情状态文本按「【分区标题】内容」拆分为带标题和分割的展示行。
+  /// 旧数据无分区标记时退化为按行展示，保证每种格式都可读。
+  List<Widget> _buildStoryStateSections() {
+    final lines = _storyStateCtrl.text.split('\n');
+    final sectionRe = RegExp(r'^【(.+?)】');
+    final sections = <Widget>[];
+    for (final line in lines) {
+      final t = line.trim();
+      if (t.isEmpty) continue;
+      final m = sectionRe.firstMatch(t);
+      if (m != null) {
+        // 分区标题行：【角色处境】内容...
+        final title = m.group(1)!;
+        final rest = t.substring(t.indexOf('】') + 1).trim();
+        sections.add(
+          Padding(
+            padding: const EdgeInsets.only(top: 10, bottom: 4),
+            child: Row(
+              children: [
+                Container(
+                  width: 3,
+                  height: 12,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF4D6BFE),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF333333),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+        if (rest.isNotEmpty) {
+          sections.add(
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4, left: 10),
+              child: Text(
+                rest,
+                style: const TextStyle(
+                  fontSize: 11,
+                  height: 1.5,
+                  color: Color(0xFF666666),
+                ),
+              ),
+            ),
+          );
+        }
+      } else {
+        // 普通内容行
+        sections.add(
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Text(
+              t,
+              style: const TextStyle(
+                fontSize: 11,
+                height: 1.5,
+                color: Color(0xFF666666),
+              ),
+            ),
+          ),
+        );
+      }
+    }
+    return sections;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -203,9 +299,33 @@ class _StoryStatePageState extends State<StoryStatePage> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                if (_characters.isEmpty)
-                  _buildEmptyCard('暂无人物档案，可添加人物，或先写一章由系统自动提取')
-                else
+                if (_characters.isEmpty) ...[
+                  _buildEmptyCard('暂无人物档案，可添加人物、从大纲生成主角档案，或先写一章由系统自动提取'),
+                  const SizedBox(height: 10),
+                  Center(
+                    child: OutlinedButton.icon(
+                      onPressed: _generatingProtagonist
+                          ? null
+                          : _generateProtagonist,
+                      icon: _generatingProtagonist
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.auto_awesome, size: 16),
+                      label: Text(
+                        _generatingProtagonist ? '正在生成...' : '从大纲生成主角档案',
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFF4D6BFE),
+                        side: const BorderSide(color: Color(0xFF4D6BFE)),
+                        visualDensity: VisualDensity.compact,
+                        textStyle: const TextStyle(fontSize: 12),
+                      ),
+                    ),
+                  ),
+                ] else
                   ..._characters.asMap().entries.map(
                     (entry) => Padding(
                       padding: const EdgeInsets.only(bottom: 12),
@@ -234,35 +354,69 @@ class _StoryStatePageState extends State<StoryStatePage> {
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(color: const Color(0xFFE8ECF4)),
                   ),
-                  child: TextField(
-                    controller: _storyStateCtrl,
-                    maxLines: 12,
-                    style: const TextStyle(fontSize: 10, height: 1.6),
-                    decoration: InputDecoration(
-                      hintText: '暂无剧情状态，写完第一章后自动生成',
-                      hintStyle: TextStyle(
-                        fontSize: 10,
-                        color: Colors.grey[400],
-                      ),
-                      border: InputBorder.none,
-                      contentPadding: EdgeInsets.zero,
-                      suffixIcon: IconButton(
-                        onPressed: _showStoryStateEnlargeDialog,
-                        icon: const Icon(Icons.open_in_full, size: 14),
-                        color: const Color(0xFF999999),
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(
-                          minWidth: 28,
-                          minHeight: 28,
+                  child: _storyStateCtrl.text.trim().isEmpty
+                      ? Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(
+                                  Icons.menu_book_outlined,
+                                  size: 18,
+                                  color: Colors.grey[300],
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    '暂无剧情状态，写完第一章后自动生成，也可点击「编辑」手动填写',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.grey[400],
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            const Divider(height: 16),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: GestureDetector(
+                                onTap: _showStoryStateEnlargeDialog,
+                                child: const Text(
+                                  '编辑',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: Color(0xFF4D6BFE),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        )
+                      : Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            ..._buildStoryStateSections(),
+                            const SizedBox(height: 4),
+                            const Divider(height: 16),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: GestureDetector(
+                                onTap: _showStoryStateEnlargeDialog,
+                                child: const Text(
+                                  '编辑',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: Color(0xFF4D6BFE),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
-                        tooltip: '放大编辑',
-                      ),
-                      suffixIconConstraints: const BoxConstraints(
-                        minWidth: 28,
-                        minHeight: 28,
-                      ),
-                    ),
-                  ),
                 ),
                 const SizedBox(height: 32),
               ],

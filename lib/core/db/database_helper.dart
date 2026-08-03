@@ -6,7 +6,7 @@ import 'package:path/path.dart' as p;
 
 class DatabaseHelper {
   static const _dbName = 'deepseek.db';
-  static const _dbVersion = 22;
+  static const _dbVersion = 27;
   static Database? _database;
 
   /// 单例入口，全局复用同一个数据库连接
@@ -171,6 +171,7 @@ class DatabaseHelper {
     });
 
     // ── outline_settings 大纲生成设置表（小说模块） ──
+    // 仅保留大纲专属列；字数配置已废弃移除，章节相关列已独立到 chapter_settings
     await db.execute('''
       CREATE TABLE outline_settings (
         id INTEGER PRIMARY KEY,
@@ -178,16 +179,7 @@ class DatabaseHelper {
         max_tokens INTEGER NOT NULL DEFAULT 4096,
         model TEXT NOT NULL DEFAULT 'deepseek-v4-flash',
         system_prompt TEXT NOT NULL DEFAULT '',
-        chapter_system_prompt TEXT NOT NULL DEFAULT '',
-        concept_min_words INTEGER NOT NULL DEFAULT 30,
-        concept_max_words INTEGER NOT NULL DEFAULT 50,
-        major_event_min_words INTEGER NOT NULL DEFAULT 50,
-        major_event_max_words INTEGER NOT NULL DEFAULT 100,
-        minor_event_min_words INTEGER NOT NULL DEFAULT 30,
-        minor_event_max_words INTEGER NOT NULL DEFAULT 50,
-        summary_max_words INTEGER NOT NULL DEFAULT 80,
-        enable_thinking INTEGER NOT NULL DEFAULT 1,
-        enable_story_state INTEGER NOT NULL DEFAULT 0
+        enable_thinking INTEGER NOT NULL DEFAULT 1
       )
     ''');
     await db.insert('outline_settings', {
@@ -196,14 +188,33 @@ class DatabaseHelper {
       'max_tokens': 4096,
       'model': 'deepseek-v4-flash',
       'system_prompt': '',
+      'enable_thinking': 1,
+    });
+
+    // ── chapter_settings 章节写作设置表（小说模块，与大纲设置独立） ──
+    await db.execute('''
+      CREATE TABLE chapter_settings (
+        id INTEGER PRIMARY KEY,
+        temperature REAL NOT NULL DEFAULT 0.8,
+        max_tokens INTEGER NOT NULL DEFAULT 4096,
+        model TEXT NOT NULL DEFAULT 'deepseek-v4-flash',
+        chapter_system_prompt TEXT NOT NULL DEFAULT '',
+        enable_thinking INTEGER NOT NULL DEFAULT 1,
+        enable_story_state INTEGER NOT NULL DEFAULT 1,
+        chapter_min_words INTEGER NOT NULL DEFAULT 2000,
+        chapter_max_words INTEGER NOT NULL DEFAULT 3000
+      )
+    ''');
+    await db.insert('chapter_settings', {
+      'id': 1,
+      'temperature': 0.8,
+      'max_tokens': 4096,
+      'model': 'deepseek-v4-flash',
       'chapter_system_prompt': '',
-      'concept_min_words': 30,
-      'concept_max_words': 50,
-      'major_event_min_words': 50,
-      'major_event_max_words': 100,
-      'minor_event_min_words': 30,
-      'minor_event_max_words': 50,
-      'summary_max_words': 80,
+      'enable_thinking': 1,
+      'enable_story_state': 1,
+      'chapter_min_words': 2000,
+      'chapter_max_words': 3000,
     });
 
     // ── outline_records 大纲生成记录表（小说模块） ──
@@ -625,6 +636,111 @@ class DatabaseHelper {
           "ALTER TABLE outline_records ADD COLUMN characters TEXT NOT NULL DEFAULT ''",
         );
       }
+    }
+
+    // V22 → V23：章节写作设置独立成表（chapter_settings），与大纲生成设置彻底分离；
+    // 从 outline_settings 迁移既有章节配置，避免升级后章节设置丢失
+    if (oldVersion < 23) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS chapter_settings (
+          id INTEGER PRIMARY KEY,
+          temperature REAL NOT NULL DEFAULT 0.8,
+          max_tokens INTEGER NOT NULL DEFAULT 4096,
+          model TEXT NOT NULL DEFAULT 'deepseek-v4-flash',
+          chapter_system_prompt TEXT NOT NULL DEFAULT '',
+          enable_thinking INTEGER NOT NULL DEFAULT 1,
+          enable_story_state INTEGER NOT NULL DEFAULT 1
+        )
+      ''');
+      final exists = await db.query('chapter_settings', limit: 1);
+      if (exists.isEmpty) {
+        final src = await db.query('outline_settings', limit: 1);
+        if (src.isNotEmpty) {
+          final s = src.first;
+          await db.insert('chapter_settings', {
+            'id': 1,
+            'temperature': s['temperature'] ?? 0.8,
+            'max_tokens': s['max_tokens'] ?? 4096,
+            'model': s['model'] ?? 'deepseek-v4-flash',
+            'chapter_system_prompt': s['chapter_system_prompt'] ?? '',
+            'enable_thinking': s['enable_thinking'] ?? 1,
+            'enable_story_state': s['enable_story_state'] ?? 1,
+          });
+        } else {
+          await db.insert('chapter_settings', {
+            'id': 1,
+            'temperature': 0.8,
+            'max_tokens': 4096,
+            'model': 'deepseek-v4-flash',
+            'chapter_system_prompt': '',
+            'enable_thinking': 1,
+            'enable_story_state': 1,
+          });
+        }
+      }
+    }
+
+    // V23 → V24：重建 outline_settings，彻底移除废弃/已迁移的列
+    // （字数配置列已废弃移除；chapter_system_prompt / enable_story_state 已迁至 chapter_settings）
+    // 采用「建新表→拷贝→删旧表→改名」方式，兼容不支持 DROP COLUMN 的旧 SQLite 版本
+    if (oldVersion < 24) {
+      final cols = await db.rawQuery('PRAGMA table_info(outline_settings)');
+      final hasOrphan = cols.any(
+        (c) =>
+            c['name'] == 'concept_min_words' ||
+            c['name'] == 'chapter_system_prompt',
+      );
+      if (hasOrphan) {
+        await db.execute('''
+          CREATE TABLE outline_settings_new (
+            id INTEGER PRIMARY KEY,
+            temperature REAL NOT NULL DEFAULT 0.8,
+            max_tokens INTEGER NOT NULL DEFAULT 4096,
+            model TEXT NOT NULL DEFAULT 'deepseek-v4-flash',
+            system_prompt TEXT NOT NULL DEFAULT '',
+            enable_thinking INTEGER NOT NULL DEFAULT 1
+          )
+        ''');
+        await db.execute('''
+          INSERT INTO outline_settings_new
+            (id, temperature, max_tokens, model, system_prompt, enable_thinking)
+          SELECT id, temperature, max_tokens, model, system_prompt, enable_thinking
+          FROM outline_settings
+        ''');
+        await db.execute('DROP TABLE outline_settings');
+        await db.execute(
+          'ALTER TABLE outline_settings_new RENAME TO outline_settings',
+        );
+      }
+    }
+
+    // V24 → V25：chapter_settings 新增单章字数范围列（章节字数可配置）
+    if (oldVersion < 25) {
+      final cols = await db.rawQuery('PRAGMA table_info(chapter_settings)');
+      if (!cols.any((c) => c['name'] == 'chapter_min_words')) {
+        await db.execute(
+          'ALTER TABLE chapter_settings ADD COLUMN chapter_min_words INTEGER NOT NULL DEFAULT 2000',
+        );
+        await db.execute(
+          'ALTER TABLE chapter_settings ADD COLUMN chapter_max_words INTEGER NOT NULL DEFAULT 3000',
+        );
+      }
+    }
+
+    // V25 → V26：剧情状态账本默认开启。
+    // 此前从 outline_settings 迁移时沿用了旧默认值 0，此处对既有数据统一修正为默认开启
+    if (oldVersion < 26) {
+      await db.execute(
+        'UPDATE chapter_settings SET enable_story_state = 1 WHERE id = 1 AND enable_story_state = 0',
+      );
+    }
+
+    // V26 → V27：修正历史脏数据——内容为空但状态仍为已生成的章节恢复为待生成
+    // （旧版清空内容时未同步 status，重载后会出现「内容已删却显示已生成」）
+    if (oldVersion < 27) {
+      await db.execute(
+        "UPDATE outline_chapters SET status = 'pending' WHERE content IS NULL OR trim(content) = ''",
+      );
     }
   }
 

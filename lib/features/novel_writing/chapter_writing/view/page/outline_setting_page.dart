@@ -1,37 +1,29 @@
 import 'package:flutter/material.dart';
-import '../../../shared/domain/outline_setting.dart';
+import '../../../shared/domain/chapter_setting.dart';
 import '../../../shared/data/outline_db_helper.dart';
 
-/// 大纲生成设置页面 — 温度、最大长度、模型选择、系统提示、字数配置
-class OutlineSettingPage extends StatefulWidget {
-  const OutlineSettingPage({super.key});
+/// 章节写作设置页面 — 章节专属配置（与大纲生成设置完全独立）
+class ChapterSettingPage extends StatefulWidget {
+  const ChapterSettingPage({super.key});
 
   @override
-  State<OutlineSettingPage> createState() => _OutlineSettingPageState();
+  State<ChapterSettingPage> createState() => _ChapterSettingPageState();
 }
 
-class _OutlineSettingPageState extends State<OutlineSettingPage> {
+class _ChapterSettingPageState extends State<ChapterSettingPage> {
   static const _models = ['deepseek-v4-flash', 'deepseek-v4-pro'];
 
   double _temperature = 0.8;
   int _maxTokens = 4096;
   String _model = 'deepseek-v4-flash';
-  final TextEditingController _systemCtrl = TextEditingController();
   final TextEditingController _chapterSystemCtrl = TextEditingController();
   final TextEditingController _maxTokensCtrl = TextEditingController();
-
-  // 字数配置
-  final TextEditingController _conceptMinCtrl = TextEditingController();
-  final TextEditingController _conceptMaxCtrl = TextEditingController();
-  final TextEditingController _majorEventMinCtrl = TextEditingController();
-  final TextEditingController _majorEventMaxCtrl = TextEditingController();
-  final TextEditingController _minorEventMinCtrl = TextEditingController();
-  final TextEditingController _minorEventMaxCtrl = TextEditingController();
-  final TextEditingController _summaryMaxCtrl = TextEditingController();
+  final TextEditingController _chapterMinCtrl = TextEditingController();
+  final TextEditingController _chapterMaxCtrl = TextEditingController();
 
   bool _loading = true;
   bool _enableThinking = true;
-  bool _enableStoryState = false;
+  bool _enableStoryState = true;
 
   @override
   void initState() {
@@ -41,43 +33,28 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
 
   Future<void> _loadSettings() async {
     try {
-      final row = await OutlineDbHelper().getSettings();
+      final row = await OutlineDbHelper().getChapterSettings();
       if (row != null) {
-        final setting = OutlineSetting.fromMap(row);
+        final setting = ChapterSetting.fromMap(row);
         _temperature = setting.temperature;
         _maxTokens = setting.maxTokens;
         _model = setting.model;
-        _systemCtrl.text = setting.systemPrompt;
         _chapterSystemCtrl.text = setting.chapterSystemPrompt;
         _maxTokensCtrl.text = '${setting.maxTokens}';
-        _conceptMinCtrl.text = '${setting.conceptMinWords}';
-        _conceptMaxCtrl.text = '${setting.conceptMaxWords}';
-        _majorEventMinCtrl.text = '${setting.majorEventMinWords}';
-        _majorEventMaxCtrl.text = '${setting.majorEventMaxWords}';
-        _minorEventMinCtrl.text = '${setting.minorEventMinWords}';
-        _minorEventMaxCtrl.text = '${setting.minorEventMaxWords}';
-        _summaryMaxCtrl.text = '${setting.summaryMaxWords}';
+        _chapterMinCtrl.text = '${setting.chapterMinWords}';
+        _chapterMaxCtrl.text = '${setting.chapterMaxWords}';
         _enableThinking = setting.enableThinking;
         _enableStoryState = setting.enableStoryState;
       }
     } catch (_) {}
-    if (_systemCtrl.text.trim().isEmpty) {
-      _systemCtrl.text = _defaultSystemPrompt();
-    }
     if (_chapterSystemCtrl.text.trim().isEmpty) {
       _chapterSystemCtrl.text = _defaultChapterSystemPrompt();
     }
     if (_maxTokensCtrl.text.isEmpty) {
       _maxTokensCtrl.text = '$_maxTokens';
     }
-    // 字数默认值填充
-    if (_conceptMinCtrl.text.isEmpty) _conceptMinCtrl.text = '30';
-    if (_conceptMaxCtrl.text.isEmpty) _conceptMaxCtrl.text = '50';
-    if (_majorEventMinCtrl.text.isEmpty) _majorEventMinCtrl.text = '50';
-    if (_majorEventMaxCtrl.text.isEmpty) _majorEventMaxCtrl.text = '100';
-    if (_minorEventMinCtrl.text.isEmpty) _minorEventMinCtrl.text = '30';
-    if (_minorEventMaxCtrl.text.isEmpty) _minorEventMaxCtrl.text = '50';
-    if (_summaryMaxCtrl.text.isEmpty) _summaryMaxCtrl.text = '80';
+    if (_chapterMinCtrl.text.isEmpty) _chapterMinCtrl.text = '2000';
+    if (_chapterMaxCtrl.text.isEmpty) _chapterMaxCtrl.text = '3000';
     if (mounted) setState(() => _loading = false);
   }
 
@@ -87,33 +64,30 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
   }
 
   Future<void> _save() async {
-    final setting = OutlineSetting(
+    var minWords = _intVal(_chapterMinCtrl, 2000);
+    var maxWords = _intVal(_chapterMaxCtrl, 3000);
+    if (minWords > maxWords) {
+      final t = minWords;
+      minWords = maxWords;
+      maxWords = t;
+    }
+    final setting = ChapterSetting(
       temperature: _temperature,
       maxTokens: _maxTokens,
       model: _model,
-      systemPrompt: _systemCtrl.text,
       chapterSystemPrompt: _chapterSystemCtrl.text,
-      conceptMinWords: _intVal(_conceptMinCtrl, 30),
-      conceptMaxWords: _intVal(_conceptMaxCtrl, 50),
-      majorEventMinWords: _intVal(_majorEventMinCtrl, 50),
-      majorEventMaxWords: _intVal(_majorEventMaxCtrl, 100),
-      minorEventMinWords: _intVal(_minorEventMinCtrl, 30),
-      minorEventMaxWords: _intVal(_minorEventMaxCtrl, 50),
-      summaryMaxWords: _intVal(_summaryMaxCtrl, 80),
       enableThinking: _enableThinking,
       enableStoryState: _enableStoryState,
+      chapterMinWords: minWords,
+      chapterMaxWords: maxWords,
     );
-    await OutlineDbHelper().saveSettings(setting.toMap());
+    await OutlineDbHelper().saveChapterSettings(setting.toMap());
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('设置已保存'), duration: Duration(seconds: 1)),
       );
       Navigator.of(context).pop();
     }
-  }
-
-  String _defaultSystemPrompt() {
-    return '你是一个专业的小说大纲生成助手，请用纯文本格式输出。';
   }
 
   String _defaultChapterSystemPrompt() {
@@ -204,16 +178,10 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
 
   @override
   void dispose() {
-    _systemCtrl.dispose();
     _chapterSystemCtrl.dispose();
     _maxTokensCtrl.dispose();
-    _conceptMinCtrl.dispose();
-    _conceptMaxCtrl.dispose();
-    _majorEventMinCtrl.dispose();
-    _majorEventMaxCtrl.dispose();
-    _minorEventMinCtrl.dispose();
-    _minorEventMaxCtrl.dispose();
-    _summaryMaxCtrl.dispose();
+    _chapterMinCtrl.dispose();
+    _chapterMaxCtrl.dispose();
     super.dispose();
   }
 
@@ -223,7 +191,7 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
       backgroundColor: Colors.white,
       appBar: AppBar(
         title: const Text(
-          '大纲/章节设置',
+          '章节写作设置',
           style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
         ),
         backgroundColor: Colors.white,
@@ -249,10 +217,10 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
               padding: const EdgeInsets.all(16),
               children: [
                 // ════════════════════════════════════════
-                //  字数配置
+                //  章节字数范围
                 // ════════════════════════════════════════
                 const Text(
-                  '字数配置',
+                  '章节字数',
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
@@ -261,93 +229,14 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '控制生成大纲中各部分内容的字数范围',
+                  '控制每章生成的字数范围，会注入到写作提示词中',
                   style: TextStyle(fontSize: 12, color: Colors.grey[500]),
                 ),
                 const SizedBox(height: 12),
-
-                // 核心概念简介
                 _buildWordRangeRow(
-                  label: '核心概念简介',
-                  minCtrl: _conceptMinCtrl,
-                  maxCtrl: _conceptMaxCtrl,
-                  hint: '30-50字',
-                ),
-                const SizedBox(height: 12),
-
-                // 大事件概述
-                _buildWordRangeRow(
-                  label: '大事件概述',
-                  minCtrl: _majorEventMinCtrl,
-                  maxCtrl: _majorEventMaxCtrl,
-                  hint: '50-100字',
-                ),
-                const SizedBox(height: 12),
-
-                // 小事件概要
-                _buildWordRangeRow(
-                  label: '小事件概要',
-                  minCtrl: _minorEventMinCtrl,
-                  maxCtrl: _minorEventMaxCtrl,
-                  hint: '30-50字',
-                ),
-                const SizedBox(height: 12),
-
-                // 人物成长总结
-                _buildSingleWordRow(
-                  label: '人物成长总结',
-                  ctrl: _summaryMaxCtrl,
-                  hint: '80字内',
-                  suffix: '字以内',
-                ),
-                const SizedBox(height: 24),
-
-                // ════════════════════════════════════════
-                //  大纲生成系统提示
-                // ════════════════════════════════════════
-                const Text(
-                  '大纲生成 · 系统提示',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF333333),
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '一键生成大纲时使用的 AI 指令',
-                  style: TextStyle(fontSize: 12, color: Colors.grey[500]),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _systemCtrl,
-                  maxLines: 4,
-                  decoration: InputDecoration(
-                    hintText: _defaultSystemPrompt(),
-                    hintStyle: const TextStyle(
-                      fontSize: 13,
-                      color: Color(0xFFBBBBBB),
-                      height: 1.5,
-                    ),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: Color(0xFFDDDDDD)),
-                    ),
-                    contentPadding: const EdgeInsets.all(12),
-                    filled: true,
-                    fillColor: const Color(0xFFFAFAFA),
-                    suffixIcon: IconButton(
-                      icon: const Icon(Icons.open_in_full, size: 18),
-                      tooltip: '放大编辑',
-                      color: const Color(0xFF999999),
-                      onPressed: () => _showEnlargeDialog(
-                        targetCtrl: _systemCtrl,
-                        hintText: _defaultSystemPrompt(),
-                        accentColor: const Color(0xFF4D6BFE),
-                      ),
-                    ),
-                  ),
-                  style: const TextStyle(fontSize: 14, height: 1.5),
+                  label: '单章字数',
+                  minCtrl: _chapterMinCtrl,
+                  maxCtrl: _chapterMaxCtrl,
                 ),
                 const SizedBox(height: 24),
 
@@ -432,6 +321,43 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
                       value: _enableStoryState,
                       activeTrackColor: const Color(0xFF4D6BFE),
                       onChanged: (v) => setState(() => _enableStoryState = v),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+
+                // ════════════════════════════════════════
+                //  深度思考开关
+                // ════════════════════════════════════════
+                Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            '深度思考',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF333333),
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '生成前进行深度思考，输出质量更高但耗时更长、消耗更多 token；关闭可显著加快生成速度',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[500],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Switch(
+                      value: _enableThinking,
+                      activeTrackColor: const Color(0xFF4D6BFE),
+                      onChanged: (v) => setState(() => _enableThinking = v),
                     ),
                   ],
                 ),
@@ -556,11 +482,11 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
     );
   }
 
+  /// 最少/最多字数输入行
   Widget _buildWordRangeRow({
     required String label,
     required TextEditingController minCtrl,
     required TextEditingController maxCtrl,
-    required String hint,
   }) {
     return Row(
       children: [
@@ -583,7 +509,7 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
             keyboardType: TextInputType.number,
             textAlign: TextAlign.center,
             decoration: InputDecoration(
-              hintText: '30',
+              hintText: '2000',
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(6),
                 borderSide: const BorderSide(color: Color(0xFFDDDDDD)),
@@ -616,7 +542,7 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
             keyboardType: TextInputType.number,
             textAlign: TextAlign.center,
             decoration: InputDecoration(
-              hintText: '50',
+              hintText: '3000',
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(6),
                 borderSide: const BorderSide(color: Color(0xFFDDDDDD)),
@@ -635,52 +561,6 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
         const Text(
           '字',
           style: TextStyle(fontSize: 12, color: Color(0xFF999999)),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildSingleWordRow({
-    required String label,
-    required TextEditingController ctrl,
-    required String hint,
-    required String suffix,
-  }) {
-    return Row(
-      children: [
-        SizedBox(
-          width: 105,
-          child: Text(
-            label,
-            style: const TextStyle(fontSize: 13, color: Color(0xFF333333)),
-          ),
-        ),
-        SizedBox(
-          width: 56,
-          child: TextField(
-            controller: ctrl,
-            keyboardType: TextInputType.number,
-            textAlign: TextAlign.center,
-            decoration: InputDecoration(
-              hintText: hint,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(6),
-                borderSide: const BorderSide(color: Color(0xFFDDDDDD)),
-              ),
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 4,
-                vertical: 6,
-              ),
-              filled: true,
-              fillColor: const Color(0xFFFAFAFA),
-            ),
-            style: const TextStyle(fontSize: 13),
-          ),
-        ),
-        const SizedBox(width: 4),
-        Text(
-          suffix,
-          style: const TextStyle(fontSize: 12, color: Color(0xFF999999)),
         ),
       ],
     );

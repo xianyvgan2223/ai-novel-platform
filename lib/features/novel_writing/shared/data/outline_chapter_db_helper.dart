@@ -3,7 +3,8 @@ import '../../../../../core/db/database_helper.dart';
 
 /// 大纲章节数据库操作
 class OutlineChapterDbHelper {
-  static final OutlineChapterDbHelper _instance = OutlineChapterDbHelper._internal();
+  static final OutlineChapterDbHelper _instance =
+      OutlineChapterDbHelper._internal();
   factory OutlineChapterDbHelper() => _instance;
   OutlineChapterDbHelper._internal();
 
@@ -42,14 +43,16 @@ class OutlineChapterDbHelper {
     return results.isNotEmpty ? results.first : null;
   }
 
-  /// 更新章节内容
+  /// 更新章节内容（有内容则视为已完成；清空内容则恢复待生成）。
+  /// 注意：清空内容时必须把 status 改回 pending，否则 DB 重载后
+  /// 会出现「内容已删但状态仍显示已生成」的问题。
   Future<void> updateContent(int id, String content) async {
     final db = await database;
     await db.update(
       'outline_chapters',
       {
         'content': content,
-        'status': 'completed',
+        'status': content.trim().isEmpty ? 'pending' : 'completed',
         'updated_at': DateTime.now().toIso8601String(),
       },
       where: 'id = ?',
@@ -62,17 +65,18 @@ class OutlineChapterDbHelper {
     final db = await database;
     await db.update(
       'outline_chapters',
-      {
-        'status': status,
-        'updated_at': DateTime.now().toIso8601String(),
-      },
+      {'status': status, 'updated_at': DateTime.now().toIso8601String()},
       where: 'id = ?',
       whereArgs: [id],
     );
   }
 
   /// 更新章节标题和大纲概要
-  Future<void> updateSummary(int id, String eventTitle, String eventSummary) async {
+  Future<void> updateSummary(
+    int id,
+    String eventTitle,
+    String eventSummary,
+  ) async {
     final db = await database;
     await db.update(
       'outline_chapters',
@@ -91,10 +95,7 @@ class OutlineChapterDbHelper {
     final db = await database;
     await db.update(
       'outline_chapters',
-      {
-        'ai_summary': aiSummary,
-        'updated_at': DateTime.now().toIso8601String(),
-      },
+      {'ai_summary': aiSummary, 'updated_at': DateTime.now().toIso8601String()},
       where: 'id = ?',
       whereArgs: [id],
     );

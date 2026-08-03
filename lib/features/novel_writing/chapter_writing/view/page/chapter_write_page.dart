@@ -17,11 +17,24 @@ class ChapterWritePage extends StatefulWidget {
 class _ChapterWritePageState extends State<ChapterWritePage> {
   late final ChapterWriteController _controller;
   final _scrollController = ScrollController();
+  final _writeScrollController = ScrollController();
+  bool _showWriteView = false; // 是否处于全屏生成视图
+  bool _selectMode = false; // 是否处于批量删除选择模式
+  final Set<int> _selected = {}; // 批量删除选中的章节 id
+  bool _followOutput = true; // 是否自动跟随流式输出滚到底部（用户上滑阅读时暂停跟随）
+  DateTime? _lastScrollJump; // 自动滚动节流时间戳
 
   @override
   void initState() {
     super.initState();
     _controller = ChapterWriteController(widget.outline);
+    // 用户上滑阅读时暂停自动跟随，避免流式输出不断把视图拉回底部导致卡顿
+    _writeScrollController.addListener(() {
+      final pos = _writeScrollController.position;
+      if (pos.hasContentDimensions) {
+        _followOutput = pos.pixels >= pos.maxScrollExtent - 80;
+      }
+    });
     _controller.initLoad().then((_) {
       if (mounted) setState(() {});
       if (mounted && _controller.needsResync) {
@@ -36,139 +49,577 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
   void dispose() {
     _controller.dispose();
     _scrollController.dispose();
+    _writeScrollController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        title: Text(
-          widget.outline.title.isNotEmpty ? widget.outline.title : '大纲转章节',
-          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-        ),
+    return PopScope(
+      canPop: !_showWriteView && !_selectMode,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        // 系统返回键：全屏生成视图/选择模式下先退出该模式，再按一次才离开页面
+        if (_selectMode) {
+          setState(() {
+            _selectMode = false;
+            _selected.clear();
+          });
+        } else if (_showWriteView) {
+          setState(() => _showWriteView = false);
+        }
+      },
+      child: Scaffold(
         backgroundColor: Colors.white,
-        elevation: 0.5,
-        centerTitle: true,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Color(0xFF333333)),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.menu_book, color: Color(0xFF4D6BFE)),
-            tooltip: '剧情状态账本',
-            onPressed: () {
-              if (widget.outline.id == null) return;
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => StoryStatePage(outlineId: widget.outline.id!),
-                ),
-              );
-            },
+        appBar: AppBar(
+          title: Text(
+            widget.outline.title.isNotEmpty ? widget.outline.title : '大纲转章节',
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
           ),
-          IconButton(
-            icon: const Icon(Icons.settings_outlined, color: Color(0xFF666666)),
-            tooltip: 'AI 设置',
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const OutlineSettingPage()),
-              );
-            },
+          backgroundColor: Colors.white,
+          elevation: 0.5,
+          centerTitle: true,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: Color(0xFF333333)),
+            onPressed: _handleBack,
           ),
-        ],
-      ),
-      body: _controller.isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : Column(
-              children: [
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 10,
-                  ),
-                  color: const Color(0xFFF8F9FF),
-                  child: Text(
-                    _controller.isAllCompleted
-                        ? '✅ 所有事件已完成'
-                        : '${_controller.completedCount}/${_controller.writableCount} 个事件已完成',
-                    style: const TextStyle(
-                      fontSize: 13,
-                      color: Color(0xFF666666),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.menu_book, color: Color(0xFF4D6BFE)),
+              tooltip: '剧情状态账本',
+              onPressed: () {
+                if (widget.outline.id == null) return;
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => StoryStatePage(
+                      outlineId: widget.outline.id!,
+                      controller: _controller,
                     ),
                   ),
-                ),
-                Expanded(
-                  child: ListView.builder(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.all(16),
-                    itemCount: _controller.chapters.length,
-                    itemBuilder: (context, index) {
-                      final ch = _controller.chapters[index];
-                      return _ChapterTile(
-                        chapter: ch,
-                        locked: !_controller.isWritable(ch),
-                        isWriting: _controller.writingId == ch.id,
-                        writingContent: _controller.writingId == ch.id
-                            ? _controller.writingText
-                            : '',
-                        onWrite: () => _controller.startWrite(
-                          context,
-                          ch,
-                          () => setState(() {}),
-                        ),
-                        onView: () => _showContentDialog(ch),
-                        onEdit: (c) => _openEditPage(c),
-                        onEditOutline: (c) => _showEditOutlineDialog(c),
-                        onDelete: () async {
-                          await _controller.resetChapter(ch);
-                          setState(() {});
-                        },
-                      );
-                    },
-                  ),
-                ),
-              ],
+                );
+              },
             ),
+            IconButton(
+              icon: const Icon(
+                Icons.settings_outlined,
+                color: Color(0xFF666666),
+              ),
+              tooltip: 'AI 设置',
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const ChapterSettingPage()),
+                );
+              },
+            ),
+            if (_selectMode)
+              IconButton(
+                icon: const Icon(Icons.close, color: Color(0xFF666666)),
+                tooltip: '取消选择',
+                onPressed: () => setState(() {
+                  _selectMode = false;
+                  _selected.clear();
+                }),
+              )
+            else
+              IconButton(
+                icon: const Icon(
+                  Icons.delete_sweep_outlined,
+                  color: Color(0xFF666666),
+                ),
+                tooltip: '批量删除已生成内容',
+                onPressed: (_controller.isWriting || _showWriteView)
+                    ? null
+                    : () => setState(() => _selectMode = true),
+              ),
+          ],
+        ),
+        bottomNavigationBar: _selectMode && !_showWriteView
+            ? _buildSelectBar()
+            : null,
+        body: _controller.isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : _showWriteView
+            ? _buildWriteView()
+            : Column(
+                children: [
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 10,
+                    ),
+                    color: const Color(0xFFF8F9FF),
+                    child: Text(
+                      _controller.isAllCompleted
+                          ? '✅ 所有事件已完成'
+                          : '${_controller.completedCount}/${_controller.writableCount} 个事件已完成',
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: Color(0xFF666666),
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: ListView.builder(
+                      controller: _scrollController,
+                      padding: const EdgeInsets.all(16),
+                      itemCount: _controller.chapters.length,
+                      itemBuilder: (context, index) {
+                        final ch = _controller.chapters[index];
+                        return _ChapterTile(
+                          chapter: ch,
+                          locked: !_controller.isWritable(ch),
+                          isWriting: _controller.writingId == ch.id,
+                          writingContent: _controller.writingId == ch.id
+                              ? _controller.writingText
+                              : '',
+                          selectMode: _selectMode,
+                          selected: _selected.contains(ch.id),
+                          onToggleSelect: () => _toggleSelect(ch),
+                          onWrite: () => _startWrite(ch),
+                          onView: () => _openViewPage(ch),
+                          onEdit: (c) => _openEditPage(c),
+                          onEditOutline: (c) => _showEditOutlineDialog(c),
+                          onOpenWriteView: () =>
+                              setState(() => _showWriteView = true),
+                          onDelete: () async {
+                            await _controller.resetChapter(ch);
+                            setState(() {});
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
 
-      floatingActionButton: _controller.isWriting
-          ? FloatingActionButton.extended(
-              onPressed: () => _controller.stopWrite(),
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
-              icon: const Icon(Icons.stop, size: 18),
-              label: const Text('停止生成'),
-            )
-          : null,
+        floatingActionButton: _controller.isWriting
+            ? FloatingActionButton.extended(
+                onPressed: () => _controller.stopWrite(),
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+                icon: const Icon(Icons.stop, size: 18),
+                label: const Text('停止生成'),
+              )
+            : null,
+      ),
     );
   }
 
-  void _showContentDialog(OutlineChapter ch) {
-    if (ch.content.isEmpty) return;
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(
-          ch.eventTitle,
-          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+  /// 返回逻辑：选择模式/全屏生成视图下先退出当前模式，再按一次才退出页面
+  void _handleBack() {
+    if (_selectMode) {
+      setState(() {
+        _selectMode = false;
+        _selected.clear();
+      });
+      return;
+    }
+    if (_showWriteView) {
+      setState(() => _showWriteView = false);
+      return;
+    }
+    Navigator.of(context).pop();
+  }
+
+  /// 开始写章节：切换到全屏生成视图，流式内容实时展示
+  void _startWrite(OutlineChapter ch) {
+    _followOutput = true;
+    setState(() => _showWriteView = true);
+    _controller.startWrite(context, ch, () {
+      if (!mounted) return;
+      setState(() {});
+      _scrollWriteToBottom();
+    });
+  }
+
+  /// 生成视图自动滚动到底部（流式输出跟随）。
+  /// 节流 + 跟随判定：用户上滑阅读时不打扰；每 150ms 最多滚一次，避免分块流式下卡顿。
+  void _scrollWriteToBottom() {
+    if (!_followOutput) return; // 用户已上滑阅读，停止自动跟随
+    final now = DateTime.now();
+    if (_lastScrollJump != null &&
+        now.difference(_lastScrollJump!) < const Duration(milliseconds: 150)) {
+      return;
+    }
+    _lastScrollJump = now;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_followOutput || !_writeScrollController.hasClients) return;
+      final pos = _writeScrollController.position;
+      if (pos.maxScrollExtent > 0) {
+        _writeScrollController.jumpTo(pos.maxScrollExtent);
+      }
+    });
+  }
+
+  /// 当前正在生成的章节
+  OutlineChapter? _currentWritingChapter() {
+    for (final c in _controller.chapters) {
+      if (c.id == _controller.writingId) return c;
+    }
+    return null;
+  }
+
+  /// 全屏生成视图：状态条 + 完整流式正文（可选中复制、自动滚动）
+  Widget _buildWriteView() {
+    final ch = _currentWritingChapter();
+    final writing = _controller.isWriting;
+    final text = _controller.writingText;
+    final thinking = _controller.thinkingText;
+    final review = _controller.reviewText;
+    final story = _controller.storyStateText;
+    final protagonist = _controller.protagonistText;
+    final protagonistThink = _controller.protagonistThinking;
+    final reviewThink = _controller.reviewThinking;
+    final storyThink = _controller.storyStateThinking;
+    final String status;
+    if (_controller.extractingProtagonist) {
+      status = '正在提炼主角档案...';
+    } else if (_controller.reviewing) {
+      status = 'AI 审查修正中...';
+    } else if (_controller.extractingStory) {
+      status = '正在提炼剧情状态...';
+    } else if (writing) {
+      status = '正在生成：${ch?.eventTitle ?? ''}';
+    } else if (_controller.wasCancelled) {
+      status = '已停止，已保留部分内容';
+    } else {
+      status = text.isEmpty ? '未开始生成' : '生成完成';
+    }
+    return Column(
+      children: [
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          color: const Color(0xFFF8F9FF),
+          child: Row(
+            children: [
+              if (writing ||
+                  _controller.extractingProtagonist ||
+                  _controller.reviewing ||
+                  _controller.extractingStory)
+                const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              else
+                Icon(
+                  _controller.wasCancelled
+                      ? Icons.stop_circle_outlined
+                      : Icons.check_circle,
+                  size: 16,
+                  color: _controller.wasCancelled
+                      ? const Color(0xFFFF9800)
+                      : const Color(0xFF4CAF50),
+                ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  status,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: Color(0xFF666666),
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              TextButton(
+                onPressed: () => setState(() => _showWriteView = false),
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  minimumSize: Size.zero,
+                ),
+                child: const Text(
+                  '回到列表',
+                  style: TextStyle(fontSize: 12, color: Color(0xFF4D6BFE)),
+                ),
+              ),
+            ],
+          ),
         ),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: SingleChildScrollView(
-            child: SelectableText(
-              ch.content,
-              style: const TextStyle(fontSize: 12, height: 1.5),
+        Expanded(
+          child: Scrollbar(
+            controller: _writeScrollController,
+            thumbVisibility: true,
+            // 允许拖动滚动条拇指快速上滑/下拉（移动端默认不可拖动，需显式开启）
+            interactive: true,
+            scrollbarOrientation: ScrollbarOrientation.right,
+            child: SingleChildScrollView(
+              controller: _writeScrollController,
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // ── 主角档案提炼（含思考），位于最上方 ──
+                  if (_controller.extractingProtagonist ||
+                      protagonist.trim().isNotEmpty) ...[
+                    if (protagonistThink.trim().isNotEmpty) ...[
+                      _buildProcessBubble(
+                        icon: Icons.psychology_alt,
+                        title: '主角提炼思考',
+                        content: protagonistThink,
+                        emptyHint: '',
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+                    _buildProcessBubble(
+                      icon: Icons.person_outline,
+                      title: '主角档案提炼',
+                      content: protagonist,
+                      emptyHint: '正在提炼中...',
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  // ── 正文生成思考（仅生成阶段） ──
+                  if (thinking.trim().isNotEmpty) ...[
+                    _buildProcessBubble(
+                      icon: Icons.psychology_alt,
+                      title: '思考过程',
+                      content: thinking,
+                      emptyHint: '',
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  // ── 章节正文（第一次生成内容） ──
+                  SelectableText(
+                    text.isEmpty
+                        ? (writing &&
+                                  thinking.trim().isEmpty &&
+                                  review.trim().isEmpty
+                              ? '正在思考中，请稍候...'
+                              : '（暂无内容）')
+                        : text,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      height: 1.8,
+                      color: Color(0xFF333333),
+                    ),
+                  ),
+                  // ── 审查相关（思考/意见/对比）位于正文下方 ──
+                  if (reviewThink.trim().isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    _buildProcessBubble(
+                      icon: Icons.psychology_alt,
+                      title: '审查思考',
+                      content: reviewThink,
+                      emptyHint: '',
+                    ),
+                  ],
+                  if (_controller.reviewing || review.trim().isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    _buildProcessBubble(
+                      icon: Icons.edit_note,
+                      title: 'AI 审查',
+                      content: review,
+                      emptyHint: '正在审查思考中...',
+                    ),
+                  ],
+                  if (_controller.reviewBefore.trim().isNotEmpty &&
+                      _controller.reviewAfter.trim().isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    _buildProcessBubble(
+                      icon: Icons.difference,
+                      title: '审查对比',
+                      content:
+                          '【修改前】\n${_controller.reviewBefore}\n\n【修改后】\n${_controller.reviewAfter}',
+                      emptyHint: '',
+                    ),
+                  ],
+                  // ── 剧情状态账本（含思考），位于最下方 ──
+                  if (_controller.extractingStory ||
+                      story.trim().isNotEmpty) ...[
+                    if (storyThink.trim().isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      _buildProcessBubble(
+                        icon: Icons.psychology_alt,
+                        title: '账本提炼思考',
+                        content: storyThink,
+                        emptyHint: '',
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                    _buildProcessBubble(
+                      icon: Icons.menu_book,
+                      title: '剧情状态账本',
+                      content: story,
+                      emptyHint: '正在提炼中...',
+                    ),
+                  ],
+                ],
+              ),
             ),
           ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('关闭'),
+      ],
+    );
+  }
+
+  /// 生成过程气泡（思考/审查/账本提炼统一样式）：
+  /// 浅蓝卡片 + 图标 + 标题 + 可选中复制的内容；内容为空时显示占位提示。
+  Widget _buildProcessBubble({
+    required IconData icon,
+    required String title,
+    required String content,
+    required String emptyHint,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF0F4FF),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFD8E2FF)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 14, color: const Color(0xFF4D6BFE)),
+              const SizedBox(width: 4),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF4D6BFE),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          SelectableText(
+            content.trim().isEmpty ? emptyHint : content,
+            style: const TextStyle(
+              fontSize: 12,
+              height: 1.6,
+              color: Color(0xFF666666),
+            ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// 有已生成内容的章节（可作为批量删除的候选）
+  List<OutlineChapter> _deletableChapters() => _controller.chapters
+      .where(
+        (c) =>
+            c.id != null &&
+            c.status == 'completed' &&
+            c.content.trim().isNotEmpty,
+      )
+      .toList();
+
+  void _toggleSelect(OutlineChapter ch) {
+    final id = ch.id;
+    if (id == null) return;
+    setState(() {
+      if (!_selected.remove(id)) _selected.add(id);
+    });
+  }
+
+  /// 批量删除底部操作栏：已选数量 + 全选 + 删除
+  Widget _buildSelectBar() {
+    final deletable = _deletableChapters();
+    final allSelected =
+        deletable.isNotEmpty && _selected.length == deletable.length;
+    return SafeArea(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          border: Border(top: BorderSide(color: Color(0xFFEEEEEE))),
+        ),
+        child: Row(
+          children: [
+            Text(
+              '已选 ${_selected.length} 项',
+              style: const TextStyle(fontSize: 13, color: Color(0xFF666666)),
+            ),
+            const Spacer(),
+            TextButton(
+              onPressed: () => setState(() {
+                if (allSelected) {
+                  _selected.clear();
+                } else {
+                  _selected
+                    ..clear()
+                    ..addAll(deletable.map((c) => c.id!));
+                }
+              }),
+              child: Text(
+                allSelected ? '取消全选' : '全选',
+                style: const TextStyle(fontSize: 13, color: Color(0xFF4D6BFE)),
+              ),
+            ),
+            const SizedBox(width: 8),
+            ElevatedButton(
+              onPressed: _selected.isEmpty ? null : _confirmBatchDelete,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFFF5252),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                visualDensity: VisualDensity.compact,
+                textStyle: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              child: const Text('删除所选'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 确认并批量删除已选章节的已生成内容
+  Future<void> _confirmBatchDelete() async {
+    final count = _selected.length;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('批量删除'),
+        content: Text('确定删除已选 $count 个章节的已生成内容吗？删除后可重新生成。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消', style: TextStyle(color: Color(0xFF999999))),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    final items = _controller.chapters
+        .where((c) => c.id != null && _selected.contains(c.id))
+        .toList();
+    await _controller.resetChapters(items);
+    if (!mounted) return;
+    setState(() {
+      _selectMode = false;
+      _selected.clear();
+    });
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('已删除 ${items.length} 个章节的已生成内容')));
+  }
+
+  /// 打开章节内容查看全屏页面（替代弹窗，便于完整阅读）
+  void _openViewPage(OutlineChapter ch) {
+    if (ch.content.isEmpty) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) =>
+            _ChapterViewPage(chapter: ch, onEdit: () => _openEditPage(ch)),
       ),
     );
   }
@@ -413,6 +864,10 @@ class _ChapterTile extends StatelessWidget {
   final VoidCallback onWrite;
   final VoidCallback onView;
   final VoidCallback onDelete;
+  final VoidCallback onOpenWriteView;
+  final bool selectMode; // 是否处于批量删除选择模式
+  final bool selected; // 当前是否被选中
+  final VoidCallback? onToggleSelect;
   final void Function(OutlineChapter) onEdit;
   final void Function(OutlineChapter) onEditOutline;
 
@@ -426,12 +881,19 @@ class _ChapterTile extends StatelessWidget {
     required this.onDelete,
     required this.onEdit,
     required this.onEditOutline,
+    required this.onOpenWriteView,
+    required this.selectMode,
+    required this.selected,
+    this.onToggleSelect,
   });
 
   @override
   Widget build(BuildContext context) {
     final isMajor = chapter.eventType == 'major';
     final isCompleted = chapter.status == 'completed';
+    // 选择模式下仅已完成且含正文的章节可被勾选
+    final canSelect =
+        selectMode && isCompleted && chapter.content.trim().isNotEmpty;
 
     // 大事件不可写：仅作为阶段标题展示（含概述，可修改大纲）
     if (isMajor) {
@@ -487,218 +949,317 @@ class _ChapterTile extends StatelessWidget {
       );
     }
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: isMajor ? const Color(0xFFF8F9FF) : Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: isCompleted
-              ? const Color(0xFFE0F0E0)
-              : const Color(0xFFE8ECF4),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(
-                isMajor ? Icons.flag : Icons.circle_outlined,
-                size: isMajor ? 20 : 8,
-                color: isCompleted
-                    ? const Color(0xFF4CAF50)
-                    : (isMajor
-                          ? const Color(0xFF4D6BFE)
-                          : const Color(0xFF999999)),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  chapter.eventTitle,
-                  style: TextStyle(
-                    fontSize: isMajor ? 15 : 13,
-                    fontWeight: isMajor ? FontWeight.w600 : FontWeight.w500,
-                    color: const Color(0xFF333333),
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              if (isWriting)
-                const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              else if (isCompleted)
-                const Icon(
-                  Icons.check_circle,
-                  size: 20,
-                  color: Color(0xFF4CAF50),
-                )
-              else
-                SizedBox(
-                  height: 28,
-                  child: ElevatedButton(
-                    onPressed: locked ? null : onWrite,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: locked
-                          ? const Color(0xFFE8ECF4)
-                          : const Color(0xFF4D6BFE),
-                      foregroundColor: locked
-                          ? const Color(0xFF999999)
-                          : Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      textStyle: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    child: const Text('写'),
-                  ),
-                ),
-            ],
+    return GestureDetector(
+      onTap: canSelect ? onToggleSelect : null,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: isMajor ? const Color(0xFFF8F9FF) : Colors.white,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: isCompleted
+                ? const Color(0xFFE0F0E0)
+                : const Color(0xFFE8ECF4),
           ),
-          if (chapter.eventSummary.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            Text(
-              chapter.eventSummary,
-              style: const TextStyle(
-                fontSize: 11,
-                height: 1.4,
-                color: Color(0xFF999999),
-              ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ] else ...[
-            const SizedBox(height: 6),
-            Text(
-              '暂无概要',
-              style: TextStyle(
-                fontSize: 11,
-                height: 1.4,
-                color: Colors.grey[300],
-              ),
-            ),
-          ],
-          if (locked && !isCompleted && !isWriting) ...[
-            const SizedBox(height: 6),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
             Row(
               children: [
-                const Icon(
-                  Icons.lock_outline,
-                  size: 12,
-                  color: Color(0xFFBBBBBB),
+                if (selectMode) ...[
+                  Checkbox(
+                    value: selected,
+                    onChanged: canSelect ? (_) => onToggleSelect?.call() : null,
+                    activeColor: const Color(0xFF4D6BFE),
+                    visualDensity: VisualDensity.compact,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  const SizedBox(width: 4),
+                ],
+                Icon(
+                  isMajor ? Icons.flag : Icons.circle_outlined,
+                  size: isMajor ? 20 : 8,
+                  color: isCompleted
+                      ? const Color(0xFF4CAF50)
+                      : (isMajor
+                            ? const Color(0xFF4D6BFE)
+                            : const Color(0xFF999999)),
                 ),
-                const SizedBox(width: 4),
-                Text(
-                  '需先完成前面的章节才能生成',
-                  style: TextStyle(fontSize: 11, color: Color(0xFFBBBBBB)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    chapter.eventTitle,
+                    style: TextStyle(
+                      fontSize: isMajor ? 15 : 13,
+                      fontWeight: isMajor ? FontWeight.w600 : FontWeight.w500,
+                      color: const Color(0xFF333333),
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
+                if (selectMode)
+                  const SizedBox.shrink()
+                else if (isWriting)
+                  const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                else if (isCompleted)
+                  const Icon(
+                    Icons.check_circle,
+                    size: 20,
+                    color: Color(0xFF4CAF50),
+                  )
+                else
+                  SizedBox(
+                    height: 28,
+                    child: ElevatedButton(
+                      onPressed: locked ? null : onWrite,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: locked
+                            ? const Color(0xFFE8ECF4)
+                            : const Color(0xFF4D6BFE),
+                        foregroundColor: locked
+                            ? const Color(0xFF999999)
+                            : Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        textStyle: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      child: const Text('写'),
+                    ),
+                  ),
               ],
             ),
-          ],
-          if (isCompleted && !isWriting) ...[
-            const SizedBox(height: 6),
-            Row(
-              children: [
-                GestureDetector(
-                  onTap: onView,
-                  child: const Text(
-                    '查看内容',
-                    style: TextStyle(fontSize: 11, color: Color(0xFF4D6BFE)),
-                  ),
+            if (chapter.eventSummary.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(
+                chapter.eventSummary,
+                style: const TextStyle(
+                  fontSize: 11,
+                  height: 1.4,
+                  color: Color(0xFF999999),
                 ),
-                const SizedBox(width: 12),
-                GestureDetector(
-                  onTap: () => onEdit(chapter),
-                  child: const Text(
-                    '编辑',
-                    style: TextStyle(fontSize: 11, color: Color(0xFF7C4DFF)),
-                  ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ] else ...[
+              const SizedBox(height: 6),
+              Text(
+                '暂无概要',
+                style: TextStyle(
+                  fontSize: 11,
+                  height: 1.4,
+                  color: Colors.grey[300],
                 ),
-                const SizedBox(width: 12),
-                GestureDetector(
-                  onTap: () => onEditOutline(chapter),
-                  child: const Text(
+              ),
+            ],
+            if (locked && !isCompleted && !isWriting && !selectMode) ...[
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  const Icon(
+                    Icons.lock_outline,
+                    size: 12,
+                    color: Color(0xFFBBBBBB),
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    '需先完成前面的章节才能生成',
+                    style: TextStyle(fontSize: 11, color: Color(0xFFBBBBBB)),
+                  ),
+                ],
+              ),
+            ],
+            if (isCompleted && !isWriting && !selectMode) ...[
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  GestureDetector(
+                    onTap: onView,
+                    child: const Text(
+                      '查看内容',
+                      style: TextStyle(fontSize: 11, color: Color(0xFF4D6BFE)),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  GestureDetector(
+                    onTap: () => onEdit(chapter),
+                    child: const Text(
+                      '编辑',
+                      style: TextStyle(fontSize: 11, color: Color(0xFF7C4DFF)),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  GestureDetector(
+                    onTap: () => onEditOutline(chapter),
+                    child: const Text(
+                      '修改大纲',
+                      style: TextStyle(fontSize: 11, color: Color(0xFF4D6BFE)),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  GestureDetector(
+                    onTap: () {
+                      showDialog(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          title: const Text('确认删除'),
+                          content: const Text('确定要删除已生成的内容吗？'),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.of(ctx).pop(),
+                              child: const Text('取消'),
+                            ),
+                            TextButton(
+                              onPressed: () {
+                                Navigator.of(ctx).pop();
+                                onDelete();
+                              },
+                              style: TextButton.styleFrom(
+                                foregroundColor: Colors.red,
+                              ),
+                              child: const Text('删除'),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                    child: const Text(
+                      '重新生成',
+                      style: TextStyle(fontSize: 11, color: Color(0xFFFF5722)),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+            if (!isCompleted && !isWriting && !selectMode)
+              GestureDetector(
+                onTap: () => onEditOutline(chapter),
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
                     '修改大纲',
                     style: TextStyle(fontSize: 11, color: Color(0xFF4D6BFE)),
                   ),
                 ),
-                const SizedBox(width: 12),
-                GestureDetector(
-                  onTap: () {
-                    showDialog(
-                      context: context,
-                      builder: (ctx) => AlertDialog(
-                        title: const Text('确认删除'),
-                        content: const Text('确定要删除已生成的内容吗？'),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.of(ctx).pop(),
-                            child: const Text('取消'),
-                          ),
-                          TextButton(
-                            onPressed: () {
-                              Navigator.of(ctx).pop();
-                              onDelete();
-                            },
-                            style: TextButton.styleFrom(
-                              foregroundColor: Colors.red,
-                            ),
-                            child: const Text('删除'),
-                          ),
-                        ],
+              ),
+            if (isWriting && writingContent.isEmpty) ...[
+              // 思考阶段无正文，仍提供进入全屏生成视图的入口
+              const SizedBox(height: 6),
+              GestureDetector(
+                onTap: onOpenWriteView,
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF0F4FF),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Row(
+                    children: [
+                      const SizedBox(
+                        width: 12,
+                        height: 12,
+                        child: CircularProgressIndicator(strokeWidth: 2),
                       ),
-                    );
-                  },
-                  child: const Text(
-                    '重新生成',
-                    style: TextStyle(fontSize: 11, color: Color(0xFFFF5722)),
+                      const SizedBox(width: 8),
+                      Text(
+                        '正在思考中，点击查看生成进度',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Color(0xFF666666),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ],
-            ),
-          ],
-          if (!isCompleted && !isWriting)
-            GestureDetector(
-              onTap: () => onEditOutline(chapter),
-              child: Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Text(
-                  '修改大纲',
-                  style: TextStyle(fontSize: 11, color: Color(0xFF4D6BFE)),
+              ),
+            ],
+            if (isWriting && writingContent.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              GestureDetector(
+                onTap: onOpenWriteView,
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF5F5F5),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    writingContent,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      height: 1.4,
+                      color: Color(0xFF666666),
+                    ),
+                    maxLines: 5,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
               ),
-            ),
-          if (isWriting && writingContent.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF5F5F5),
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: Text(
-                writingContent,
-                style: const TextStyle(
-                  fontSize: 11,
-                  height: 1.4,
-                  color: Color(0xFF666666),
-                ),
-                maxLines: 5,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
+            ],
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 章节内容查看全屏页面（只读，可选中复制；右上角可直接进入编辑）
+class _ChapterViewPage extends StatelessWidget {
+  final OutlineChapter chapter;
+  final VoidCallback? onEdit;
+
+  const _ChapterViewPage({required this.chapter, this.onEdit});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        title: Text(
+          chapter.eventTitle,
+          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+        ),
+        backgroundColor: Colors.white,
+        elevation: 0.5,
+        centerTitle: true,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Color(0xFF333333)),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        actions: [
+          if (onEdit != null)
+            TextButton(
+              onPressed: onEdit,
+              child: const Text(
+                '编辑',
+                style: TextStyle(fontSize: 14, color: Color(0xFF4D6BFE)),
+              ),
+            ),
         ],
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: SelectableText(
+          chapter.content,
+          style: const TextStyle(
+            fontSize: 14,
+            height: 1.8,
+            color: Color(0xFF333333),
+          ),
+        ),
       ),
     );
   }
