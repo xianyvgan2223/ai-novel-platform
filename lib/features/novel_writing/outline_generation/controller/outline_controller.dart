@@ -74,6 +74,7 @@ class OutlineController extends ChangeNotifier {
   int _ledgerBatchCount = 0; // 需抽取账本的批次数
   int _step2SubStepCount = 1; // 步骤 2 子调用数 = 1（粗骨架）+ 精写批次 + 账本批次
   int _refinedBatchCount = 0; // 已完成（精写+账本）的批次数，断点续跑从此继续
+  bool _step2RefinedThisRun = false; // 本次运行是否实际执行过精写批次（检查点触发条件）
   final List<Map<String, dynamic>> _ledgerForeshadows = []; // 伏笔账本：伏笔列表
   final List<String> _ledgerCharacters = []; // 伏笔账本：角色状态
   final List<String> _ledgerUnresolved = []; // 伏笔账本：未解决悬念
@@ -92,6 +93,17 @@ class OutlineController extends ChangeNotifier {
   List<_ExpandChunk> _chunks = [];
   int _flushIndex = 0; // 已按序刷入 rawText 的块数
   int _completedChunkCount = 0; // 已完成的块数（含乱序完成）
+
+  // ─── 检查点（生成暂停审查）状态 ──────────────────────────────
+  bool paused = false; // 是否处于检查点暂停
+  String? checkpointKind; // 当前检查点类型：'skeleton'（粗骨架）| 'events'（大事件）
+  String checkpointText = ''; // 当前检查点的可编辑文本（三幕骨架渲染）
+  String _checkpointOriginalText = ''; // 进入检查点时的原始文本（判断是否编辑过）
+  bool _checkpointEdited = false; // 用户是否编辑过内容（大事件检查点继续后需重提炼账本）
+  Completer<void>? _checkpointResumer; // 暂停等待用户操作
+  _CheckpointAction _checkpointAction = _CheckpointAction.none; // 用户操作意图
+  String? _restoreCheckpointKind; // 断点续跑恢复的检查点类型
+  String? _restoreCheckpointText; // 断点续跑恢复的检查点文本
 
   /// 当前步骤的显示标签
   String get stepLabel =>
@@ -168,6 +180,48 @@ class OutlineController extends ChangeNotifier {
     return m;
   }
 
+  // ─── 检查点用户操作（页面调用） ───────────────────────────────
+
+  /// 用户确认检查点内容并继续：若内容被编辑则解析回填三幕骨架，再放行生成流程。
+  /// 解析失败时设置 [error] 并保持暂停，不推进流程。
+  Future<void> continueCheckpoint(String editedText) async {
+    final kind = checkpointKind;
+    final resumer = _checkpointResumer;
+    if (kind == null || resumer == null || resumer.isCompleted) return;
+    final trimmed = editedText.trim();
+    if (trimmed.isEmpty) {
+      error = '检查点内容不能为空';
+      notifyListeners();
+      return;
+    }
+    if (trimmed != _checkpointOriginalText.trim()) {
+      final parsed = _parseSkeletonText(trimmed);
+      if (parsed == null) {
+        error = '编辑内容无法解析为三幕结构，请保留「══ 第一幕/第二幕/第三幕」幕标题与大事件N：标题 行格式';
+        notifyListeners();
+        return;
+      }
+      _step2Json = parsed;
+      _checkpointEdited = true;
+    }
+    _releaseCheckpoint(_CheckpointAction.none);
+  }
+
+  /// 用户要求重新生成当前检查点对应阶段：
+  /// 粗骨架检查点重跑整个步骤 2；大事件检查点重跑精写批次与伏笔账本。
+  void regenerateCheckpoint() {
+    _releaseCheckpoint(_CheckpointAction.regenerate);
+  }
+
+  /// 结束检查点等待：记录用户操作意图并完成 resumer，让暂停中的生成流程继续
+  void _releaseCheckpoint(_CheckpointAction action) {
+    _checkpointAction = action;
+    final resumer = _checkpointResumer;
+    if (resumer != null && !resumer.isCompleted) {
+      resumer.complete();
+    }
+  }
+
   // ─── 取消 / 部分保存 ─────────────────────────────────────────
 
   Future<void> cancel() async {
@@ -179,6 +233,8 @@ class OutlineController extends ChangeNotifier {
     _activeTokens.clear();
     _cancelToken?.cancel();
     _cancelToken = null;
+    // 若正处于检查点暂停，先释放等待，让生成流程能感知取消并退出
+    _releaseCheckpoint(_CheckpointAction.cancel);
     if (_step1Json != null || _step2Json != null || rawText.isNotEmpty) {
       await _persistProgress();
     }
@@ -268,6 +324,8 @@ class OutlineController extends ChangeNotifier {
     _activeTokens.clear();
     _cancelToken?.cancel();
     _cancelToken = null;
+    // 旧流程若正处于检查点暂停，先释放等待，避免挂起导致新流程无法启动
+    _releaseCheckpoint(_CheckpointAction.cancel);
     try {
       await prev;
     } catch (_) {}
@@ -369,6 +427,41 @@ class OutlineController extends ChangeNotifier {
       // ── 步骤 2：骨架 — 粗骨架规划 + 分批精写 + 伏笔账本 ──
       final ok2 = await _runStep2();
       if (!ok2 || _cancelled || error != null) return;
+
+      // ── 检查点：大事件（可选）—— 精写完成（含账本）后暂停审查 ──
+      // 仅在「本次实际执行过精写」或「续跑恢复的大事件检查点」时触发，避免恢复运行重复暂停
+      if (_restoreCheckpointKind == 'events' ||
+          (_step2RefinedThisRun && _outlineSetting.pauseAfterEvents)) {
+        var isRestore = _restoreCheckpointKind == 'events';
+        _restoreCheckpointKind = null;
+        while (true) {
+          final action = await _checkpointPause(
+            'events',
+            initialText: isRestore ? _restoreCheckpointText : null,
+          );
+          _restoreCheckpointText = null;
+          isRestore = false;
+          if (action == _CheckpointAction.cancel) {
+            await _persistProgress(phase: 3);
+            loading = false;
+            notifyListeners();
+            return;
+          }
+          if (action == _CheckpointAction.regenerate) {
+            final ok = await _runStep2(forceRefine: true);
+            if (!ok || _cancelled || error != null) return;
+            continue; // 重新生成后再次暂停，供用户审查
+          }
+          // 继续：若用户编辑过大事件，重新提炼一次伏笔账本
+          if (_checkpointEdited) {
+            _checkpointEdited = false;
+            final okLedger = await _refreshLedgerFromSkeleton();
+            if (!okLedger || _cancelled || error != null) return;
+          }
+          break;
+        }
+        if (_cancelled || error != null) return;
+      }
 
       // ── 准备步骤 3：构建展开块（按每 5 个大事件拆分） ────
       _buildChunks();
@@ -668,12 +761,139 @@ class OutlineController extends ChangeNotifier {
 
   // ─── 步骤 2：粗骨架规划 + 分批精写 + 伏笔账本 ──────────────────
 
+  /// 进入检查点暂停：设置暂停状态、落盘、等待用户操作（继续/重新生成/取消）。
+  /// 返回用户操作意图；[initialText] 用于续跑恢复时保留暂停前的编辑文本。
+  Future<_CheckpointAction> _checkpointPause(
+    String kind, {
+    String? initialText,
+  }) async {
+    paused = true;
+    checkpointKind = kind;
+    checkpointText = initialText ?? _renderSkeleton();
+    _checkpointOriginalText = checkpointText;
+    _checkpointEdited = false;
+    _liveText = ''; // 清空残留流式内容，避免与检查点卡片同时展示
+    loading = false;
+    notifyListeners();
+    await _persistProgress();
+    _checkpointAction = _CheckpointAction.none;
+    _checkpointResumer = Completer<void>();
+    await _checkpointResumer!.future;
+    paused = false;
+    checkpointKind = null;
+    loading = true;
+    notifyListeners();
+    if (_cancelled) return _CheckpointAction.cancel;
+    return _checkpointAction;
+  }
+
+  /// 把用户编辑后的三幕骨架文本解析回 [_Step2Result]。
+  /// 兼容「══ 第一幕：开端 ══」等幕标题与大事件N：标题 行格式，概要支持多行。
+  _Step2Result? _parseSkeletonText(String text) {
+    final actRe = RegExp(r'^\s*[══=]+\s*(第一幕|第二幕|第三幕)');
+    final eventRe = RegExp(r'^大事件\s*\d+\s*[：:]\s*(.+)$');
+    final acts = <_Act>[];
+    _Act? curAct;
+    String? curTitle;
+    final summaryBuf = StringBuffer();
+    void flushEvent() {
+      if (curAct != null && curTitle != null) {
+        curAct.events.add(
+          _Event(title: curTitle!, summary: summaryBuf.toString().trim()),
+        );
+      }
+      curTitle = null;
+      summaryBuf.clear();
+    }
+
+    for (final raw in text.split('\n')) {
+      final line = raw.trimRight();
+      final actM = actRe.firstMatch(line);
+      if (actM != null) {
+        flushEvent();
+        curAct = _Act(name: actM.group(1)!, events: []);
+        acts.add(curAct);
+        continue;
+      }
+      final evM = eventRe.firstMatch(line.trim());
+      if (evM != null) {
+        flushEvent();
+        curTitle = evM.group(1)!.trim();
+        continue;
+      }
+      if (curTitle != null && line.trim().isNotEmpty) {
+        if (summaryBuf.isNotEmpty) summaryBuf.writeln();
+        summaryBuf.write(line.trim());
+      }
+    }
+    flushEvent();
+    if (acts.length != 3) return null;
+    for (final a in acts) {
+      if (a.events.isEmpty) return null;
+    }
+    return _Step2Result(acts: acts);
+  }
+
+  /// 大事件检查点继续且内容被编辑后，基于编辑后的完整骨架重新提炼一次伏笔账本。
+  Future<bool> _refreshLedgerFromSkeleton() async {
+    currentStep = 2;
+    _liveText = '正在按编辑后的大事件重新提炼伏笔账本...';
+    notifyListeners();
+    final r = await _runStructuredStep<_LedgerResult>(
+      systemPrompt: OutlinePromptTemplate.jsonSystemPrompt,
+      userPrompt: OutlinePromptTemplate.buildLedgerPrompt(
+        batchContent: _renderSkeleton(),
+        prevLedgerText: '（基于编辑后的大事件全新提炼）',
+      ),
+      maxTokens: _outlineSetting.maxTokens,
+      temperature: 0.3,
+      failureMessage: '伏笔账本重新提炼失败',
+      validate: _parseLedger,
+    );
+    if (_cancelled || error != null) return false;
+    if (r != null) {
+      _ledgerForeshadows
+        ..clear()
+        ..addAll(r.foreshadows);
+      _ledgerCharacters
+        ..clear()
+        ..addAll(r.characterStates);
+      _ledgerUnresolved
+        ..clear()
+        ..addAll(r.unresolved);
+    }
+    _liveText = '';
+    notifyListeners();
+    return true;
+  }
+
   /// 执行步骤 2 全部子步骤：粗骨架 → 分批精写 → 批次间抽取伏笔账本。
   ///
   /// 支持断点续跑：粗骨架已存在则跳过；已完成的批次（[_refinedBatchCount]）跳过，
   /// 从未完成批次继续。返回 false 表示取消或出错，调用方应终止流程。
-  Future<bool> _runStep2() async {
+  ///
+  /// [forceSkeleton] 重新生成粗骨架（清空骨架与全部精写/账本后重跑）；
+  /// [forceRefine] 保留骨架，重跑全部精写批次与伏笔账本（大事件检查点「重新生成」用）。
+  Future<bool> _runStep2({
+    bool forceSkeleton = false,
+    bool forceRefine = false,
+  }) async {
+    if (forceSkeleton) {
+      _step2Json = null;
+      _refinedBatchCount = 0;
+      _ledgerForeshadows.clear();
+      _ledgerCharacters.clear();
+      _ledgerUnresolved.clear();
+    }
+    if (forceRefine) {
+      _refinedBatchCount = 0;
+      _ledgerForeshadows.clear();
+      _ledgerCharacters.clear();
+      _ledgerUnresolved.clear();
+    }
+
     // ── 2a：粗骨架规划（全部大事件仅标题+定位，锁定全局轨迹） ──
+    var skeletonGenerated = false; // 本次调用是否实际生成了粗骨架（检查点触发条件）
     if (_step2Json == null) {
       currentStep = 1;
       _liveText = '正在规划三幕粗骨架...';
@@ -702,6 +922,7 @@ class OutlineController extends ChangeNotifier {
         return false;
       }
       _step2Json = r;
+      skeletonGenerated = true;
       final totalEvents = r!.acts.fold<int>(
         0,
         (sum, a) => sum + a.events.length,
@@ -730,6 +951,41 @@ class OutlineController extends ChangeNotifier {
 
     if (_cancelled || error != null) return false;
 
+    // ── 检查点：粗骨架（可选）—— 骨架生成完成后暂停，供编辑/重新生成 ──
+    // 仅在「本次实际生成骨架」或「续跑恢复的骨架检查点」时触发，避免恢复运行重复暂停
+    if (_restoreCheckpointKind == 'skeleton') {
+      final action = await _checkpointPause(
+        'skeleton',
+        initialText: _restoreCheckpointText,
+      );
+      _restoreCheckpointKind = null;
+      _restoreCheckpointText = null;
+      if (action == _CheckpointAction.cancel) {
+        await _persistProgress(phase: 2);
+        loading = false;
+        notifyListeners();
+        return false;
+      }
+      if (action == _CheckpointAction.regenerate) {
+        // 重新生成粗骨架：清空骨架与精写/账本后整体重跑步骤 2（内部会再次暂停供审查）
+        return _runStep2(forceSkeleton: true);
+      }
+    } else if (skeletonGenerated && _outlineSetting.pauseAfterSkeleton) {
+      final action = await _checkpointPause('skeleton');
+      if (action == _CheckpointAction.cancel) {
+        await _persistProgress(phase: 2);
+        loading = false;
+        notifyListeners();
+        return false;
+      }
+      if (action == _CheckpointAction.regenerate) {
+        return _runStep2(forceSkeleton: true);
+      }
+      // continue：若用户编辑过骨架，已通过 continueCheckpoint 回填到 _step2Json
+    }
+
+    if (_cancelled || error != null) return false;
+
     // ── 2b：按幕顺序切批次（每批约总数 1/10，封顶 5 个） ──
     _step2Batches = _buildBatches(_step2Json!.acts);
     _step2BatchCount = _step2Batches.length;
@@ -747,8 +1003,10 @@ class OutlineController extends ChangeNotifier {
 
     // ── 2c：逐批「精写 + 间隔抽取伏笔账本」 ──
     var subStepIndex = 2; // 步骤 2 内部子步骤序号（0/1 为书名概念、粗骨架）
+    _step2RefinedThisRun = false;
     for (int b = _refinedBatchCount; b < totalBatches; b++) {
       if (_cancelled || error != null) break;
+      _step2RefinedThisRun = true;
       final batch = _step2Batches[b];
 
       // 精写本批大事件（粒度由「大事件粒度定义」约束，保证不退化）
@@ -1448,12 +1706,22 @@ class OutlineController extends ChangeNotifier {
     _ledgerBatchCount = 0;
     _step2SubStepCount = 1;
     _refinedBatchCount = 0;
+    _step2RefinedThisRun = false;
     _ledgerForeshadows.clear();
     _ledgerCharacters.clear();
     _ledgerUnresolved.clear();
     _chunks = [];
     _flushIndex = 0;
     _completedChunkCount = 0;
+    paused = false;
+    checkpointKind = null;
+    checkpointText = '';
+    _checkpointOriginalText = '';
+    _checkpointEdited = false;
+    _checkpointResumer = null;
+    _checkpointAction = _CheckpointAction.none;
+    _restoreCheckpointKind = null;
+    _restoreCheckpointText = null;
     notifyListeners();
   }
 
@@ -1497,6 +1765,12 @@ class OutlineController extends ChangeNotifier {
         },
         'completedChunks': _completedChunkCount,
         'rawText': rawText,
+        if (paused && checkpointKind != null)
+          'checkpoint': {
+            'kind': checkpointKind,
+            'text': checkpointText,
+            'originalText': _checkpointOriginalText,
+          },
       };
       await file.writeAsString(jsonEncode(data));
     } catch (_) {}
@@ -1571,6 +1845,21 @@ class OutlineController extends ChangeNotifier {
     if (displayText.isNotEmpty) {
       _bubbles.add(OutlineStepBubble(label: '已生成内容', content: displayText));
     }
+    // 检查点恢复：若上次暂停在粗骨架/大事件检查点，恢复暂停态供用户继续
+    final cp = data['checkpoint'];
+    if (cp is Map<String, dynamic>) {
+      final kind = cp['kind'] as String?;
+      final text = cp['text'] as String? ?? '';
+      if (kind != null && text.trim().isNotEmpty) {
+        _restoreCheckpointKind = kind;
+        _restoreCheckpointText = text;
+        checkpointKind = kind;
+        checkpointText = text;
+        _checkpointOriginalText = cp['originalText'] as String? ?? text;
+        paused = true;
+        loading = false;
+      }
+    }
   }
 }
 
@@ -1582,6 +1871,9 @@ class _StepParseException implements Exception {
   @override
   String toString() => message;
 }
+
+/// 检查点用户操作意图：none 表示继续（沿用当前内容）
+enum _CheckpointAction { none, regenerate, cancel }
 
 /// 单步统计（耗时 + 输出字符估算）
 class _StepStat {

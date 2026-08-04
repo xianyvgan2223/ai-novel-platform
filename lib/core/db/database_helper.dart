@@ -6,7 +6,7 @@ import 'package:path/path.dart' as p;
 
 class DatabaseHelper {
   static const _dbName = 'deepseek.db';
-  static const _dbVersion = 27;
+  static const _dbVersion = 28;
   static Database? _database;
 
   /// 单例入口，全局复用同一个数据库连接
@@ -179,7 +179,9 @@ class DatabaseHelper {
         max_tokens INTEGER NOT NULL DEFAULT 4096,
         model TEXT NOT NULL DEFAULT 'deepseek-v4-flash',
         system_prompt TEXT NOT NULL DEFAULT '',
-        enable_thinking INTEGER NOT NULL DEFAULT 1
+        enable_thinking INTEGER NOT NULL DEFAULT 1,
+        pause_after_skeleton INTEGER NOT NULL DEFAULT 0,
+        pause_after_events INTEGER NOT NULL DEFAULT 0
       )
     ''');
     await db.insert('outline_settings', {
@@ -741,6 +743,21 @@ class DatabaseHelper {
       await db.execute(
         "UPDATE outline_chapters SET status = 'pending' WHERE content IS NULL OR trim(content) = ''",
       );
+    }
+
+    // V27 → V28：outline_settings 新增生成检查点开关（粗骨架/大事件完成后暂停）
+    if (oldVersion < 28) {
+      final cols = await db.rawQuery('PRAGMA table_info(outline_settings)');
+      if (!cols.any((c) => c['name'] == 'pause_after_skeleton')) {
+        await db.execute(
+          'ALTER TABLE outline_settings ADD COLUMN pause_after_skeleton INTEGER NOT NULL DEFAULT 0',
+        );
+      }
+      if (!cols.any((c) => c['name'] == 'pause_after_events')) {
+        await db.execute(
+          'ALTER TABLE outline_settings ADD COLUMN pause_after_events INTEGER NOT NULL DEFAULT 0',
+        );
+      }
     }
   }
 

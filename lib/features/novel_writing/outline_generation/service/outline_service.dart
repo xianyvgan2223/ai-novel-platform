@@ -236,7 +236,7 @@ $laterContent
 === 全局框架（保证与全局设定、其他幕保持一致） ===
 $globalSummary
 
-${previousSection}${laterSection}=== 当前幕已有的大事件框架 ===
+$previousSection$laterSection=== 当前幕已有的大事件框架 ===
 $actContent
 
 请为上述每个大事件展开配套的小事件（共$minorEventCount个小事件每个），严格遵循以下格式：

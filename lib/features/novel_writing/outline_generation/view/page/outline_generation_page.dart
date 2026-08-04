@@ -21,6 +21,8 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
   final _controller = OutlineController();
   final _majorEventCountController = TextEditingController();
   final _minorEventCountController = TextEditingController();
+  final _checkpointCtrl = TextEditingController();
+  String? _lastCheckpointSync; // 已同步到检查点编辑器的文本（避免覆盖用户输入）
   bool _hasDraft = false;
 
   static const _inspirations =
@@ -92,6 +94,7 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
     _controller.dispose();
     _majorEventCountController.dispose();
     _minorEventCountController.dispose();
+    _checkpointCtrl.dispose();
     super.dispose();
   }
 
@@ -104,6 +107,17 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
         ..showSnackBar(
           SnackBar(content: Text(msg), duration: const Duration(seconds: 2)),
         );
+    }
+    // 检查点文本同步：进入/更新检查点时覆盖编辑器，用户输入期间不覆盖
+    final cpText = _controller.checkpointText;
+    if (_controller.checkpointKind != null) {
+      if (cpText != _lastCheckpointSync) {
+        _lastCheckpointSync = cpText;
+        _checkpointCtrl.text = cpText;
+      }
+    } else if (_lastCheckpointSync != null) {
+      _lastCheckpointSync = null;
+      _checkpointCtrl.clear();
     }
   }
 
@@ -217,7 +231,7 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
                 width: double.infinity,
                 height: 44,
                 child: ElevatedButton.icon(
-                  onPressed: c.loading
+                  onPressed: (c.loading || c.paused)
                       ? null
                       : () async {
                           await c.generate();
@@ -407,7 +421,11 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
                     ),
                 ],
               ],
-              if (_hasDraft && !c.loading) ...[
+              if (c.paused && c.checkpointKind != null) ...[
+                const SizedBox(height: 12),
+                _buildCheckpointCard(),
+              ],
+              if (_hasDraft && !c.loading && !c.paused) ...[
                 const SizedBox(height: 12),
                 SizedBox(
                   width: double.infinity,
@@ -638,6 +656,98 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
       filled: true,
       fillColor: Colors.white,
       isDense: true,
+    );
+  }
+
+  /// 检查点暂停卡片：可编辑三幕骨架文本 + 重新生成/继续/取消
+  Widget _buildCheckpointCard() {
+    final c = _controller;
+    final isSkeleton = c.checkpointKind == 'skeleton';
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF8E1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFF0D9A8)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.pause_circle_outline,
+                size: 18,
+                color: Color(0xFFB8860B),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                isSkeleton ? '粗骨架已生成 · 检查点' : '大事件已生成 · 检查点',
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF7A5C00),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '可编辑下方内容或重新生成，确认后手动点击「继续」',
+            style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _checkpointCtrl,
+            maxLines: null,
+            minLines: 6,
+            style: const TextStyle(fontSize: 12, height: 1.5),
+            decoration: InputDecoration(
+              hintText: isSkeleton ? '编辑三幕粗骨架...' : '编辑大事件概述...',
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+              filled: true,
+              fillColor: Colors.white,
+              isDense: true,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: c.regenerateCheckpoint,
+                  icon: const Icon(Icons.refresh, size: 18),
+                  label: const Text('重新生成'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: () => c.continueCheckpoint(_checkpointCtrl.text),
+                  icon: const Icon(Icons.play_arrow, size: 18),
+                  label: const Text('继续'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF4D6BFE),
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Center(
+            child: TextButton.icon(
+              onPressed: _onCancelPressed,
+              icon: const Icon(Icons.stop, size: 16),
+              label: const Text('取消生成', style: TextStyle(fontSize: 13)),
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+            ),
+          ),
+        ],
+      ),
     );
   }
 

@@ -17,6 +17,8 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
   int _maxTokens = 4096;
   String _model = 'deepseek-v4-flash';
   bool _enableThinking = true;
+  bool _pauseAfterSkeleton = false;
+  bool _pauseAfterEvents = false;
   final TextEditingController _systemCtrl = TextEditingController();
   final TextEditingController _maxTokensCtrl = TextEditingController();
 
@@ -37,6 +39,8 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
         _maxTokens = setting.maxTokens;
         _model = setting.model;
         _enableThinking = setting.enableThinking;
+        _pauseAfterSkeleton = setting.pauseAfterSkeleton;
+        _pauseAfterEvents = setting.pauseAfterEvents;
         _systemCtrl.text = setting.systemPrompt;
         _maxTokensCtrl.text = '${setting.maxTokens}';
       }
@@ -61,6 +65,8 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
       maxTokens: _maxTokens,
       model: _model,
       enableThinking: _enableThinking,
+      pauseAfterSkeleton: _pauseAfterSkeleton,
+      pauseAfterEvents: _pauseAfterEvents,
       systemPrompt: _systemCtrl.text,
     );
     await OutlineDbHelper().saveSettings(setting.toMap());
@@ -311,6 +317,47 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
                   value: _enableThinking,
                   activeTrackColor: const Color(0xFF4D6BFE),
                   onChanged: (v) => setState(() => _enableThinking = v),
+                ),
+                const SizedBox(height: 24),
+
+                // ════════════════════════════════════════
+                //  生成检查点
+                // ════════════════════════════════════════
+                const Text(
+                  '生成检查点',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF333333),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '开启后，对应阶段生成完成即暂停，可编辑或重新生成该阶段内容，再手动点击「继续」',
+                  style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('粗骨架检查点', style: TextStyle(fontSize: 14)),
+                  subtitle: const Text(
+                    '三幕粗骨架生成完成后暂停，可编辑/重新生成骨架再继续',
+                    style: TextStyle(fontSize: 12, color: Color(0xFF999999)),
+                  ),
+                  value: _pauseAfterSkeleton,
+                  activeTrackColor: const Color(0xFF4D6BFE),
+                  onChanged: (v) =>
+                      setState(() => _pauseAfterSkeleton = v),
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('大事件检查点', style: TextStyle(fontSize: 14)),
+                  subtitle: const Text(
+                    '大事件精写（含伏笔账本）完成后暂停，可编辑/重新生成大事件再继续',
+                    style: TextStyle(fontSize: 12, color: Color(0xFF999999)),
+                  ),
+                  value: _pauseAfterEvents,
+                  activeTrackColor: const Color(0xFF4D6BFE),
+                  onChanged: (v) => setState(() => _pauseAfterEvents = v),
                 ),
                 const SizedBox(height: 24),
 

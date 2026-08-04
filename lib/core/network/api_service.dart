@@ -6,7 +6,7 @@ import 'dart:async';
 import 'package:dio/dio.dart';
 
 class ApiService {
-  static const _baseUrl = 'https://api.deepseek.com/beta/chat/completions';
+  static const _baseUrl = 'https://api.deepseek.com/chat/completions';
   final Dio _dio;
 
   ApiService()
