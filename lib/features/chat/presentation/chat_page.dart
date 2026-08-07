@@ -15,10 +15,7 @@ import '../../novel_writing/novel_writing_page.dart';
 import 'widgets/message_bubble.dart';
 import '../../game/game_hub_page.dart';
 
-/// ChatController Riverpod Provider
-final chatProvider = ChangeNotifierProvider<ChatController>(
-  (ref) => ChatController(),
-);
+/// ChatController Riverpod Provider 定义见 chat_controller.dart（全局单例）
 
 class ChatPage extends ConsumerStatefulWidget {
   const ChatPage({super.key});
@@ -44,6 +41,12 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   void initState() {
     super.initState();
     _scrollCtrl.addListener(_onScrollChanged);
+    // 进入页面时定位到底部（如从悬浮面板“展开”进入时展示最新消息）
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollCtrl.hasClients) {
+        _scrollCtrl.jumpTo(_scrollCtrl.position.maxScrollExtent);
+      }
+    });
   }
 
   void _onScrollChanged() {
@@ -207,6 +210,13 @@ class _ChatPageState extends ConsumerState<ChatPage> {
           return;
         }
 
+        // 非根路由（如悬浮面板“展开”进入的完整聊天页）：直接返回上一页
+        final isRoot = ModalRoute.of(context)?.isFirst ?? true;
+        if (!isRoot) {
+          Navigator.of(context).pop();
+          return;
+        }
+
         final confirm = await showDialog<bool>(
           context: context,
           barrierDismissible: true,
@@ -251,30 +261,37 @@ class _ChatPageState extends ConsumerState<ChatPage> {
 
   /// 普通模式 AppBar
   PreferredSizeWidget _buildAppBar(String title, bool hasSession) {
+    // 非根路由（悬浮面板展开进入的聊天页）显示返回按钮
+    final isRoot = ModalRoute.of(context)?.isFirst ?? true;
     return AppBar(
       toolbarHeight: 44,
       backgroundColor: Colors.white,
       elevation: 0,
       scrolledUnderElevation: 0,
-      leading: IconButton(
-        icon: const Icon(Icons.menu, color: Color(0xFF333333), size: 20),
-        constraints: BoxConstraints(minWidth: 36, minHeight: 36),
-        onPressed: () async {
-          // 打开历史会话页，回传可能选中会话
-          final result = await Navigator.of(context).push<ChatSession>(
-            MaterialPageRoute(builder: (_) => const HistoryPage()),
-          );
-          if (result != null && mounted) {
-            await ref.read(chatProvider).loadSession(result);
-            // 会话加载后滚动到底部
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (_scrollCtrl.hasClients) {
-                _scrollCtrl.jumpTo(_scrollCtrl.position.maxScrollExtent);
-              }
-            });
-          }
-        },
-      ),
+      leading: isRoot
+          ? IconButton(
+              icon: const Icon(Icons.menu, color: Color(0xFF333333), size: 20),
+              constraints: BoxConstraints(minWidth: 36, minHeight: 36),
+              onPressed: () async {
+                // 打开历史会话页，回传可能选中会话
+                final result = await Navigator.of(context).push<ChatSession>(
+                  MaterialPageRoute(builder: (_) => const HistoryPage()),
+                );
+                if (result != null && mounted) {
+                  await ref.read(chatProvider).loadSession(result);
+                  // 会话加载后滚动到底部
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (_scrollCtrl.hasClients) {
+                      _scrollCtrl.jumpTo(_scrollCtrl.position.maxScrollExtent);
+                    }
+                  });
+                }
+              },
+            )
+          : BackButton(
+              color: const Color(0xFF333333),
+              onPressed: () => Navigator.of(context).pop(),
+            ),
       title: GestureDetector(
         onTap: () {
           // 点击标题打开当前会话的设置页

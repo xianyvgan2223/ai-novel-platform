@@ -4,7 +4,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/chat_session_service.dart';
-import 'chat_page.dart'; // chatProvider
+import '../application/chat_controller.dart'; // chatProvider
 
 class SessionSettingsPage extends ConsumerStatefulWidget {
   const SessionSettingsPage({super.key});

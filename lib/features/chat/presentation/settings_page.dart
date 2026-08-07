@@ -4,8 +4,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../application/setting_controller.dart';
+import '../application/chat_controller.dart'; // chatProvider
 import '../../../core/db/data_manager.dart';
-import 'chat_page.dart'; // chatProvider
 
 /// SettingController Riverpod Provider
 final settingProvider = ChangeNotifierProvider<SettingController>(

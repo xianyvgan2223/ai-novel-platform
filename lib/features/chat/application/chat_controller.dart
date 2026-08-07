@@ -4,6 +4,7 @@
 
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../domain/chat_message.dart';
 import '../domain/chat_session.dart';
 import '../../../core/config/user_setting.dart';
@@ -736,3 +737,8 @@ class ChatController extends ChangeNotifier {
     _settingCache = null;
   }
 }
+
+/// ChatController Riverpod Provider（全局单例，主聊天页与悬浮迷你面板共用）
+final chatProvider = ChangeNotifierProvider<ChatController>(
+  (ref) => ChatController(),
+);

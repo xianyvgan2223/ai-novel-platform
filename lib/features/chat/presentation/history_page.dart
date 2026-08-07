@@ -4,8 +4,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../application/history_controller.dart';
+import '../application/chat_controller.dart'; // chatProvider
 import '../domain/chat_session.dart';
-import 'chat_page.dart'; // chatProvider
 
 /// HistoryController Riverpod Provider
 final historyProvider = ChangeNotifierProvider<HistoryController>(
