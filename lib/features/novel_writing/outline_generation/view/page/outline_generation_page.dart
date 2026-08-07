@@ -659,10 +659,34 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
     );
   }
 
-  /// 检查点暂停卡片：可编辑三幕骨架文本 + 重新生成/继续/取消
+  /// 检查点暂停卡片：可编辑当前阶段内容 + 返回上一步/重新生成/继续/取消
   Widget _buildCheckpointCard() {
     final c = _controller;
-    final isSkeleton = c.checkpointKind == 'skeleton';
+    final kind = c.checkpointKind;
+    final isTitle = kind == 'title';
+    final isSkeleton = kind == 'skeleton';
+    final canBack = !isTitle; // 书名/概念检查点没有上一步
+    final canForward = c.checkpointBackSource != null; // 从返回状态恢复时提供「下一步」反悔
+    final String cardTitle;
+    final String cardDesc;
+    final String fieldHint;
+    if (isTitle) {
+      cardTitle = '书名与核心概念 · 检查点';
+      cardDesc = '可编辑书名与核心概念，确认后手动点击「继续」';
+      fieldHint = '编辑书名与核心概念...';
+    } else if (isSkeleton) {
+      cardTitle = '粗骨架已生成 · 检查点';
+      cardDesc = '可编辑下方内容、返回上一步或重新生成，确认后手动点击「继续」';
+      fieldHint = '编辑三幕粗骨架...';
+    } else if (kind == 'minor') {
+      cardTitle = '小事件已生成 · 检查点';
+      cardDesc = '全部小事件已展开，可编辑全文、返回上一步或重新生成，确认后手动点击「继续」';
+      fieldHint = '编辑全部展开内容...';
+    } else {
+      cardTitle = '大事件已生成 · 检查点';
+      cardDesc = '可编辑下方内容、返回上一步或重新生成，确认后手动点击「继续」';
+      fieldHint = '编辑大事件概述...';
+    }
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(12),
@@ -683,7 +707,7 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
               ),
               const SizedBox(width: 6),
               Text(
-                isSkeleton ? '粗骨架已生成 · 检查点' : '大事件已生成 · 检查点',
+                cardTitle,
                 style: const TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
@@ -694,7 +718,7 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
           ),
           const SizedBox(height: 4),
           Text(
-            '可编辑下方内容或重新生成，确认后手动点击「继续」',
+            cardDesc,
             style: TextStyle(fontSize: 12, color: Colors.grey[600]),
           ),
           const SizedBox(height: 8),
@@ -704,7 +728,7 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
             minLines: 6,
             style: const TextStyle(fontSize: 12, height: 1.5),
             decoration: InputDecoration(
-              hintText: isSkeleton ? '编辑三幕粗骨架...' : '编辑大事件概述...',
+              hintText: fieldHint,
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(8),
               ),
@@ -714,6 +738,32 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
             ),
           ),
           const SizedBox(height: 10),
+          // 导航行：返回上一步 / 下一步（按状态动态显示，仅出现有意义的方向）
+          ...[
+            if (canBack || canForward)
+              Row(
+                children: [
+                  if (canBack)
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: c.backCheckpoint,
+                        icon: const Icon(Icons.arrow_back, size: 18),
+                        label: const Text('返回上一步'),
+                      ),
+                    ),
+                  if (canBack && canForward) const SizedBox(width: 8),
+                  if (canForward)
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: c.forwardCheckpoint,
+                        icon: const Icon(Icons.arrow_forward, size: 18),
+                        label: const Text('下一步'),
+                      ),
+                    ),
+                ],
+              ),
+            if (canBack || canForward) const SizedBox(height: 8),
+          ],
           Row(
             children: [
               Expanded(

@@ -7,6 +7,7 @@ class OutlineSetting {
   final bool enableThinking; // 是否启用深度思考（默认开启）
   final bool pauseAfterSkeleton; // 粗骨架生成完成后暂停检查点，等待手动继续
   final bool pauseAfterEvents; // 大事件精写完成后暂停检查点，等待手动继续
+  final bool pauseAfterMinor; // 小事件（步骤3展开）生成完毕后暂停检查点，等待手动继续
 
   const OutlineSetting({
     this.temperature = 0.8,
@@ -16,6 +17,7 @@ class OutlineSetting {
     this.enableThinking = true,
     this.pauseAfterSkeleton = false,
     this.pauseAfterEvents = false,
+    this.pauseAfterMinor = false,
   });
 
   Map<String, dynamic> toMap() => {
@@ -26,6 +28,7 @@ class OutlineSetting {
     'enable_thinking': enableThinking ? 1 : 0,
     'pause_after_skeleton': pauseAfterSkeleton ? 1 : 0,
     'pause_after_events': pauseAfterEvents ? 1 : 0,
+    'pause_after_minor': pauseAfterMinor ? 1 : 0,
   };
 
   factory OutlineSetting.fromMap(Map<String, dynamic> map) => OutlineSetting(
@@ -39,6 +42,7 @@ class OutlineSetting {
     // 检查点开关默认关闭
     pauseAfterSkeleton: (map['pause_after_skeleton'] as int?) == 1,
     pauseAfterEvents: (map['pause_after_events'] as int?) == 1,
+    pauseAfterMinor: (map['pause_after_minor'] as int?) == 1,
   );
 
   OutlineSetting copyWith({
@@ -49,6 +53,7 @@ class OutlineSetting {
     bool? enableThinking,
     bool? pauseAfterSkeleton,
     bool? pauseAfterEvents,
+    bool? pauseAfterMinor,
   }) => OutlineSetting(
     temperature: temperature ?? this.temperature,
     maxTokens: maxTokens ?? this.maxTokens,
@@ -57,5 +62,6 @@ class OutlineSetting {
     enableThinking: enableThinking ?? this.enableThinking,
     pauseAfterSkeleton: pauseAfterSkeleton ?? this.pauseAfterSkeleton,
     pauseAfterEvents: pauseAfterEvents ?? this.pauseAfterEvents,
+    pauseAfterMinor: pauseAfterMinor ?? this.pauseAfterMinor,
   );
 }

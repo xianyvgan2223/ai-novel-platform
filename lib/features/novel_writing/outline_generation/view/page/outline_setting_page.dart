@@ -19,6 +19,7 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
   bool _enableThinking = true;
   bool _pauseAfterSkeleton = false;
   bool _pauseAfterEvents = false;
+  bool _pauseAfterMinor = false;
   final TextEditingController _systemCtrl = TextEditingController();
   final TextEditingController _maxTokensCtrl = TextEditingController();
 
@@ -41,6 +42,7 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
         _enableThinking = setting.enableThinking;
         _pauseAfterSkeleton = setting.pauseAfterSkeleton;
         _pauseAfterEvents = setting.pauseAfterEvents;
+        _pauseAfterMinor = setting.pauseAfterMinor;
         _systemCtrl.text = setting.systemPrompt;
         _maxTokensCtrl.text = '${setting.maxTokens}';
       }
@@ -67,6 +69,7 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
       enableThinking: _enableThinking,
       pauseAfterSkeleton: _pauseAfterSkeleton,
       pauseAfterEvents: _pauseAfterEvents,
+      pauseAfterMinor: _pauseAfterMinor,
       systemPrompt: _systemCtrl.text,
     );
     await OutlineDbHelper().saveSettings(setting.toMap());
@@ -345,8 +348,7 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
                   ),
                   value: _pauseAfterSkeleton,
                   activeTrackColor: const Color(0xFF4D6BFE),
-                  onChanged: (v) =>
-                      setState(() => _pauseAfterSkeleton = v),
+                  onChanged: (v) => setState(() => _pauseAfterSkeleton = v),
                 ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
@@ -358,6 +360,17 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
                   value: _pauseAfterEvents,
                   activeTrackColor: const Color(0xFF4D6BFE),
                   onChanged: (v) => setState(() => _pauseAfterEvents = v),
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('小事件检查点', style: TextStyle(fontSize: 14)),
+                  subtitle: const Text(
+                    '全部小事件展开完毕后暂停，可编辑全文、返回上一步再继续',
+                    style: TextStyle(fontSize: 12, color: Color(0xFF999999)),
+                  ),
+                  value: _pauseAfterMinor,
+                  activeTrackColor: const Color(0xFF4D6BFE),
+                  onChanged: (v) => setState(() => _pauseAfterMinor = v),
                 ),
                 const SizedBox(height: 24),
 

@@ -6,7 +6,7 @@ import 'package:path/path.dart' as p;
 
 class DatabaseHelper {
   static const _dbName = 'deepseek.db';
-  static const _dbVersion = 28;
+  static const _dbVersion = 29;
   static Database? _database;
 
   /// 单例入口，全局复用同一个数据库连接
@@ -756,6 +756,16 @@ class DatabaseHelper {
       if (!cols.any((c) => c['name'] == 'pause_after_events')) {
         await db.execute(
           'ALTER TABLE outline_settings ADD COLUMN pause_after_events INTEGER NOT NULL DEFAULT 0',
+        );
+      }
+    }
+
+    // V28 → V29：outline_settings 新增小事件检查点开关（步骤3展开完毕后暂停）
+    if (oldVersion < 29) {
+      final cols = await db.rawQuery('PRAGMA table_info(outline_settings)');
+      if (!cols.any((c) => c['name'] == 'pause_after_minor')) {
+        await db.execute(
+          'ALTER TABLE outline_settings ADD COLUMN pause_after_minor INTEGER NOT NULL DEFAULT 0',
         );
       }
     }

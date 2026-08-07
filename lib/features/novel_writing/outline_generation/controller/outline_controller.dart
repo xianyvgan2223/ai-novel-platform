@@ -67,6 +67,8 @@ class OutlineController extends ChangeNotifier {
   String? _step1Text; // 步骤 1 的展示文本（书名+概念）
   _Step1Result? _step1Json;
   _Step2Result? _step2Json;
+  String? _coarseSkeletonSnapshot; // 粗骨架规划阶段的原始渲染文本（精写前的标题+定位），供「大事件返回上一步」展示
+  String _systemPrompt = ''; // 本次运行使用的系统提示词（重新展开步骤3时复用）
 
   // ─── 步骤 2 分批精写状态 ─────────────────────────────────────
   List<_Step2Batch> _step2Batches = []; // 本轮按幕顺序切好的批次
@@ -96,14 +98,18 @@ class OutlineController extends ChangeNotifier {
 
   // ─── 检查点（生成暂停审查）状态 ──────────────────────────────
   bool paused = false; // 是否处于检查点暂停
-  String? checkpointKind; // 当前检查点类型：'skeleton'（粗骨架）| 'events'（大事件）
+  String?
+  checkpointKind; // 当前检查点类型：'skeleton'（粗骨架）| 'events'（大事件）| 'title'（书名/概念）
   String checkpointText = ''; // 当前检查点的可编辑文本（三幕骨架渲染）
+  String? checkpointBackSource; // 当前检查点是从哪个检查点返回来的（null=正常入口，非 null 时页面显示「下一步」）
   String _checkpointOriginalText = ''; // 进入检查点时的原始文本（判断是否编辑过）
   bool _checkpointEdited = false; // 用户是否编辑过内容（大事件检查点继续后需重提炼账本）
   Completer<void>? _checkpointResumer; // 暂停等待用户操作
   _CheckpointAction _checkpointAction = _CheckpointAction.none; // 用户操作意图
   String? _restoreCheckpointKind; // 断点续跑恢复的检查点类型
   String? _restoreCheckpointText; // 断点续跑恢复的检查点文本
+  bool _restoreCheckpointFromMinor = false; // 恢复的大事件检查点是否来自小事件返回链
+  Map<String, dynamic>? _lastSavedCheckpoint; // 最近一次暂停保存的检查点（取消后沿用，避免覆盖丢失）
 
   /// 当前步骤的显示标签
   String get stepLabel =>
@@ -195,22 +201,275 @@ class OutlineController extends ChangeNotifier {
       return;
     }
     if (trimmed != _checkpointOriginalText.trim()) {
-      final parsed = _parseSkeletonText(trimmed);
-      if (parsed == null) {
-        error = '编辑内容无法解析为三幕结构，请保留「══ 第一幕/第二幕/第三幕」幕标题与大事件N：标题 行格式';
-        notifyListeners();
-        return;
+      if (kind == 'minor') {
+        // 小事件检查点：编辑的是最终全文（rawText）
+        rawText = trimmed;
+        _checkpointEdited = true;
+      } else if (kind == 'title') {
+        // 书名与核心概念检查点：首行为「书名：《xxx》」，其余为核心概念简介
+        final parsed = _parseTitleText(trimmed);
+        if (parsed == null) {
+          error = '编辑内容无法解析，请保留「书名：《xxx》」首行与核心概念简介';
+          notifyListeners();
+          return;
+        }
+        _step1Json = parsed;
+        _step1Text = trimmed;
+        _stepPreview = _step1Text!;
+        title = parsed.title;
+        _upsertBubble('书名与核心概念', _step1Text!);
+        _checkpointEdited = true;
+      } else {
+        final parsed = _parseSkeletonText(trimmed);
+        if (parsed == null) {
+          error = '编辑内容无法解析为三幕结构，请保留「══ 第一幕/第二幕/第三幕」幕标题与大事件N：标题 行格式';
+          notifyListeners();
+          return;
+        }
+        _step2Json = parsed;
+        _stepPreview = '${_step1Text ?? ''}\n\n${_renderSkeleton()}';
+        _coarseSkeletonSnapshot = _renderSkeleton(); // 编辑后快照同步，返回上一步时展示最新粗骨
+        _upsertBubble('三幕粗骨架', _renderSkeleton());
+        _checkpointEdited = true;
       }
-      _step2Json = parsed;
-      _checkpointEdited = true;
     }
     _releaseCheckpoint(_CheckpointAction.none);
+  }
+
+  /// 解析用户编辑后的书名/核心概念文本（检查点「返回上一步」编辑用）
+  _Step1Result? _parseTitleText(String text) {
+    final lines = text
+        .trim()
+        .split('\n')
+        .map((l) => l.trim())
+        .where((l) => l.isNotEmpty)
+        .toList();
+    if (lines.isEmpty) return null;
+    final m = RegExp(
+      r'^书名\s*[：:]\s*(?:《([^》]+)》|(.+))$',
+    ).firstMatch(lines.first);
+    final t = (m?.group(1) ?? m?.group(2) ?? '').trim();
+    final concept = lines.skip(1).join('\n').trim();
+    if (t.isEmpty || concept.isEmpty) return null;
+    return _Step1Result(title: t, concept: concept);
+  }
+
+  /// 更新（或新增）指定标签的气泡内容：检查点编辑/重新生成后原位刷新展示
+  void _upsertBubble(String label, String content) {
+    for (final b in _bubbles) {
+      if (b.label == label) {
+        b.content = content;
+        return;
+      }
+    }
+    _bubbles.add(OutlineStepBubble(label: label, content: content));
   }
 
   /// 用户要求重新生成当前检查点对应阶段：
   /// 粗骨架检查点重跑整个步骤 2；大事件检查点重跑精写批次与伏笔账本。
   void regenerateCheckpoint() {
     _releaseCheckpoint(_CheckpointAction.regenerate);
+  }
+
+  /// 用户要求返回上一步（检查点回退）：
+  /// 大事件检查点回到粗骨架检查点；粗骨架检查点回到书名与核心概念检查点。
+  void backCheckpoint() {
+    _releaseCheckpoint(_CheckpointAction.back);
+  }
+
+  /// 用户要求下一步（反悔返回）：回到返回上一步之前的检查点。
+  /// 书名/概念检查点回到粗骨架检查点；粗骨架检查点回到大事件检查点。
+  void forwardCheckpoint() {
+    _releaseCheckpoint(_CheckpointAction.forward);
+  }
+
+  /// 「书名与核心概念」检查点循环：编辑或重新生成，供用户审查后继续。
+  /// 返回 null 表示取消或出错（调用方终止流程）；
+  /// 其余见 [_TitleBackResult]。
+  Future<_TitleBackResult?> _runTitleCheckpointBack() async {
+    var changed = false;
+    while (true) {
+      // 每轮都取最新的 _step1Text，重新生成后展示新内容
+      final action = await _checkpointPause(
+        'title',
+        initialText: _step1Text,
+        backSource: 'skeleton',
+      );
+      if (action == _CheckpointAction.cancel) {
+        await _persistProgress(phase: 2);
+        loading = false;
+        notifyListeners();
+        return null;
+      }
+      if (action == _CheckpointAction.forward) {
+        return _TitleBackResult.forward; // 下一步：回到骨架检查点
+      }
+      if (action == _CheckpointAction.regenerate) {
+        final ok1 = await _regenerateStep1();
+        if (!ok1 || _cancelled || error != null) return null;
+        changed = true;
+        continue; // 重新生成后再次暂停供审查
+      }
+      // 继续：若用户编辑过，已通过 continueCheckpoint 回填 _step1Json
+      if (_checkpointEdited) changed = true;
+      break;
+    }
+    return changed ? _TitleBackResult.changed : _TitleBackResult.unchanged;
+  }
+
+  /// 大事件检查点循环（含返回上一步 → 粗骨架 → 书名/概念 的整条回退链）。
+  ///
+  /// [fromMinor] 表示是否从小事件检查点返回而来：为 true 时，
+  /// 「继续/下一步」回到小事件检查点（调用方据此决定是否重展步骤3）；
+  /// 为 false 时（正常流程）「继续」进入步骤3。
+  ///
+  /// 返回 null 表示取消或出错（调用方终止流程）；
+  /// true 表示期间发生过大事件/骨架/书名的改动（需要重新展开小事件）；
+  /// false 表示无改动。
+  Future<bool?> _runEventsCheckpoint({required bool fromMinor}) async {
+    var rerunNeeded = false; // 是否发生改动，需要重新展开步骤3（小事件）
+    var isRestore = _restoreCheckpointKind == 'events';
+    _restoreCheckpointKind = null;
+    _restoreCheckpointFromMinor = false;
+    while (true) {
+      final action = await _checkpointPause(
+        'events',
+        initialText: isRestore ? _restoreCheckpointText : null,
+        backSource: fromMinor ? 'minor' : null,
+      );
+      _restoreCheckpointText = null;
+      isRestore = false;
+      if (action == _CheckpointAction.cancel) {
+        await _persistProgress(phase: 3);
+        loading = false;
+        notifyListeners();
+        return null;
+      }
+      if (action == _CheckpointAction.regenerate) {
+        final ok = await _runStep2(forceRefine: true);
+        if (!ok || _cancelled || error != null) return null;
+        rerunNeeded = true;
+        continue; // 重新生成后再次暂停，供用户审查
+      }
+      if (action == _CheckpointAction.forward) {
+        // 下一步：反悔返回小事件检查点（仅 fromMinor 时有意义）
+        if (fromMinor) return rerunNeeded;
+        break; // 防御：正常流程无「下一步」，等同继续
+      }
+      if (action == _CheckpointAction.back) {
+        // 返回上一步：回到粗骨架检查点，可编辑骨架后重新精写
+        var needRefine = false;
+        var skeletonReRan = false;
+        while (true) {
+          final skAction = await _checkpointPause(
+            'skeleton',
+            initialText: _coarseSkeletonSnapshot ?? _renderSkeleton(),
+            backSource: 'events',
+          );
+          if (skAction == _CheckpointAction.cancel) {
+            await _persistProgress(phase: 3);
+            loading = false;
+            notifyListeners();
+            return null;
+          }
+          if (skAction == _CheckpointAction.forward) {
+            // 下一步：反悔返回大事件检查点（内容未动），由外层重新暂停
+            break;
+          }
+          if (skAction == _CheckpointAction.back) {
+            // 再返回一步：书名与核心概念
+            final tRes = await _runTitleCheckpointBack();
+            if (tRes == null || _cancelled || error != null) return null;
+            if (tRes == _TitleBackResult.forward) {
+              continue; // title 点了「下一步」：重新暂停骨架检查点
+            }
+            if (tRes == _TitleBackResult.changed) {
+              final ok = await _runStep2(forceSkeleton: true);
+              if (!ok || _cancelled || error != null) return null;
+              skeletonReRan = true;
+            }
+            break;
+          }
+          if (skAction == _CheckpointAction.regenerate) {
+            final ok = await _runStep2(forceSkeleton: true);
+            if (!ok || _cancelled || error != null) return null;
+            skeletonReRan = true;
+            break;
+          }
+          // 继续：仅当骨架被编辑过才需要重新精写
+          if (_checkpointEdited) needRefine = true;
+          break;
+        }
+        if (!skeletonReRan && needRefine) {
+          final ok = await _runStep2(forceRefine: true);
+          if (!ok || _cancelled || error != null) return null;
+        }
+        if (skeletonReRan || needRefine) rerunNeeded = true;
+        continue; // 回到大事件检查点，供用户审查
+      }
+      // 继续：若用户编辑过大事件，重新提炼一次伏笔账本
+      if (_checkpointEdited) {
+        _checkpointEdited = false;
+        final okLedger = await _refreshLedgerFromSkeleton();
+        if (!okLedger || _cancelled || error != null) return null;
+        rerunNeeded = true;
+      }
+      break;
+    }
+    return rerunNeeded;
+  }
+
+  /// 重新生成书名与核心概念（步骤 1）。成功返回 true；取消/出错返回 false。
+  Future<bool> _regenerateStep1() async {
+    currentStep = 0;
+    _liveText = '正在重新生成书名和核心概念...';
+    notifyListeners();
+    final t0 = DateTime.now();
+    final r = await _runStructuredStep<_Step1Result>(
+      systemPrompt: OutlinePromptTemplate.jsonSystemPrompt,
+      userPrompt: OutlinePromptTemplate.buildStep1Prompt(
+        genre: genreController.text,
+        theme: themeController.text,
+        protagonist: protagonistController.text,
+        worldview: worldViewController.text,
+      ),
+      maxTokens: _outlineSetting.maxTokens,
+      temperature: 0.3,
+      failureMessage: '书名和核心概念生成失败：模型输出无法解析',
+      validate: (map) {
+        final t = map['title'];
+        final c = map['concept'];
+        if (t is String &&
+            t.trim().isNotEmpty &&
+            c is String &&
+            c.trim().isNotEmpty) {
+          return _Step1Result(title: t.trim(), concept: c.trim());
+        }
+        return null;
+      },
+    );
+    if (_cancelled || error != null || r == null) {
+      await _persistProgress(phase: 1);
+      loading = false;
+      notifyListeners();
+      return false;
+    }
+    _step1Json = r;
+    _step1Text = '书名：《${r.title}》\n\n${r.concept}';
+    _stepPreview = _step1Text!;
+    _liveText = '';
+    _upsertBubble('书名与核心概念', _step1Text!);
+    title = r.title;
+    _stepStats.add(
+      _StepStat(
+        '生成书名和核心概念',
+        DateTime.now().difference(t0).inSeconds,
+        r.concept.length,
+      ),
+    );
+    await _persistProgress(phase: 2);
+    notifyListeners();
+    return true;
   }
 
   /// 结束检查点等待：记录用户操作意图并完成 resumer，让暂停中的生成流程继续
@@ -369,98 +628,57 @@ class OutlineController extends ChangeNotifier {
       final systemPrompt = OutlinePromptTemplate.buildSystemPrompt(
         settings.outlineSetting.systemPrompt,
       );
+      _systemPrompt = systemPrompt;
 
       // ── 步骤 1：定调 — 书名 + 核心概念（JSON） ──────────
       if (_step1Json == null) {
-        currentStep = 0;
-        _liveText = '正在生成书名和核心概念...';
-        notifyListeners();
-        final t0 = DateTime.now();
-        final r = await _runStructuredStep<_Step1Result>(
-          systemPrompt: OutlinePromptTemplate.jsonSystemPrompt,
-          userPrompt: OutlinePromptTemplate.buildStep1Prompt(
-            genre: genreController.text,
-            theme: themeController.text,
-            protagonist: protagonistController.text,
-            worldview: worldViewController.text,
-          ),
-          maxTokens: _outlineSetting.maxTokens,
-          temperature: 0.3,
-          failureMessage: '书名和核心概念生成失败：模型输出无法解析',
-          validate: (map) {
-            final t = map['title'];
-            final c = map['concept'];
-            if (t is String &&
-                t.trim().isNotEmpty &&
-                c is String &&
-                c.trim().isNotEmpty) {
-              return _Step1Result(title: t.trim(), concept: c.trim());
-            }
-            return null;
-          },
-        );
-        if (_cancelled || error != null) {
-          await _persistProgress(phase: 1);
-          loading = false;
-          notifyListeners();
-          return;
+        final ok1 = await _regenerateStep1();
+        if (!ok1) return;
+      }
+
+      if (_cancelled || error != null) return;
+
+      // ── 检查点恢复：书名与核心概念（可选）──
+      // 断点续跑时若暂停在「返回上一步」的书名检查点，恢复暂停供用户继续
+      var step2Done = false;
+      if (_restoreCheckpointKind == 'title') {
+        final changed = await _runTitleCheckpointBack();
+        _restoreCheckpointKind = null;
+        _restoreCheckpointText = null;
+        if (changed == null || _cancelled || error != null) return;
+        if (changed == _TitleBackResult.changed) {
+          // 书名/概念有变更：整体重跑步骤 2（内部会再次暂停供审查）
+          final ok2 = await _runStep2(forceSkeleton: true);
+          if (!ok2 || _cancelled || error != null) return;
+          step2Done = true;
+        } else {
+          // 继续/下一步：都回到返回前的位置（粗骨架检查点）继续审查，
+          // 由 _runStep2 恢复检查点逻辑再决定回到大事件检查点或进入精写
+          _restoreCheckpointKind = 'skeleton';
         }
-        _step1Json = r;
-        _step1Text = '书名：《${r!.title}》\n\n${r.concept}';
-        _stepPreview = _step1Text!;
-        _liveText = '';
-        _bubbles.add(OutlineStepBubble(label: '书名与核心概念', content: _step1Text!));
-        title = r.title;
-        _stepStats.add(
-          _StepStat(
-            '生成书名和核心概念',
-            DateTime.now().difference(t0).inSeconds,
-            r.concept.length,
-          ),
-        );
-        await _persistProgress(phase: 2);
-        notifyListeners();
       }
 
       if (_cancelled || error != null) return;
 
       // ── 步骤 2：骨架 — 粗骨架规划 + 分批精写 + 伏笔账本 ──
-      final ok2 = await _runStep2();
-      if (!ok2 || _cancelled || error != null) return;
+      if (!step2Done) {
+        final ok2 = await _runStep2();
+        if (!ok2 || _cancelled || error != null) return;
+      }
 
       // ── 检查点：大事件（可选）—— 精写完成（含账本）后暂停审查 ──
       // 仅在「本次实际执行过精写」或「续跑恢复的大事件检查点」时触发，避免恢复运行重复暂停
       if (_restoreCheckpointKind == 'events' ||
           (_step2RefinedThisRun && _outlineSetting.pauseAfterEvents)) {
-        var isRestore = _restoreCheckpointKind == 'events';
-        _restoreCheckpointKind = null;
-        while (true) {
-          final action = await _checkpointPause(
-            'events',
-            initialText: isRestore ? _restoreCheckpointText : null,
-          );
-          _restoreCheckpointText = null;
-          isRestore = false;
-          if (action == _CheckpointAction.cancel) {
-            await _persistProgress(phase: 3);
-            loading = false;
-            notifyListeners();
-            return;
-          }
-          if (action == _CheckpointAction.regenerate) {
-            final ok = await _runStep2(forceRefine: true);
-            if (!ok || _cancelled || error != null) return;
-            continue; // 重新生成后再次暂停，供用户审查
-          }
-          // 继续：若用户编辑过大事件，重新提炼一次伏笔账本
-          if (_checkpointEdited) {
-            _checkpointEdited = false;
-            final okLedger = await _refreshLedgerFromSkeleton();
-            if (!okLedger || _cancelled || error != null) return;
-          }
-          break;
+        final fromMinor =
+            _restoreCheckpointKind == 'events' && _restoreCheckpointFromMinor;
+        final rerun = await _runEventsCheckpoint(fromMinor: fromMinor);
+        if (rerun == null || _cancelled || error != null) return;
+        if (fromMinor && rerun) {
+          // 恢复自小事件返回链的大事件检查点且发生改动：重新展开小事件
+          await _rerunChunks();
+          if (_cancelled || error != null) return;
         }
-        if (_cancelled || error != null) return;
       }
 
       // ── 准备步骤 3：构建展开块（按每 5 个大事件拆分） ────
@@ -468,7 +686,7 @@ class OutlineController extends ChangeNotifier {
       if (_cancelled || error != null) return;
 
       // ── 步骤 3a/b/c...：限流并行展开，按序合并 ──────────
-      await _runChunksParallel(systemPrompt: systemPrompt);
+      await _runChunksParallel(systemPrompt: _systemPrompt);
 
       if (_cancelled) {
         loading = false;
@@ -482,6 +700,50 @@ class OutlineController extends ChangeNotifier {
         loading = false;
         notifyListeners();
         return;
+      }
+
+      // ── 检查点：小事件（可选）—— 步骤3全部展开完毕后暂停审查 ──
+      // 仅在「本次实际展开过」或「续跑恢复的小事件检查点」时触发
+      if (_restoreCheckpointKind == 'minor' ||
+          (_chunks.isNotEmpty && _outlineSetting.pauseAfterMinor)) {
+        var isRestore = _restoreCheckpointKind == 'minor';
+        _restoreCheckpointKind = null;
+        while (true) {
+          final action = await _checkpointPause(
+            'minor',
+            initialText: isRestore ? _restoreCheckpointText : rawText,
+          );
+          _restoreCheckpointText = null;
+          isRestore = false;
+          if (action == _CheckpointAction.cancel) {
+            await _persistProgress(phase: 3);
+            loading = false;
+            notifyListeners();
+            return;
+          }
+          if (action == _CheckpointAction.regenerate) {
+            // 重新生成小事件：按当前骨架重新展开步骤3
+            await _rerunChunks();
+            if (_cancelled || error != null) return;
+            continue; // 重新暂停在小事件检查点，供用户审查
+          }
+          if (action == _CheckpointAction.forward) {
+            break; // 防御：小事件检查点无「下一步」（最底层）
+          }
+          if (action == _CheckpointAction.back) {
+            // 返回上一步：大事件检查点（可继续向上到粗骨架/书名，改动后重新展开小事件）
+            final rerun = await _runEventsCheckpoint(fromMinor: true);
+            if (rerun == null || _cancelled || error != null) return;
+            if (rerun) {
+              await _rerunChunks();
+              if (_cancelled || error != null) return;
+            }
+            continue; // 重新暂停在小事件检查点，供用户审查
+          }
+          // 继续：若编辑过，rawText 已在 continueCheckpoint 更新
+          break;
+        }
+        if (_cancelled || error != null) return;
       }
 
       // ── 保存到历史记录（await + 失败提示） ───────────────
@@ -761,15 +1023,18 @@ class OutlineController extends ChangeNotifier {
 
   // ─── 步骤 2：粗骨架规划 + 分批精写 + 伏笔账本 ──────────────────
 
-  /// 进入检查点暂停：设置暂停状态、落盘、等待用户操作（继续/重新生成/取消）。
-  /// 返回用户操作意图；[initialText] 用于续跑恢复时保留暂停前的编辑文本。
+  /// 进入检查点暂停：设置暂停状态、落盘、等待用户操作（继续/重新生成/返回上一步/下一步/取消）。
+  /// 返回用户操作意图；[initialText] 用于续跑恢复时保留暂停前的编辑文本；
+  /// [backSource] 记录当前检查点是从哪个检查点返回来的（非 null 时页面提供「下一步」返回）。
   Future<_CheckpointAction> _checkpointPause(
     String kind, {
     String? initialText,
+    String? backSource,
   }) async {
     paused = true;
     checkpointKind = kind;
     checkpointText = initialText ?? _renderSkeleton();
+    checkpointBackSource = backSource;
     _checkpointOriginalText = checkpointText;
     _checkpointEdited = false;
     _liveText = ''; // 清空残留流式内容，避免与检查点卡片同时展示
@@ -781,6 +1046,7 @@ class OutlineController extends ChangeNotifier {
     await _checkpointResumer!.future;
     paused = false;
     checkpointKind = null;
+    checkpointBackSource = null;
     loading = true;
     notifyListeners();
     if (_cancelled) return _CheckpointAction.cancel;
@@ -942,46 +1208,75 @@ class OutlineController extends ChangeNotifier {
         ),
       );
       _stepPreview = '${_step1Text ?? ''}\n\n${_renderSkeleton()}';
-      _bubbles.add(
-        OutlineStepBubble(label: '三幕粗骨架', content: _renderSkeleton()),
-      );
+      _coarseSkeletonSnapshot = _renderSkeleton(); // 保存粗骨架原始快照（精写前的标题+定位）
+      _upsertBubble('三幕粗骨架', _renderSkeleton());
       await _persistProgress(phase: 2);
       notifyListeners();
     }
 
     if (_cancelled || error != null) return false;
 
-    // ── 检查点：粗骨架（可选）—— 骨架生成完成后暂停，供编辑/重新生成 ──
+    // ── 检查点：粗骨架（可选）—— 骨架生成完成后暂停，供编辑/重新生成/返回上一步 ──
     // 仅在「本次实际生成骨架」或「续跑恢复的骨架检查点」时触发，避免恢复运行重复暂停
-    if (_restoreCheckpointKind == 'skeleton') {
-      final action = await _checkpointPause(
-        'skeleton',
-        initialText: _restoreCheckpointText,
-      );
+    if (_restoreCheckpointKind == 'skeleton' ||
+        (skeletonGenerated && _outlineSetting.pauseAfterSkeleton)) {
+      final isRestore = _restoreCheckpointKind == 'skeleton';
+      var restoreText = isRestore ? _restoreCheckpointText : null;
+      // 恢复且精写已完成（从大事件检查点返回后取消）→ 提供「下一步」回到大事件检查点
+      final backSource = isRestore && _refinedBatchCount > 0 ? 'events' : null;
       _restoreCheckpointKind = null;
       _restoreCheckpointText = null;
-      if (action == _CheckpointAction.cancel) {
-        await _persistProgress(phase: 2);
-        loading = false;
-        notifyListeners();
-        return false;
+      while (true) {
+        final action = await _checkpointPause(
+          'skeleton',
+          initialText:
+              restoreText ?? _coarseSkeletonSnapshot ?? _renderSkeleton(),
+          backSource: backSource,
+        );
+        restoreText = null;
+        if (action == _CheckpointAction.cancel) {
+          await _persistProgress(phase: 2);
+          loading = false;
+          notifyListeners();
+          return false;
+        }
+        if (action == _CheckpointAction.regenerate) {
+          // 重新生成粗骨架：清空骨架与精写/账本后整体重跑步骤 2（内部会再次暂停供审查）
+          return _runStep2(forceSkeleton: true);
+        }
+        if (action == _CheckpointAction.back) {
+          // 返回上一步：编辑书名与核心概念
+          final tRes = await _runTitleCheckpointBack();
+          if (tRes == null) return false;
+          if (tRes == _TitleBackResult.forward) {
+            continue; // title 点了「下一步」：重新暂停骨架检查点
+          }
+          if (tRes == _TitleBackResult.changed) {
+            return _runStep2(forceSkeleton: true);
+          }
+          // 未变更：等同直接继续
+          break;
+        }
+        if (action == _CheckpointAction.forward) {
+          // 下一步（恢复场景）：反悔返回大事件检查点，交由 _doRunAll 恢复检查点逻辑触发
+          _restoreCheckpointKind = 'events';
+          _restoreCheckpointFromMinor = rawText.isNotEmpty;
+          break;
+        }
+        // 继续：若用户编辑过骨架，已通过 continueCheckpoint 回填到 _step2Json
+        if (isRestore && _refinedBatchCount > 0) {
+          if (_checkpointEdited) {
+            // 骨架在精写完成后被编辑：按新骨架重新精写
+            final ok = await _runStep2(forceRefine: true);
+            if (!ok || _cancelled || error != null) return false;
+          } else {
+            // 未编辑：恢复大事件检查点供审查（修复返回后取消、继续未完成生成的丢失检查点问题）
+            _restoreCheckpointKind = 'events';
+            _restoreCheckpointFromMinor = rawText.isNotEmpty;
+          }
+        }
+        break;
       }
-      if (action == _CheckpointAction.regenerate) {
-        // 重新生成粗骨架：清空骨架与精写/账本后整体重跑步骤 2（内部会再次暂停供审查）
-        return _runStep2(forceSkeleton: true);
-      }
-    } else if (skeletonGenerated && _outlineSetting.pauseAfterSkeleton) {
-      final action = await _checkpointPause('skeleton');
-      if (action == _CheckpointAction.cancel) {
-        await _persistProgress(phase: 2);
-        loading = false;
-        notifyListeners();
-        return false;
-      }
-      if (action == _CheckpointAction.regenerate) {
-        return _runStep2(forceSkeleton: true);
-      }
-      // continue：若用户编辑过骨架，已通过 continueCheckpoint 回填到 _step2Json
     }
 
     if (_cancelled || error != null) return false;
@@ -1014,6 +1309,10 @@ class OutlineController extends ChangeNotifier {
       _liveText = '正在精写第 ${b + 1}/$totalBatches 批大事件...';
       notifyListeners();
       final t0 = DateTime.now();
+      // 注入紧邻上一批已精写的完整概述（仅上批、非全部历史），保证跨批大事件因果承接
+      final prevRefined = b > 0
+          ? _renderRefinedBatchContent(_step2Batches[b - 1])
+          : '';
       final r = await _runStructuredStep<List<_Event>>(
         systemPrompt: OutlinePromptTemplate.jsonSystemPrompt,
         userPrompt: OutlinePromptTemplate.buildRefineBatchPrompt(
@@ -1026,6 +1325,7 @@ class OutlineController extends ChangeNotifier {
           coarseSkeletonText: _renderSkeleton(),
           batchContent: _renderBatchContent(batch),
           ledgerText: _renderLedgerText(),
+          prevRefinedContent: prevRefined,
         ),
         maxTokens: _outlineSetting.maxTokens,
         temperature: _outlineSetting.temperature,
@@ -1091,6 +1391,7 @@ class OutlineController extends ChangeNotifier {
       }
       _refinedBatchCount++;
       _stepPreview = '${_step1Text ?? ''}\n\n${_renderSkeleton()}';
+      _upsertBubble('三幕粗骨架', _renderSkeleton()); // 精写推进后同步刷新骨架气泡
       await _persistProgress(phase: 2);
       notifyListeners();
     }
@@ -1342,6 +1643,18 @@ class OutlineController extends ChangeNotifier {
 
     pump();
     await completer.future;
+  }
+
+  /// 重新展开步骤 3：清空已生成的小事件内容，按当前（可能已编辑的）骨架重新生成全部小事件。
+  /// 供小事件检查点返回上一步改动大事件/骨架/书名后重建全文。
+  Future<void> _rerunChunks() async {
+    _chunks = [];
+    _flushIndex = 0;
+    _completedChunkCount = 0;
+    rawText = '';
+    _liveText = '';
+    _buildChunks();
+    await _runChunksParallel(systemPrompt: _systemPrompt);
   }
 
   Future<void> _expandChunk(int index, String systemPrompt) async {
@@ -1700,6 +2013,8 @@ class OutlineController extends ChangeNotifier {
     _step1Text = null;
     _step1Json = null;
     _step2Json = null;
+    _coarseSkeletonSnapshot = null;
+    _systemPrompt = '';
     _stepPreview = '';
     _step2Batches = [];
     _step2BatchCount = 0;
@@ -1716,12 +2031,15 @@ class OutlineController extends ChangeNotifier {
     paused = false;
     checkpointKind = null;
     checkpointText = '';
+    checkpointBackSource = null;
     _checkpointOriginalText = '';
     _checkpointEdited = false;
     _checkpointResumer = null;
     _checkpointAction = _CheckpointAction.none;
     _restoreCheckpointKind = null;
     _restoreCheckpointText = null;
+    _restoreCheckpointFromMinor = false;
+    _lastSavedCheckpoint = null;
     notifyListeners();
   }
 
@@ -1735,6 +2053,7 @@ class OutlineController extends ChangeNotifier {
   }
 
   Future<void> _deleteProgress() async {
+    _lastSavedCheckpoint = null;
     try {
       final file = await _ensureProgressFile();
       if (file.existsSync()) await file.delete();
@@ -1744,6 +2063,20 @@ class OutlineController extends ChangeNotifier {
   Future<void> _persistProgress({int? phase}) async {
     try {
       final file = await _ensureProgressFile();
+      // 暂停态保存当前检查点；非暂停态（取消后流程收尾）沿用最近一次暂停保存的检查点，
+      // 避免取消时 checkpointKind 被清空后覆盖丢失，导致续跑无法回到检查点
+      Map<String, dynamic>? checkpointData;
+      if (paused && checkpointKind != null) {
+        checkpointData = {
+          'kind': checkpointKind,
+          'text': checkpointText,
+          'originalText': _checkpointOriginalText,
+          'fromMinor': checkpointBackSource == 'minor',
+        };
+        _lastSavedCheckpoint = checkpointData;
+      } else {
+        checkpointData = _lastSavedCheckpoint;
+      }
       final data = {
         'genre': genreController.text,
         'theme': themeController.text,
@@ -1757,6 +2090,7 @@ class OutlineController extends ChangeNotifier {
         'step1Text': _step1Text ?? '',
         'step1Json': _step1Json?.toJson(),
         'step2Json': _step2Json?.toJson(),
+        'coarseSkeletonSnapshot': _coarseSkeletonSnapshot ?? '',
         'refinedBatchCount': _refinedBatchCount,
         'ledger': {
           'foreshadows': _ledgerForeshadows,
@@ -1765,12 +2099,7 @@ class OutlineController extends ChangeNotifier {
         },
         'completedChunks': _completedChunkCount,
         'rawText': rawText,
-        if (paused && checkpointKind != null)
-          'checkpoint': {
-            'kind': checkpointKind,
-            'text': checkpointText,
-            'originalText': _checkpointOriginalText,
-          },
+        if (checkpointData != null) 'checkpoint': checkpointData,
       };
       await file.writeAsString(jsonEncode(data));
     } catch (_) {}
@@ -1813,6 +2142,10 @@ class OutlineController extends ChangeNotifier {
     } else {
       final s2 = data['step2Json'];
       if (s2 is Map<String, dynamic>) _step2Json = _Step2Result.fromMap(s2);
+      _coarseSkeletonSnapshot =
+          (data['coarseSkeletonSnapshot'] as String?)?.trim().isNotEmpty == true
+          ? data['coarseSkeletonSnapshot'] as String
+          : null;
       _refinedBatchCount = data['refinedBatchCount'] as int? ?? 0;
       final ledger = data['ledger'];
       if (ledger is Map<String, dynamic>) {
@@ -1853,6 +2186,7 @@ class OutlineController extends ChangeNotifier {
       if (kind != null && text.trim().isNotEmpty) {
         _restoreCheckpointKind = kind;
         _restoreCheckpointText = text;
+        _restoreCheckpointFromMinor = cp['fromMinor'] == true;
         checkpointKind = kind;
         checkpointText = text;
         _checkpointOriginalText = cp['originalText'] as String? ?? text;
@@ -1873,7 +2207,12 @@ class _StepParseException implements Exception {
 }
 
 /// 检查点用户操作意图：none 表示继续（沿用当前内容）
-enum _CheckpointAction { none, regenerate, cancel }
+enum _CheckpointAction { none, regenerate, cancel, back, forward }
+
+/// 「书名与核心概念」检查点循环结果：
+/// [forward] 用户点了「下一步」（反悔返回骨架检查点）；
+/// [changed] 书名/概念有变更（编辑或重新生成）；[unchanged] 未变更直接继续。
+enum _TitleBackResult { forward, changed, unchanged }
 
 /// 单步统计（耗时 + 输出字符估算）
 class _StepStat {
@@ -2007,12 +2346,13 @@ class _LedgerResult {
 }
 
 /// 生成过程展示气泡：步骤/尝试级内容快照（思考 + 生成内容）
+/// [content] 可变：检查点编辑/重新生成后由控制器原位刷新，保证展示与最新内容一致
 class OutlineStepBubble {
   final String label;
-  final String content;
+  String content;
   final bool isError;
 
-  const OutlineStepBubble({
+  OutlineStepBubble({
     required this.label,
     required this.content,
     this.isError = false,
