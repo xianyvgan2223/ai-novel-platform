@@ -185,7 +185,7 @@ class _ChatFloatingBallHostState extends ConsumerState<ChatFloatingBallHost> {
 }
 
 /// 悬浮层：悬浮球 + 迷你面板（两者始终挂载，隐藏时用 Offstage 保留内部状态）
-class _FloatingChatLayer extends StatefulWidget {
+class _FloatingChatLayer extends StatelessWidget {
   final ValueListenable<bool> ballVisible;
   final ValueListenable<bool> panelOpen;
   final ValueNotifier<Offset> ballPosition;
@@ -207,90 +207,80 @@ class _FloatingChatLayer extends StatefulWidget {
   });
 
   @override
-  State<_FloatingChatLayer> createState() => _FloatingChatLayerState();
-}
-
-class _FloatingChatLayerState extends State<_FloatingChatLayer> {
-  @override
-  void initState() {
-    super.initState();
-    widget.ballVisible.addListener(_onChanged);
-    widget.panelOpen.addListener(_onChanged);
-    widget.ballPosition.addListener(_onChanged);
-    widget.panelPosition.addListener(_onChanged);
-    widget.panelSize.addListener(_onChanged);
-  }
-
-  void _onChanged() => setState(() {});
-
-  @override
-  void dispose() {
-    widget.ballVisible.removeListener(_onChanged);
-    widget.panelOpen.removeListener(_onChanged);
-    widget.ballPosition.removeListener(_onChanged);
-    widget.panelPosition.removeListener(_onChanged);
-    widget.panelSize.removeListener(_onChanged);
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final ballVisible = widget.ballVisible.value;
-    final panelOpen = widget.panelOpen.value;
-    final pos = widget.ballPosition.value;
-    final viewInsets = MediaQuery.of(context).viewInsets.bottom;
-    final screen = MediaQuery.of(context).size;
-    final rawPanelPos = widget.panelPosition.value;
-    final panelSize = widget.panelSize.value;
-    // 键盘弹出时自动上移，避免遮挡输入区
-    final maxDx = math.max(0.0, screen.width - panelSize.width - 8);
-    final maxDy = math.max(
-      0.0,
-      screen.height - viewInsets - 8 - panelSize.height,
-    );
-    final effDx = rawPanelPos.dx.clamp(0.0, maxDx);
-    final effDy = rawPanelPos.dy.clamp(0.0, maxDy);
-
+    // 三个分支彼此独立：拖动球/面板/缩放只重建各自分支，
+    // 避免整层 setState 导致始终挂载的迷你面板每帧重建（帧率低的主因）。
     return Stack(
       children: [
         // 面板展开时：点击面板外任意区域收起为悬浮球
-        if (panelOpen)
-          Positioned.fill(
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: widget.onMinimizePanel,
-            ),
-          ),
+        AnimatedBuilder(
+          animation: panelOpen,
+          builder: (context, _) {
+            if (!panelOpen.value) return const SizedBox.shrink();
+            return Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: onMinimizePanel,
+              ),
+            );
+          },
+        ),
         // 悬浮球（面板展开时隐藏，收起到球时恢复）
-        Positioned(
-          left: pos.dx,
-          top: pos.dy,
-          child: Offstage(
-            offstage: !ballVisible || panelOpen,
-            child: _FloatingBall(
-              positionNotifier: widget.ballPosition,
-              onTap: widget.onTapBall,
-            ),
-          ),
+        AnimatedBuilder(
+          animation: Listenable.merge([ballVisible, panelOpen, ballPosition]),
+          builder: (context, _) {
+            final visible = ballVisible.value && !panelOpen.value;
+            if (!visible) return const SizedBox.shrink();
+            final pos = ballPosition.value;
+            return Positioned(
+              left: pos.dx,
+              top: pos.dy,
+              child: RepaintBoundary(
+                child: _FloatingBall(
+                  positionNotifier: ballPosition,
+                  onTap: onTapBall,
+                ),
+              ),
+            );
+          },
         ),
         // 迷你聊天面板（自由定位，支持拖动与边缘缩放）
-        Positioned(
-          left: effDx,
-          top: effDy,
-          child: Offstage(
-            offstage: !panelOpen,
-            child: SizedBox(
-              width: panelSize.width,
-              height: panelSize.height,
-              child: _MiniChatPanel(
-                visible: widget.panelOpen,
-                positionNotifier: widget.panelPosition,
-                sizeNotifier: widget.panelSize,
-                onMinimize: widget.onMinimizePanel,
-                onMaximize: widget.onMaximizePanel,
+        AnimatedBuilder(
+          animation: Listenable.merge([panelOpen, panelPosition, panelSize]),
+          builder: (context, _) {
+            final rawPos = panelPosition.value;
+            final pSize = panelSize.value;
+            final viewInsets = MediaQuery.of(context).viewInsets.bottom;
+            final screen = MediaQuery.of(context).size;
+            // 键盘弹出时自动上移，避免遮挡输入区
+            final maxDx = math.max(0.0, screen.width - pSize.width - 8);
+            final maxDy = math.max(
+              0.0,
+              screen.height - viewInsets - 8 - pSize.height,
+            );
+            final effDx = rawPos.dx.clamp(0.0, maxDx);
+            final effDy = rawPos.dy.clamp(0.0, maxDy);
+            return Positioned(
+              left: effDx,
+              top: effDy,
+              child: Offstage(
+                offstage: !panelOpen.value,
+                child: RepaintBoundary(
+                  child: SizedBox(
+                    width: pSize.width,
+                    height: pSize.height,
+                    child: _MiniChatPanel(
+                      visible: panelOpen,
+                      positionNotifier: panelPosition,
+                      sizeNotifier: panelSize,
+                      onMinimize: onMinimizePanel,
+                      onMaximize: onMaximizePanel,
+                    ),
+                  ),
+                ),
               ),
-            ),
-          ),
+            );
+          },
         ),
       ],
     );
