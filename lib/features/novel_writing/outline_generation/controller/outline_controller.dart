@@ -110,6 +110,9 @@ class OutlineController extends ChangeNotifier {
   String? _restoreCheckpointText; // 断点续跑恢复的检查点文本
   bool _restoreCheckpointFromMinor = false; // 恢复的大事件检查点是否来自小事件返回链
   Map<String, dynamic>? _lastSavedCheckpoint; // 最近一次暂停保存的检查点（取消后沿用，避免覆盖丢失）
+  String _fallbackForeshadows = ''; // 局部重新生成时的原记录伏笔清单（新账本为空时沿用）
+  Timer? _checkpointSyncTimer; // 检查点编辑防抖落盘定时器
+  Future<void> _writeQueue = Future.value(); // 串行写入队列：同一时刻仅一个写操作在途
 
   /// 当前步骤的显示标签
   String get stepLabel =>
@@ -200,7 +203,7 @@ class OutlineController extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    if (trimmed != _checkpointOriginalText.trim()) {
+    if (trimmed != _checkpointOriginalText.trim() || _checkpointEdited) {
       if (kind == 'minor') {
         // 小事件检查点：编辑的是最终全文（rawText）
         rawText = trimmed;
@@ -283,18 +286,49 @@ class OutlineController extends ChangeNotifier {
     _releaseCheckpoint(_CheckpointAction.forward);
   }
 
+  /// 检查点暂停期间，页面把用户编辑实时同步到控制器（防抖落盘），
+  /// 防止用户意外退出页面（返回上一页/系统返回/杀掉应用）后编辑内容丢失。
+  /// 仅记录文本与「是否编辑过」标记，不校验格式、不阻塞输入。
+  void syncCheckpointEdit(String text) {
+    if (!paused || checkpointKind == null) return;
+    if (text == checkpointText) return;
+    checkpointText = text;
+    _checkpointEdited = text.trim() != _checkpointOriginalText.trim();
+    // 防抖：停止输入约 300ms 后落盘，避免每次按键都写本地文件
+    _checkpointSyncTimer?.cancel();
+    _checkpointSyncTimer = Timer(
+      const Duration(milliseconds: 300),
+      _persistProgress,
+    );
+  }
+
+  /// 立即把尚未落盘的检查点编辑写入本地草稿（退出页面/释放检查点前调用）。
+  void flushCheckpointSync() {
+    _checkpointSyncTimer?.cancel();
+    _checkpointSyncTimer = null;
+    if (!paused || checkpointKind == null) return;
+    _persistProgress();
+  }
+
   /// 「书名与核心概念」检查点循环：编辑或重新生成，供用户审查后继续。
   /// 返回 null 表示取消或出错（调用方终止流程）；
   /// 其余见 [_TitleBackResult]。
   Future<_TitleBackResult?> _runTitleCheckpointBack() async {
     var changed = false;
+    var isRestore = _restoreCheckpointKind == 'title';
     while (true) {
-      // 每轮都取最新的 _step1Text，重新生成后展示新内容
+      // 每轮都取最新的 _step1Text，重新生成后展示新内容；续跑恢复时展示上次会话编辑的文本
       final action = await _checkpointPause(
         'title',
-        initialText: _step1Text,
+        initialText: isRestore
+            ? (_restoreCheckpointText ?? _step1Text)
+            : _step1Text,
         backSource: 'skeleton',
+        originalText: isRestore ? _step1Text : null,
+        keepEdited: isRestore,
       );
+      _restoreCheckpointText = null;
+      isRestore = false;
       if (action == _CheckpointAction.cancel) {
         await _persistProgress(phase: 2);
         loading = false;
@@ -310,7 +344,7 @@ class OutlineController extends ChangeNotifier {
         changed = true;
         continue; // 重新生成后再次暂停供审查
       }
-      // 继续：若用户编辑过，已通过 continueCheckpoint 回填 _step1Json
+      // 继续：若用户编辑过（含恢复自上次会话的编辑），已通过 continueCheckpoint 回填 _step1Json
       if (_checkpointEdited) changed = true;
       break;
     }
@@ -329,15 +363,23 @@ class OutlineController extends ChangeNotifier {
   Future<bool?> _runEventsCheckpoint({required bool fromMinor}) async {
     var rerunNeeded = false; // 是否发生改动，需要重新展开步骤3（小事件）
     var isRestore = _restoreCheckpointKind == 'events';
+    // 仅在确实恢复到大事件检查点（带上次会话的编辑文本）时才保留「已编辑」标记与基线；
+    // 经骨架检查点「下一步」转入时无恢复文本，按全新检查点处理，避免标记跨检查点泄漏
+    var restoreText = isRestore ? _restoreCheckpointText : null;
     _restoreCheckpointKind = null;
+    _restoreCheckpointText = null;
     _restoreCheckpointFromMinor = false;
     while (true) {
       final action = await _checkpointPause(
         'events',
-        initialText: isRestore ? _restoreCheckpointText : null,
+        initialText: restoreText,
         backSource: fromMinor ? 'minor' : null,
+        originalText: (isRestore && restoreText != null)
+            ? _renderSkeleton()
+            : null,
+        keepEdited: isRestore && restoreText != null,
       );
-      _restoreCheckpointText = null;
+      restoreText = null;
       isRestore = false;
       if (action == _CheckpointAction.cancel) {
         await _persistProgress(phase: 3);
@@ -475,6 +517,8 @@ class OutlineController extends ChangeNotifier {
   /// 结束检查点等待：记录用户操作意图并完成 resumer，让暂停中的生成流程继续
   void _releaseCheckpoint(_CheckpointAction action) {
     _checkpointAction = action;
+    // 释放暂停前先把未落盘的编辑立即写入草稿，防止继续/取消/退出时丢失最近输入
+    flushCheckpointSync();
     final resumer = _checkpointResumer;
     if (resumer != null && !resumer.isCompleted) {
       resumer.complete();
@@ -514,6 +558,7 @@ class OutlineController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _checkpointSyncTimer?.cancel();
     for (final t in _activeTokens) {
       t.cancel();
     }
@@ -564,6 +609,28 @@ class OutlineController extends ChangeNotifier {
     await _waitForPreviousRun();
     _resetState();
     _applyProgress(data);
+    await _runAll();
+  }
+
+  /// 基于历史大纲记录做「局部重新生成」：
+  /// 解析出书名/概念与三幕骨架后，直接进入指定检查点（粗骨/大事件）供编辑，
+  /// 继续后仅重新生成对应下游内容，并作为新记录保存（不覆盖原大纲）。
+  /// [kind]：'skeleton'（编辑粗骨 → 重新精写大事件+账本+展开小事件）
+  ///        | 'events'（编辑大事件 → 重新展开小事件）
+  Future<void> regenerateFromRecord(
+    OutlineRecord record, {
+    required String kind,
+  }) async {
+    _resetState();
+    await _deleteProgress();
+    if (!_seedFromRecord(record)) {
+      error = '无法从该大纲解析出三幕结构，可能原大纲内容格式不完整';
+      loading = false;
+      notifyListeners();
+      return;
+    }
+    _restoreCheckpointKind = kind;
+    _restoreCheckpointText = _renderSkeleton();
     await _runAll();
   }
 
@@ -707,13 +774,17 @@ class OutlineController extends ChangeNotifier {
       if (_restoreCheckpointKind == 'minor' ||
           (_chunks.isNotEmpty && _outlineSetting.pauseAfterMinor)) {
         var isRestore = _restoreCheckpointKind == 'minor';
+        var restoreText = isRestore ? _restoreCheckpointText : null;
         _restoreCheckpointKind = null;
+        _restoreCheckpointText = null;
         while (true) {
           final action = await _checkpointPause(
             'minor',
-            initialText: isRestore ? _restoreCheckpointText : rawText,
+            initialText: restoreText ?? rawText,
+            originalText: (isRestore && restoreText != null) ? rawText : null,
+            keepEdited: isRestore && restoreText != null,
           );
-          _restoreCheckpointText = null;
+          restoreText = null;
           isRestore = false;
           if (action == _CheckpointAction.cancel) {
             await _persistProgress(phase: 3);
@@ -1030,13 +1101,15 @@ class OutlineController extends ChangeNotifier {
     String kind, {
     String? initialText,
     String? backSource,
+    String? originalText, // 恢复场景：编辑前的基线文本，用于与恢复的编辑文本比较
+    bool keepEdited = false, // 恢复场景：保留上次会话记录的「已编辑」标记
   }) async {
     paused = true;
     checkpointKind = kind;
     checkpointText = initialText ?? _renderSkeleton();
     checkpointBackSource = backSource;
-    _checkpointOriginalText = checkpointText;
-    _checkpointEdited = false;
+    _checkpointOriginalText = originalText ?? checkpointText;
+    if (!keepEdited) _checkpointEdited = false;
     _liveText = ''; // 清空残留流式内容，避免与检查点卡片同时展示
     loading = false;
     notifyListeners();
@@ -1098,6 +1171,140 @@ class OutlineController extends ChangeNotifier {
       if (a.events.isEmpty) return null;
     }
     return _Step2Result(acts: acts);
+  }
+
+  // ─── 历史记录解析（局部重新生成用） ──────────────────────────
+
+  /// 从历史大纲记录重建状态：回填设定，解析书名/概念与三幕骨架。
+  /// 成功返回 true；格式不完整返回 false（调用方提示错误）。
+  bool _seedFromRecord(OutlineRecord record) {
+    genreController.text = record.genre;
+    themeController.text = record.theme;
+    protagonistController.text = record.protagonist;
+    worldViewController.text = record.worldview;
+    _fallbackForeshadows = record.foreshadows;
+
+    final titleConcept = _parseRecordTitleConcept(record);
+    if (titleConcept == null) return false;
+    _step1Json = titleConcept;
+    _step1Text = '书名：《${titleConcept.title}》\n\n${titleConcept.concept}';
+    _stepPreview = _step1Text!;
+    title = titleConcept.title;
+
+    final acts = _parseRecordActs(record.content);
+    if (acts == null || acts.length != 3) return false;
+    _step2Json = _Step2Result(acts: acts);
+    majorEventCount = acts.fold<int>(0, (s, a) => s + a.events.length);
+    _coarseSkeletonSnapshot = null; // 记录内容无粗骨架原始快照
+    _refinedBatchCount = _estimateRefinedBatchCount(acts); // 视为全部精写完成
+    _stepPreview = '${_step1Text ?? ''}\n\n${_renderSkeleton()}';
+    _upsertBubble('三幕粗骨架', _renderSkeleton());
+    return true;
+  }
+
+  /// 从历史大纲最终内容解析书名与核心概念（步骤 1 的文本形式）。
+  /// 兼容旧格式：首行可为「书名：《xxx》」、《xxx》或直接回退记录的 title 字段。
+  _Step1Result? _parseRecordTitleConcept(OutlineRecord record) {
+    final lines = record.content
+        .trim()
+        .split('\n')
+        .map((l) => l.trim())
+        .where((l) => l.isNotEmpty)
+        .toList();
+    if (lines.isEmpty) return null;
+    final m = RegExp(
+      r'^书名\s*[：:]\s*(?:《([^》]+)》|(.+))$',
+    ).firstMatch(lines.first);
+    var t = (m?.group(1) ?? m?.group(2) ?? '').trim();
+    if (t.isEmpty) {
+      // 旧格式可能没有「书名：」前缀：首行形如《xxx》则取之，否则回退记录 title 字段
+      final t2 = RegExp(r'^《([^》]+)》').firstMatch(lines.first);
+      t = t2?.group(1)?.trim() ?? record.title.trim();
+    }
+    if (t.isEmpty) return null;
+    final conceptBuf = <String>[];
+    for (final line in lines.skip(1)) {
+      if (RegExp(r'^[══=]+\s*第\s*[一二三四五六七八九十0-9]+\s*幕').hasMatch(line)) {
+        break;
+      }
+      conceptBuf.add(line);
+    }
+    final concept = conceptBuf.join('\n').trim();
+    if (concept.isEmpty) return null;
+    return _Step1Result(title: t, concept: concept);
+  }
+
+  /// 从历史大纲最终内容解析三幕骨架：每个大事件 = 标题 + 概述
+  /// （概述只取标题后、第一个小事件展开之前的段落，小事件块不参与骨架）。
+  /// 容错与章节事件解析器（[_parseEvents]）保持一致，兼容旧版生成的大纲：
+  /// - 幕标题：`══ 第一幕：开端 ══` / `══ 第1幕 ══` 等（══ 装饰 + 中文/数字编号）
+  /// - 大事件行：`══ 大事件N：标题 ══` / `大事件N：标题` / `事件N：标题` 等
+  ///   （══ 包裹可有可无，前缀支持 大事件/Major/事件，编号支持数字/X/中文/带圈）
+  List<_Act>? _parseRecordActs(String content) {
+    final actRe = RegExp(r'^\s*[══=]+\s*(第\s*[一二三四五六七八九十0-9]+\s*幕)');
+    final eventRe = RegExp(
+      r'^\s*═*\s*(?:大事件|Major|事件)\s*(?:[0-9Xx]|①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩|[一二三四五六七八九十]+)?\s*[：:]\s*(.+?)\s*═*\s*$',
+    );
+    final acts = <_Act>[];
+    _Act? curAct;
+    String? curTitle;
+    final summaryBuf = StringBuffer();
+    var minorStarted = false; // 当前大事件是否已进入小事件展开块（概述到此为止）
+
+    void flushEvent() {
+      if (curAct != null && curTitle != null) {
+        curAct.events.add(
+          _Event(title: curTitle!, summary: summaryBuf.toString().trim()),
+        );
+      }
+      curTitle = null;
+      summaryBuf.clear();
+      minorStarted = false;
+    }
+
+    for (final raw in content.split('\n')) {
+      final trimmed = raw.trim();
+      if (trimmed.isEmpty) continue;
+      final actM = actRe.firstMatch(trimmed);
+      if (actM != null) {
+        flushEvent();
+        curAct = _Act(name: actM.group(1)!, events: []);
+        acts.add(curAct);
+        continue;
+      }
+      final evM = eventRe.firstMatch(trimmed);
+      if (evM != null) {
+        flushEvent();
+        curTitle = evM.group(1)!.trim();
+        minorStarted = false;
+        continue;
+      }
+      if (trimmed.startsWith('○') || trimmed.startsWith('小事件')) {
+        minorStarted = true; // 进入小事件块，概述收集结束
+        continue;
+      }
+      if (curTitle != null && !minorStarted) {
+        if (summaryBuf.isNotEmpty) summaryBuf.writeln();
+        summaryBuf.write(trimmed);
+      }
+    }
+    flushEvent();
+    if (acts.length != 3) return null;
+    for (final a in acts) {
+      if (a.events.isEmpty) return null;
+    }
+    return acts;
+  }
+
+  /// 预估精写批次数（与 [_buildBatches] 的批次划分保持一致），
+  /// 用于把历史记录视为「全部精写完成」以跳过精写循环。
+  int _estimateRefinedBatchCount(List<_Act> acts) {
+    final batchSize = _calcBatchSize(majorEventCount);
+    var count = 0;
+    for (final act in acts) {
+      count += _groupList(act.events, batchSize).length;
+    }
+    return count;
   }
 
   /// 大事件检查点继续且内容被编辑后，基于编辑后的完整骨架重新提炼一次伏笔账本。
@@ -1232,6 +1439,10 @@ class OutlineController extends ChangeNotifier {
           initialText:
               restoreText ?? _coarseSkeletonSnapshot ?? _renderSkeleton(),
           backSource: backSource,
+          originalText: (isRestore && restoreText != null)
+              ? (_coarseSkeletonSnapshot ?? _renderSkeleton())
+              : null,
+          keepEdited: isRestore && restoreText != null,
         );
         restoreText = null;
         if (action == _CheckpointAction.cancel) {
@@ -1808,6 +2019,15 @@ class OutlineController extends ChangeNotifier {
                 _throttledNotify();
                 _throttledScroll();
               }
+              // 思考过程也实时合并进展示文本：推理模型在输出正文前会先流式
+              // 输出 reasoning_content，不展示会被误认为卡死
+              final reasoning = delta?['reasoning_content'] as String?;
+              if (reasoning != null && reasoning.isNotEmpty) {
+                chunk.reasoning += reasoning;
+                _liveText = _mergeChunkLiveText();
+                _throttledNotify();
+                _throttledScroll();
+              }
               final fr = choices[0]['finish_reason'] as String?;
               if (fr != null && fr.isNotEmpty) roundFinish = fr;
             },
@@ -1857,14 +2077,23 @@ class OutlineController extends ChangeNotifier {
     return '【思考过程】\n$reasoning\n\n【生成内容】\n$content';
   }
 
-  /// 按块顺序合并尚未刷入 rawText 的各块缓冲（含乱序完成但未刷入的块）
+  /// 按块顺序合并尚未刷入 rawText 的各块缓冲（含乱序完成但未刷入的块）。
+  /// 有思考过程时以「【思考过程】+【生成内容】」结构展示，避免推理阶段看起来卡死。
   String _mergeChunkLiveText() {
     if (_flushIndex >= _chunks.length) return '';
     final parts = <String>[];
     for (int i = _flushIndex; i < _chunks.length; i++) {
       final c = _chunks[i];
-      if (c.buffer.isEmpty) continue;
-      parts.add(c.isActStart ? '${c.header}\n${c.buffer}' : c.buffer);
+      if (c.buffer.isEmpty && c.reasoning.isEmpty) continue;
+      final String body;
+      if (c.reasoning.trim().isEmpty) {
+        body = c.buffer;
+      } else if (c.buffer.trim().isEmpty) {
+        body = '【思考过程】\n${c.reasoning}';
+      } else {
+        body = '【思考过程】\n${c.reasoning}\n\n【生成内容】\n${c.buffer}';
+      }
+      parts.add(c.isActStart ? '${c.header}\n$body' : body);
     }
     return parts.join('\n\n');
   }
@@ -1970,6 +2199,7 @@ class OutlineController extends ChangeNotifier {
   // ─── 内部工具 ────────────────────────────────────────────────
 
   OutlineRecord _buildRecord() {
+    final ledger = _renderLedgerText();
     return OutlineRecord(
       title: title,
       genre: genreController.text,
@@ -1977,8 +2207,11 @@ class OutlineController extends ChangeNotifier {
       protagonist: protagonistController.text,
       worldview: worldViewController.text,
       content: rawText,
-      // 持久化伏笔账本，供「大纲转章节」写正文时注入【伏笔清单】
-      foreshadows: _renderLedgerText(),
+      // 持久化伏笔账本，供「大纲转章节」写正文时注入【伏笔清单】；
+      // 局部重新生成未产出新账本时，沿用原记录的伏笔清单
+      foreshadows: ledger == '（暂无）' && _fallbackForeshadows.isNotEmpty
+          ? _fallbackForeshadows
+          : ledger,
     );
   }
 
@@ -1997,6 +2230,8 @@ class OutlineController extends ChangeNotifier {
   }
 
   void _resetState() {
+    _checkpointSyncTimer?.cancel();
+    _checkpointSyncTimer = null;
     loading = true;
     error = null;
     warning = null;
@@ -2040,6 +2275,7 @@ class OutlineController extends ChangeNotifier {
     _restoreCheckpointText = null;
     _restoreCheckpointFromMinor = false;
     _lastSavedCheckpoint = null;
+    _fallbackForeshadows = '';
     notifyListeners();
   }
 
@@ -2054,23 +2290,29 @@ class OutlineController extends ChangeNotifier {
 
   Future<void> _deleteProgress() async {
     _lastSavedCheckpoint = null;
+    // 等待在途/排队中的写入全部完成后删除，避免已入队的写入把草稿又写回来
+    await _writeQueue;
     try {
       final file = await _ensureProgressFile();
       if (file.existsSync()) await file.delete();
+      final tmp = File('${file.path}.tmp');
+      if (tmp.existsSync()) await tmp.delete();
     } catch (_) {}
   }
 
   Future<void> _persistProgress({int? phase}) async {
     try {
-      final file = await _ensureProgressFile();
       // 暂停态保存当前检查点；非暂停态（取消后流程收尾）沿用最近一次暂停保存的检查点，
-      // 避免取消时 checkpointKind 被清空后覆盖丢失，导致续跑无法回到检查点
+      // 避免取消时 checkpointKind 被清空后覆盖丢失，导致续跑无法回到检查点。
+      // 检查点数据与全部落盘内容都在 await 之前同步捕获为快照：
+      // 后续无论写入何时真正执行，落盘的都是调用时刻的准确状态
       Map<String, dynamic>? checkpointData;
       if (paused && checkpointKind != null) {
         checkpointData = {
           'kind': checkpointKind,
           'text': checkpointText,
           'originalText': _checkpointOriginalText,
+          'edited': _checkpointEdited,
           'fromMinor': checkpointBackSource == 'minor',
         };
         _lastSavedCheckpoint = checkpointData;
@@ -2101,7 +2343,25 @@ class OutlineController extends ChangeNotifier {
         'rawText': rawText,
         if (checkpointData != null) 'checkpoint': checkpointData,
       };
-      await file.writeAsString(jsonEncode(data));
+      // 串行化落盘：同一时刻仅一个写操作在途，后续写入排队依次执行，
+      // 避免并发 writeAsString 覆盖竞态
+      _writeQueue = _writeQueue
+          .then((_) => _atomicWrite(data))
+          .catchError((_) {});
+      return _writeQueue;
+    } catch (_) {
+      return Future<void>.value();
+    }
+  }
+
+  /// 原子写入进度草稿：先写临时文件再 rename 覆盖，
+  /// 避免写入中途进程被杀/崩溃留下半截 JSON 损坏整份草稿。
+  Future<void> _atomicWrite(Map<String, dynamic> data) async {
+    try {
+      final file = await _ensureProgressFile();
+      final tmp = File('${file.path}.tmp');
+      await tmp.writeAsString(jsonEncode(data), flush: true);
+      await tmp.rename(file.path);
     } catch (_) {}
   }
 
@@ -2190,6 +2450,7 @@ class OutlineController extends ChangeNotifier {
         checkpointKind = kind;
         checkpointText = text;
         _checkpointOriginalText = cp['originalText'] as String? ?? text;
+        _checkpointEdited = cp['edited'] == true;
         paused = true;
         loading = false;
       }
@@ -2299,6 +2560,7 @@ class _ExpandChunk {
   final int globalStartIndex; // 本块首个大事件的全局序号（1-based）
   final int globalEndIndex; // 本块最后一个大事件的全局序号（1-based，含）
   String buffer = '';
+  String reasoning = ''; // 本块流式思考过程（reasoning_content，供实时展示）
   bool done = false;
   bool truncated = false;
   bool continuing = false; // 是否正处于自动续写状态

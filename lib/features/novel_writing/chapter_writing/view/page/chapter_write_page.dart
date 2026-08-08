@@ -23,6 +23,7 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
   final Set<int> _selected = {}; // 批量删除选中的章节 id
   bool _followOutput = true; // 是否自动跟随流式输出滚到底部（用户上滑阅读时暂停跟随）
   DateTime? _lastScrollJump; // 自动滚动节流时间戳
+  int _lastChapterWords = 0; // 上一次章节生成的字数（连续生成时预填，避免重复输入）
 
   @override
   void initState() {
@@ -222,15 +223,35 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
     Navigator.of(context).pop();
   }
 
-  /// 开始写章节：切换到全屏生成视图，流式内容实时展示
-  void _startWrite(OutlineChapter ch) {
+  /// 开始写章节：先生成前弹出字数输入框（预填设置默认值/上次输入），
+  /// 确认后切换到全屏生成视图，流式内容实时展示。
+  Future<void> _startWrite(OutlineChapter ch) async {
+    final defaultWords = await _controller.loadDefaultWords();
+    if (!mounted) return;
+    final target = await _showWordCountDialog(
+      _lastChapterWords > 0 ? _lastChapterWords : defaultWords,
+    );
+    if (!mounted || target == null) return;
+    _lastChapterWords = target;
     _followOutput = true;
     setState(() => _showWriteView = true);
     _controller.startWrite(context, ch, () {
       if (!mounted) return;
       setState(() {});
       _scrollWriteToBottom();
-    });
+    }, targetWords: target);
+  }
+
+  /// 章节生成前的字数输入弹窗：返回用户输入的目标字数；取消返回 null
+  Future<int?> _showWordCountDialog(int defaultWords) {
+    return showDialog<int>(
+      context: context,
+      // 键盘弹出时上移弹窗，避免输入框被键盘遮挡
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+        child: _WordCountDialog(initialWords: defaultWords),
+      ),
+    );
   }
 
   /// 生成视图自动滚动到底部（流式输出跟随）。
@@ -1378,5 +1399,97 @@ class _ChapterEditPageState extends State<_ChapterEditPage> {
   void _saveAndGoBack() {
     widget.onSaved(_controller.text);
     Navigator.of(context).pop();
+  }
+}
+
+/// 章节生成前的字数输入弹窗：返回用户输入的目标字数；取消/关闭返回 null。
+class _WordCountDialog extends StatefulWidget {
+  final int initialWords;
+  const _WordCountDialog({required this.initialWords});
+
+  @override
+  State<_WordCountDialog> createState() => _WordCountDialogState();
+}
+
+class _WordCountDialogState extends State<_WordCountDialog> {
+  late final TextEditingController _ctrl;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: '${widget.initialWords}');
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  void _confirm() {
+    final n = int.tryParse(_ctrl.text.trim());
+    if (n == null || n <= 0) {
+      setState(() => _error = '请输入有效的字数（大于 0 的整数）');
+      return;
+    }
+    Navigator.of(context).pop(n);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text(
+        '设置本章字数',
+        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            '输入本章目标字数，将覆盖设置中的默认范围',
+            style: TextStyle(fontSize: 12, color: Color(0xFF999999)),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _ctrl,
+            autofocus: true,
+            keyboardType: TextInputType.number,
+            decoration: InputDecoration(
+              hintText: '如：3000',
+              errorText: _error,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 10,
+              ),
+              filled: true,
+              fillColor: const Color(0xFFFAFAFA),
+            ),
+            style: const TextStyle(fontSize: 14),
+            onSubmitted: (_) => _confirm(),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消', style: TextStyle(color: Color(0xFF999999))),
+        ),
+        TextButton(
+          onPressed: _confirm,
+          child: const Text(
+            '开始生成',
+            style: TextStyle(
+              color: Color(0xFF4D6BFE),
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ],
+    );
   }
 }

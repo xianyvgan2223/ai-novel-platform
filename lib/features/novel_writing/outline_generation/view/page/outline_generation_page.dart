@@ -11,19 +11,26 @@ class OutlineGenerationPage extends StatefulWidget {
   /// 从历史大纲「重新生成」时带入的小说设定，页面加载后回填到输入区，由用户手动点击生成
   final OutlineRecord? initialRecord;
 
-  const OutlineGenerationPage({super.key, this.initialRecord});
+  /// 局部重新生成模式：'skeleton'（编辑粗骨）| 'events'（编辑大事件）。
+  /// 传入后页面自动从 [initialRecord] 解析骨架并进入对应检查点供编辑，
+  /// 继续后仅重新生成对应下游内容，并另存为新大纲（不覆盖原记录）。
+  final String? reeditKind;
+
+  const OutlineGenerationPage({super.key, this.initialRecord, this.reeditKind});
 
   @override
   State<OutlineGenerationPage> createState() => _OutlineGenerationPageState();
 }
 
-class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
+class _OutlineGenerationPageState extends State<OutlineGenerationPage>
+    with WidgetsBindingObserver {
   final _controller = OutlineController();
   final _majorEventCountController = TextEditingController();
   final _minorEventCountController = TextEditingController();
   final _checkpointCtrl = TextEditingController();
   String? _lastCheckpointSync; // 已同步到检查点编辑器的文本（避免覆盖用户输入）
   bool _hasDraft = false;
+  late final bool _isReedit; // 是否处于历史大纲「局部重新生成」模式
 
   static const _inspirations =
       <({String theme, String protagonist, String worldview})>[
@@ -63,10 +70,22 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _controller.addListener(_onChanged);
     _applyInitialRecord();
     _majorEventCountController.text = '${_controller.majorEventCount}';
     _minorEventCountController.text = '${_controller.minorEventCount}';
+    _isReedit = widget.initialRecord != null && widget.reeditKind != null;
+    if (_isReedit) {
+      // 下一帧再启动局部重新生成流程，避免 initState 期间触发 setState
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _controller.regenerateFromRecord(
+          widget.initialRecord!,
+          kind: widget.reeditKind!,
+        );
+      });
+    }
     _refreshDraft();
   }
 
@@ -90,12 +109,25 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _controller.removeListener(_onChanged);
+    // 退出页面前把检查点编辑立即落盘，防止意外返回/退出丢失用户更改
+    _controller.flushCheckpointSync();
     _controller.dispose();
     _majorEventCountController.dispose();
     _minorEventCountController.dispose();
     _checkpointCtrl.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // 退后台/进程被杀前冲刷未落盘的检查点编辑，防止最后一段输入丢失
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      _controller.flushCheckpointSync();
+    }
   }
 
   void _onChanged() {
@@ -174,9 +206,9 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        title: const Text(
-          '一键生成大纲',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+        title: Text(
+          _isReedit ? '局部重新生成' : '一键生成大纲',
+          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
         ),
         backgroundColor: Colors.white,
         elevation: 0.5,
@@ -225,42 +257,45 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _buildInputSection(),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                height: 44,
-                child: ElevatedButton.icon(
-                  onPressed: (c.loading || c.paused)
-                      ? null
-                      : () async {
-                          await c.generate();
-                          await _refreshDraft();
-                        },
-                  icon: c.loading
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                      : const Icon(Icons.auto_awesome),
-                  label: Text(c.loading ? '生成中...' : '一键生成大纲'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF4D6BFE),
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    textStyle: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
+              // 局部重新生成模式：隐藏设定区与「一键生成」按钮，直接进入检查点编辑
+              if (!_isReedit) ...[
+                _buildInputSection(),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  height: 44,
+                  child: ElevatedButton.icon(
+                    onPressed: (c.loading || c.paused)
+                        ? null
+                        : () async {
+                            await c.generate();
+                            await _refreshDraft();
+                          },
+                    icon: c.loading
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Icon(Icons.auto_awesome),
+                    label: Text(c.loading ? '生成中...' : '一键生成大纲'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF4D6BFE),
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      textStyle: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                 ),
-              ),
+              ],
               if (c.error != null) ...[
                 const SizedBox(height: 8),
                 Container(
@@ -425,7 +460,7 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
                 const SizedBox(height: 12),
                 _buildCheckpointCard(),
               ],
-              if (_hasDraft && !c.loading && !c.paused) ...[
+              if (!_isReedit && _hasDraft && !c.loading && !c.paused) ...[
                 const SizedBox(height: 12),
                 SizedBox(
                   width: double.infinity,
@@ -675,7 +710,7 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
       cardDesc = '可编辑书名与核心概念，确认后手动点击「继续」';
       fieldHint = '编辑书名与核心概念...';
     } else if (isSkeleton) {
-      cardTitle = '粗骨架已生成 · 检查点';
+      cardTitle = _isReedit ? '重新编辑粗骨 · 局部重新生成' : '粗骨架已生成 · 检查点';
       cardDesc = '可编辑下方内容、返回上一步或重新生成，确认后手动点击「继续」';
       fieldHint = '编辑三幕粗骨架...';
     } else if (kind == 'minor') {
@@ -683,7 +718,7 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
       cardDesc = '全部小事件已展开，可编辑全文、返回上一步或重新生成，确认后手动点击「继续」';
       fieldHint = '编辑全部展开内容...';
     } else {
-      cardTitle = '大事件已生成 · 检查点';
+      cardTitle = _isReedit ? '重新编辑大事件 · 局部重新生成' : '大事件已生成 · 检查点';
       cardDesc = '可编辑下方内容、返回上一步或重新生成，确认后手动点击「继续」';
       fieldHint = '编辑大事件概述...';
     }
@@ -721,6 +756,13 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
             cardDesc,
             style: TextStyle(fontSize: 12, color: Colors.grey[600]),
           ),
+          if (_isReedit) ...[
+            const SizedBox(height: 4),
+            Text(
+              '重新生成后将另存为新大纲，不会覆盖原记录',
+              style: const TextStyle(fontSize: 11, color: Color(0xFFB8860B)),
+            ),
+          ],
           const SizedBox(height: 8),
           TextField(
             controller: _checkpointCtrl,
@@ -736,6 +778,8 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage> {
               fillColor: Colors.white,
               isDense: true,
             ),
+            // 编辑内容实时同步到控制器并防抖落盘，意外退出页面后可通过「继续上次」恢复
+            onChanged: (v) => _controller.syncCheckpointEdit(v),
           ),
           const SizedBox(height: 10),
           // 导航行：返回上一步 / 下一步（按状态动态显示，仅出现有意义的方向）

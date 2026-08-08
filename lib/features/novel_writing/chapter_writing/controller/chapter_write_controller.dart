@@ -176,12 +176,27 @@ class ChapterWriteController {
     isLoading = false;
   }
 
+  /// 章节默认目标字数（设置中的单章最少字数），供生成前输入框预填。
+  Future<int> loadDefaultWords() async {
+    try {
+      final settings = await _service.loadSettings();
+      return settings.chapterSetting.chapterMinWords;
+    } catch (_) {
+      return 2000;
+    }
+  }
+
   /// 开始生成章节内容
+  ///
+  /// [targetWords] 用户为本章指定的目标字数：传入时覆盖设置默认范围
+  /// （min=max=目标字数），并按目标同步放大单次输出上限，避免被 max_tokens 截断；
+  /// 为空时沿用设置的默认范围。
   Future<void> startWrite(
     BuildContext context,
     OutlineChapter ch,
-    VoidCallback onUpdate,
-  ) async {
+    VoidCallback onUpdate, {
+    int? targetWords,
+  }) async {
     if (ch.id == null || ch.eventType != 'minor') return; // 大事件不可写
     final settings = await _service.loadSettings();
     if (settings.apiKey.isEmpty) {
@@ -218,6 +233,14 @@ class ChapterWriteController {
         : (allCharacters.isNotEmpty
               ? [allCharacters.first]
               : const <CharacterProfile>[]);
+    // 用户指定本章字数时：min=max=目标字数（提示词显示「字数 N 字」），
+    // 并按目标放大单次输出上限（约 2 token/字，封顶 8192），避免被 max_tokens 截断
+    final minWords = targetWords ?? settings.chapterSetting.chapterMinWords;
+    final maxWords = targetWords ?? settings.chapterSetting.chapterMaxWords;
+    final baseMaxTokens = settings.chapterSetting.maxTokens;
+    final effectiveMaxTokens = targetWords != null
+        ? (targetWords * 2).clamp(baseMaxTokens, 8192).toInt()
+        : baseMaxTokens;
     final prompt = ChapterWritePromptTemplate.buildWritePrompt(
       outline: outline,
       outlineExcerpt: _buildLocalOutline(ch),
@@ -231,8 +254,8 @@ class ChapterWriteController {
       prevEventTitle: _findAdjacentTitle(ch, -1),
       nextEvents: _findNextEvents(ch, 3),
       isLastOfMajor: _isLastMinorOfMajor(ch),
-      minWords: settings.chapterSetting.chapterMinWords,
-      maxWords: settings.chapterSetting.chapterMaxWords,
+      minWords: minWords,
+      maxWords: maxWords,
     );
 
     isWriting = true;
@@ -277,7 +300,7 @@ class ChapterWriteController {
           apiParams: {
             'model': settings.chapterSetting.model,
             'temperature': settings.chapterSetting.temperature,
-            'max_tokens': settings.chapterSetting.maxTokens,
+            'max_tokens': effectiveMaxTokens,
             // 与大纲生成保持一致：关闭深度思考时显式禁用，避免思考抢占输出预算
             if (!settings.chapterSetting.enableThinking)
               'thinking': {'type': 'disabled'},

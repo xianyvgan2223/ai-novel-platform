@@ -170,6 +170,20 @@ class _OutlineEditPageState extends State<_OutlineEditPage> {
     widget.onSaved();
   }
 
+  /// 局部重新生成：进入「编辑粗骨/大事件」检查点，仅重写对应下游内容，
+  /// 结果另存为新大纲记录，不覆盖当前原记录。
+  Future<void> _reedit(String kind) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => OutlineGenerationPage(
+          initialRecord: widget.record,
+          reeditKind: kind,
+        ),
+      ),
+    );
+    widget.onSaved();
+  }
+
   Future<void> _save() async {
     final newContent = _contentCtrl.text;
     final r = widget.record;
@@ -285,6 +299,45 @@ class _OutlineEditPageState extends State<_OutlineEditPage> {
                     ),
                   ),
                 ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => _reedit('skeleton'),
+                      icon: const Icon(Icons.edit_note, size: 18),
+                      label: const Text('编辑粗骨'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFF4D6BFE),
+                        side: const BorderSide(color: Color(0xFF4D6BFE)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => _reedit('events'),
+                      icon: const Icon(Icons.edit_note, size: 18),
+                      label: const Text('编辑大事件'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFF4D6BFE),
+                        side: const BorderSide(color: Color(0xFF4D6BFE)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '局部重新生成：编辑粗骨/大事件后仅重写对应下游内容，另存为新大纲',
+                style: TextStyle(fontSize: 11, color: Colors.grey[500]),
               ),
               const SizedBox(height: 12),
               Container(
