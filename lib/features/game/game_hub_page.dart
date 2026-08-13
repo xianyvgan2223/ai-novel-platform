@@ -4,6 +4,7 @@
 import 'package:flutter/material.dart';
 import 'novel_game_page.dart';
 import 'character_chat/view/character_select_page.dart';
+import 'trpg/view/page/trpg_home_page.dart';
 
 class GameHubPage extends StatelessWidget {
   const GameHubPage({super.key});
@@ -22,6 +23,13 @@ class GameHubPage extends StatelessWidget {
       description: '选择角色进行沉浸式AI对话，仿SillyTavern风格的角色扮演体验',
       icon: Icons.people,
       color: Color(0xFFE74C3C),
+    ),
+    _GameEntry(
+      id: 'trpg',
+      name: '跑团模拟器',
+      description: 'AI当主持人，掷骰判定、回合制冒险的DnD风格TRPG',
+      icon: Icons.casino,
+      color: Color(0xFF8E44AD),
     ),
   ];
 
@@ -97,6 +105,10 @@ class GameHubPage extends StatelessWidget {
         Navigator.of(
           context,
         ).push(MaterialPageRoute(builder: (_) => const CharacterSelectPage()));
+      case 'trpg':
+        Navigator.of(
+          context,
+        ).push(MaterialPageRoute(builder: (_) => const TrpgHomePage()));
     }
   }
 }

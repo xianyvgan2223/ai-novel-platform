@@ -634,6 +634,20 @@ class OutlineController extends ChangeNotifier {
     await _runAll();
   }
 
+  /// 从未完成的历史大纲记录继续生成：恢复骨架、伏笔账本与已生成的小事件内容，
+  /// 直接从未完成的展开块继续生成剩余小事件，并另存为新记录（不覆盖原大纲）。
+  Future<void> continueFromRecord(OutlineRecord record) async {
+    _resetState();
+    await _deleteProgress();
+    if (!_seedContinueFromRecord(record)) {
+      error = '无法从该大纲恢复未完成的生成进度，可能原大纲内容格式不完整';
+      loading = false;
+      notifyListeners();
+      return;
+    }
+    await _runAll();
+  }
+
   /// 等待上一次生成流程彻底结束，再启动新流程。
   ///
   /// 取消生成后，旧流程的流式请求仍可能在后台收尾（刚取消的请求完成、
@@ -1176,6 +1190,8 @@ class OutlineController extends ChangeNotifier {
   // ─── 历史记录解析（局部重新生成用） ──────────────────────────
 
   /// 从历史大纲记录重建状态：回填设定，解析书名/概念与三幕骨架。
+  /// 优先使用记录中持久化的骨架 JSON（兼容内容不完整的部分保存），
+  /// 旧记录无骨架字段时退回从 content 文本解析。
   /// 成功返回 true；格式不完整返回 false（调用方提示错误）。
   bool _seedFromRecord(OutlineRecord record) {
     genreController.text = record.genre;
@@ -1184,21 +1200,137 @@ class OutlineController extends ChangeNotifier {
     worldViewController.text = record.worldview;
     _fallbackForeshadows = record.foreshadows;
 
-    final titleConcept = _parseRecordTitleConcept(record);
-    if (titleConcept == null) return false;
-    _step1Json = titleConcept;
-    _step1Text = '书名：《${titleConcept.title}》\n\n${titleConcept.concept}';
-    _stepPreview = _step1Text!;
-    title = titleConcept.title;
+    if (!_restoreSkeletonFromRecord(record.skeleton)) {
+      final titleConcept = _parseRecordTitleConcept(record);
+      if (titleConcept == null) return false;
+      _step1Json = titleConcept;
 
-    final acts = _parseRecordActs(record.content);
-    if (acts == null || acts.length != 3) return false;
-    _step2Json = _Step2Result(acts: acts);
-    majorEventCount = acts.fold<int>(0, (s, a) => s + a.events.length);
+      final acts = _parseRecordActs(record.content);
+      if (acts == null || acts.length != 3) return false;
+      _step2Json = _Step2Result(acts: acts);
+    }
+
+    _step1Text = '书名：《${_step1Json!.title}》\n\n${_step1Json!.concept}';
+    _stepPreview = _step1Text!;
+    title = _step1Json!.title;
+    majorEventCount = _step2Json!.acts.fold<int>(
+      0,
+      (s, a) => s + a.events.length,
+    );
     _coarseSkeletonSnapshot = null; // 记录内容无粗骨架原始快照
-    _refinedBatchCount = _estimateRefinedBatchCount(acts); // 视为全部精写完成
+    _refinedBatchCount = _estimateRefinedBatchCount(
+      _step2Json!.acts,
+    ); // 视为全部精写完成
     _stepPreview = '${_step1Text ?? ''}\n\n${_renderSkeleton()}';
     _upsertBubble('三幕粗骨架', _renderSkeleton());
+    return true;
+  }
+
+  /// 从记录持久化的骨架 JSON 重建书名/概念与三幕骨架。
+  /// 成功返回 true；字段缺失或解析失败返回 false（调用方回退到文本解析）。
+  bool _restoreSkeletonFromRecord(String skeleton) {
+    final map = _decodeSkeleton(skeleton);
+    if (map == null) return false;
+    final s1 = map['step1'];
+    final s2 = map['step2'];
+    if (s1 is! Map<String, dynamic> || s2 is! Map<String, dynamic>) {
+      return false;
+    }
+    final step1 = _Step1Result.fromMap(s1);
+    final step2 = _Step2Result.fromMap(s2);
+    if (step1.title.trim().isEmpty ||
+        step1.concept.trim().isEmpty ||
+        step2.acts.length != 3 ||
+        step2.acts.any((a) => a.events.isEmpty)) {
+      return false;
+    }
+    _step1Json = step1;
+    _step2Json = step2;
+    return true;
+  }
+
+  /// 解析记录持久化的骨架 JSON；为空或非法时返回 null。
+  Map<String, dynamic>? _decodeSkeleton(String skeleton) {
+    if (skeleton.trim().isEmpty) return null;
+    try {
+      final map = jsonDecode(skeleton);
+      return map is Map<String, dynamic> ? map : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 从未完成大纲记录重建「继续生成」所需状态：
+  /// 书名/概念 + 三幕骨架 + 已生成的小事件内容 + 展开块进度 + 伏笔账本。
+  /// 成功返回 true；格式不完整返回 false。
+  bool _seedContinueFromRecord(OutlineRecord record) {
+    genreController.text = record.genre;
+    themeController.text = record.theme;
+    protagonistController.text = record.protagonist;
+    worldViewController.text = record.worldview;
+    _fallbackForeshadows = record.foreshadows;
+
+    final map = _decodeSkeleton(record.skeleton);
+    if (!_restoreSkeletonFromRecord(record.skeleton)) {
+      // 旧记录未持久化骨架：退回从 content 文本解析（需内容完整）
+      final titleConcept = _parseRecordTitleConcept(record);
+      if (titleConcept == null) return false;
+      _step1Json = titleConcept;
+
+      final acts = _parseRecordActs(record.content);
+      if (acts == null || acts.length != 3) return false;
+      _step2Json = _Step2Result(acts: acts);
+    }
+
+    _step1Text = '书名：《${_step1Json!.title}》\n\n${_step1Json!.concept}';
+    _stepPreview = _step1Text!;
+    title = _step1Json!.title;
+
+    // 先确定事件数量：优先使用记录持久化的原设定（保证与原始批次划分一致），
+    // 缺失时从骨架实际事件数推导。
+    final acts = _step2Json!.acts;
+    majorEventCount = acts.fold<int>(0, (s, a) => s + a.events.length);
+    if (map != null) {
+      final major = map['majorEventCount'];
+      if (major is int && major > 0) majorEventCount = major;
+      final minor = map['minorEventCount'];
+      if (minor is int && minor > 0) minorEventCount = minor;
+    }
+
+    _coarseSkeletonSnapshot = null;
+    _refinedBatchCount = _estimateRefinedBatchCount(acts); // 视为全部精写完成
+
+    // 续写状态：已生成的小事件内容与展开块进度
+    rawText = record.content.trim();
+    if (map != null) {
+      final completed = map['completedChunks'];
+      if (completed is int && completed >= 0) _completedChunkCount = completed;
+      final ledger = map['ledger'];
+      if (ledger is Map<String, dynamic>) {
+        _ledgerForeshadows
+          ..clear()
+          ..addAll(
+            (ledger['foreshadows'] as List?)
+                    ?.whereType<Map<String, dynamic>>() ??
+                const [],
+          );
+        _ledgerCharacters
+          ..clear()
+          ..addAll(
+            (ledger['characters'] as List?)?.whereType<String>() ?? const [],
+          );
+        _ledgerUnresolved
+          ..clear()
+          ..addAll(
+            (ledger['unresolved'] as List?)?.whereType<String>() ?? const [],
+          );
+      }
+    }
+
+    _stepPreview = '${_step1Text!}\n\n${_renderSkeleton()}';
+    if (displayText.isNotEmpty) {
+      _bubbles.add(OutlineStepBubble(label: '已生成内容', content: displayText));
+    }
     return true;
   }
 
@@ -2212,6 +2344,23 @@ class OutlineController extends ChangeNotifier {
       foreshadows: ledger == '（暂无）' && _fallbackForeshadows.isNotEmpty
           ? _fallbackForeshadows
           : ledger,
+      // 持久化三幕骨架（书名/概念 + 精写后大事件 + 续写所需进度信息），
+      // 供小事件未生成完就保存的历史大纲也能重新编辑粗骨/大事件，或继续生成
+      skeleton: _step1Json != null && _step2Json != null
+          ? jsonEncode({
+              'step1': _step1Json!.toJson(),
+              'step2': _step2Json!.toJson(),
+              'minorEventCount': minorEventCount,
+              'majorEventCount': majorEventCount,
+              'completedChunks': _completedChunkCount,
+              'totalChunks': _chunks.length,
+              'ledger': {
+                'foreshadows': _ledgerForeshadows,
+                'characters': _ledgerCharacters,
+                'unresolved': _ledgerUnresolved,
+              },
+            })
+          : '',
     );
   }
 
@@ -2304,8 +2453,8 @@ class OutlineController extends ChangeNotifier {
     try {
       // 暂停态保存当前检查点；非暂停态（取消后流程收尾）沿用最近一次暂停保存的检查点，
       // 避免取消时 checkpointKind 被清空后覆盖丢失，导致续跑无法回到检查点。
-      // 检查点数据与全部落盘内容都在 await 之前同步捕获为快照：
-      // 后续无论写入何时真正执行，落盘的都是调用时刻的准确状态
+      // 一旦进入步骤 3（小事件展开，_chunks 已构建），旧骨架/大事件检查点已通过，
+      // 不再落盘旧检查点，否则小事件中断续跑会被旧检查点拦回、无法从中断处继续。
       Map<String, dynamic>? checkpointData;
       if (paused && checkpointKind != null) {
         checkpointData = {
@@ -2316,7 +2465,7 @@ class OutlineController extends ChangeNotifier {
           'fromMinor': checkpointBackSource == 'minor',
         };
         _lastSavedCheckpoint = checkpointData;
-      } else {
+      } else if (_chunks.isEmpty) {
         checkpointData = _lastSavedCheckpoint;
       }
       final data = {

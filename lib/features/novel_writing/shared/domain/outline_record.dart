@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 /// 大纲生成记录模型
 class OutlineRecord {
   final int? id;
@@ -10,6 +12,7 @@ class OutlineRecord {
   final String foreshadows; // 伏笔清单（一键生成时的账本，供章节写作注入）
   final String storyState; // 剧情状态账本（随章节写作逐步累积）
   final String characters; // 人物档案 JSON（描述/能力/性格，性格仅用户可改）
+  final String skeleton; // 三幕骨架 JSON（书名/概念 + 精写后大事件，供局部重新生成重建）
   final String createdAt;
 
   OutlineRecord({
@@ -23,6 +26,7 @@ class OutlineRecord {
     this.foreshadows = '',
     this.storyState = '',
     this.characters = '',
+    this.skeleton = '',
     String? createdAt,
   }) : createdAt = createdAt ?? DateTime.now().toIso8601String();
 
@@ -36,6 +40,7 @@ class OutlineRecord {
     'foreshadows': foreshadows,
     'story_state': storyState,
     'characters': characters,
+    'skeleton': skeleton,
     'created_at': createdAt,
   };
 
@@ -50,6 +55,7 @@ class OutlineRecord {
     foreshadows: map['foreshadows'] as String? ?? '',
     storyState: map['story_state'] as String? ?? '',
     characters: map['characters'] as String? ?? '',
+    skeleton: map['skeleton'] as String? ?? '',
     createdAt: map['created_at'] as String?,
   );
 
@@ -60,6 +66,24 @@ class OutlineRecord {
       return '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
     } catch (_) {
       return createdAt;
+    }
+  }
+
+  /// 是否为「未完成」的大纲：小事件展开块已生成数小于总块数。
+  /// 依据记录持久化的骨架 JSON 中的进度字段判断；旧记录无进度字段时视为已完成。
+  bool get isIncomplete {
+    if (skeleton.trim().isEmpty) return false;
+    try {
+      final map = jsonDecode(skeleton);
+      if (map is! Map<String, dynamic>) return false;
+      final done = map['completedChunks'];
+      final total = map['totalChunks'];
+      if (done is int && total is int) {
+        return total > 0 && done < total;
+      }
+      return false;
+    } catch (_) {
+      return false;
     }
   }
 }

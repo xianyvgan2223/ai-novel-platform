@@ -184,6 +184,19 @@ class _OutlineEditPageState extends State<_OutlineEditPage> {
     widget.onSaved();
   }
 
+  /// 继续生成未完成大纲：从未完成的小事件展开块继续生成，结果另存为新记录。
+  Future<void> _continueGeneration() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => OutlineGenerationPage(
+          initialRecord: widget.record,
+          reeditKind: 'continue',
+        ),
+      ),
+    );
+    widget.onSaved();
+  }
+
   Future<void> _save() async {
     final newContent = _contentCtrl.text;
     final r = widget.record;
@@ -284,6 +297,25 @@ class _OutlineEditPageState extends State<_OutlineEditPage> {
               _infoRow('世界观', r.worldview),
               _infoRow('生成时间', r.formattedDate),
               const SizedBox(height: 16),
+              if (r.isIncomplete) ...[
+                SizedBox(
+                  width: double.infinity,
+                  height: 40,
+                  child: ElevatedButton.icon(
+                    onPressed: _continueGeneration,
+                    icon: const Icon(Icons.play_arrow, size: 18),
+                    label: const Text('继续生成'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF4D6BFE),
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
               SizedBox(
                 width: double.infinity,
                 height: 40,

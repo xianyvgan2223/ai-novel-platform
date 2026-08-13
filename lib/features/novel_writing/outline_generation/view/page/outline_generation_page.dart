@@ -31,6 +31,7 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
   String? _lastCheckpointSync; // 已同步到检查点编辑器的文本（避免覆盖用户输入）
   bool _hasDraft = false;
   late final bool _isReedit; // 是否处于历史大纲「局部重新生成」模式
+  late final bool _isContinue; // 是否处于未完成大纲「继续生成」模式
 
   static const _inspirations =
       <({String theme, String protagonist, String worldview})>[
@@ -76,14 +77,19 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
     _majorEventCountController.text = '${_controller.majorEventCount}';
     _minorEventCountController.text = '${_controller.minorEventCount}';
     _isReedit = widget.initialRecord != null && widget.reeditKind != null;
+    _isContinue = _isReedit && widget.reeditKind == 'continue';
     if (_isReedit) {
-      // 下一帧再启动局部重新生成流程，避免 initState 期间触发 setState
+      // 下一帧再启动历史大纲局部重新生成/继续生成，避免 initState 期间触发 setState
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        _controller.regenerateFromRecord(
-          widget.initialRecord!,
-          kind: widget.reeditKind!,
-        );
+        if (_isContinue) {
+          _controller.continueFromRecord(widget.initialRecord!);
+        } else {
+          _controller.regenerateFromRecord(
+            widget.initialRecord!,
+            kind: widget.reeditKind!,
+          );
+        }
       });
     }
     _refreshDraft();
@@ -207,7 +213,7 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
       backgroundColor: Colors.white,
       appBar: AppBar(
         title: Text(
-          _isReedit ? '局部重新生成' : '一键生成大纲',
+          _isContinue ? '继续生成' : (_isReedit ? '局部重新生成' : '一键生成大纲'),
           style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
         ),
         backgroundColor: Colors.white,
@@ -759,7 +765,7 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
           if (_isReedit) ...[
             const SizedBox(height: 4),
             Text(
-              '重新生成后将另存为新大纲，不会覆盖原记录',
+              _isContinue ? '继续生成后将另存为新大纲，不会覆盖原记录' : '重新生成后将另存为新大纲，不会覆盖原记录',
               style: const TextStyle(fontSize: 11, color: Color(0xFFB8860B)),
             ),
           ],

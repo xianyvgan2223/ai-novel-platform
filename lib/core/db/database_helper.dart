@@ -6,7 +6,7 @@ import 'package:path/path.dart' as p;
 
 class DatabaseHelper {
   static const _dbName = 'deepseek.db';
-  static const _dbVersion = 29;
+  static const _dbVersion = 31;
   static Database? _database;
 
   /// 单例入口，全局复用同一个数据库连接
@@ -229,6 +229,7 @@ class DatabaseHelper {
         protagonist TEXT NOT NULL DEFAULT '',
         worldview TEXT NOT NULL DEFAULT '',
         content TEXT NOT NULL DEFAULT '',
+        skeleton TEXT NOT NULL DEFAULT '',
         foreshadows TEXT NOT NULL DEFAULT '',
         story_state TEXT NOT NULL DEFAULT '',
         characters TEXT NOT NULL DEFAULT '',
@@ -314,6 +315,59 @@ class DatabaseHelper {
         importance INTEGER NOT NULL DEFAULT 1,
         created_at TEXT NOT NULL,
         FOREIGN KEY (session_id) REFERENCES character_chat_sessions(id) ON DELETE CASCADE
+      )
+    ''');
+
+    // ── trpg_campaigns 跑团战役表 ──
+    await db.execute('''
+      CREATE TABLE trpg_campaigns (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        dm_prompt TEXT NOT NULL DEFAULT '',
+        scene TEXT NOT NULL DEFAULT '',
+        flags TEXT NOT NULL DEFAULT '{}',
+        summary TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    ''');
+
+    // ── trpg_characters 跑团角色卡表（玩家 + NPC 共用） ──
+    await db.execute('''
+      CREATE TABLE trpg_characters (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        campaign_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        race TEXT NOT NULL DEFAULT '',
+        char_class TEXT NOT NULL DEFAULT '',
+        level INTEGER NOT NULL DEFAULT 1,
+        str INTEGER NOT NULL DEFAULT 10,
+        dex INTEGER NOT NULL DEFAULT 10,
+        con INTEGER NOT NULL DEFAULT 10,
+        intl INTEGER NOT NULL DEFAULT 10,
+        wis INTEGER NOT NULL DEFAULT 10,
+        cha INTEGER NOT NULL DEFAULT 10,
+        max_hp INTEGER NOT NULL DEFAULT 10,
+        current_hp INTEGER NOT NULL DEFAULT 10,
+        armor_bonus INTEGER NOT NULL DEFAULT 0,
+        skilled_skills TEXT NOT NULL DEFAULT '[]',
+        inventory TEXT NOT NULL DEFAULT '[]',
+        background TEXT NOT NULL DEFAULT '',
+        is_player INTEGER NOT NULL DEFAULT 0,
+        FOREIGN KEY (campaign_id) REFERENCES trpg_campaigns(id) ON DELETE CASCADE
+      )
+    ''');
+
+    // ── trpg_messages 跑团叙事/对话日志表 ──
+    await db.execute('''
+      CREATE TABLE trpg_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        campaign_id INTEGER NOT NULL,
+        is_user INTEGER NOT NULL DEFAULT 1,
+        content TEXT NOT NULL,
+        meta TEXT NOT NULL DEFAULT '{}',
+        timestamp TEXT NOT NULL,
+        FOREIGN KEY (campaign_id) REFERENCES trpg_campaigns(id) ON DELETE CASCADE
       )
     ''');
   }
@@ -766,6 +820,68 @@ class DatabaseHelper {
       if (!cols.any((c) => c['name'] == 'pause_after_minor')) {
         await db.execute(
           'ALTER TABLE outline_settings ADD COLUMN pause_after_minor INTEGER NOT NULL DEFAULT 0',
+        );
+      }
+    }
+
+    // V29 → V30：新增跑团（TRPG）模拟器相关表
+    if (oldVersion < 30) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS trpg_campaigns (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          dm_prompt TEXT NOT NULL DEFAULT '',
+          scene TEXT NOT NULL DEFAULT '',
+          flags TEXT NOT NULL DEFAULT '{}',
+          summary TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+      ''');
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS trpg_characters (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          campaign_id INTEGER NOT NULL,
+          name TEXT NOT NULL,
+          race TEXT NOT NULL DEFAULT '',
+          char_class TEXT NOT NULL DEFAULT '',
+          level INTEGER NOT NULL DEFAULT 1,
+          str INTEGER NOT NULL DEFAULT 10,
+          dex INTEGER NOT NULL DEFAULT 10,
+          con INTEGER NOT NULL DEFAULT 10,
+          intl INTEGER NOT NULL DEFAULT 10,
+          wis INTEGER NOT NULL DEFAULT 10,
+          cha INTEGER NOT NULL DEFAULT 10,
+          max_hp INTEGER NOT NULL DEFAULT 10,
+          current_hp INTEGER NOT NULL DEFAULT 10,
+          armor_bonus INTEGER NOT NULL DEFAULT 0,
+          skilled_skills TEXT NOT NULL DEFAULT '[]',
+          inventory TEXT NOT NULL DEFAULT '[]',
+          background TEXT NOT NULL DEFAULT '',
+          is_player INTEGER NOT NULL DEFAULT 0,
+          FOREIGN KEY (campaign_id) REFERENCES trpg_campaigns(id) ON DELETE CASCADE
+        )
+      ''');
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS trpg_messages (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          campaign_id INTEGER NOT NULL,
+          is_user INTEGER NOT NULL DEFAULT 1,
+          content TEXT NOT NULL,
+          meta TEXT NOT NULL DEFAULT '{}',
+          timestamp TEXT NOT NULL,
+          FOREIGN KEY (campaign_id) REFERENCES trpg_campaigns(id) ON DELETE CASCADE
+        )
+      ''');
+    }
+
+    // V30 → V31：outline_records 新增 skeleton 列（书名/概念 + 精写后三幕骨架 JSON），
+    // 供「局部重新生成」在内容不完整（如小事件中断后保存）时仍能重建粗骨与大事件
+    if (oldVersion < 31) {
+      final columns = await db.rawQuery('PRAGMA table_info(outline_records)');
+      if (!columns.any((c) => c['name'] == 'skeleton')) {
+        await db.execute(
+          "ALTER TABLE outline_records ADD COLUMN skeleton TEXT NOT NULL DEFAULT ''",
         );
       }
     }
