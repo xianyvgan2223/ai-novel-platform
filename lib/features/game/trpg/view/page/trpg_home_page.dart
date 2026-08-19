@@ -206,6 +206,20 @@ class _CreateCampaignDialogState extends State<_CreateCampaignDialog> {
     super.dispose();
   }
 
+  /// 打开全屏编辑页，方便编写较长的冒险背景
+  void _openFullscreenEditor() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => _FullscreenEditPage(
+          title: '冒险背景',
+          controller: _dmCtrl,
+          hintText: '输入世界观、剧情背景、初始场景等，会喂给主持人（DM）…',
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
@@ -231,15 +245,20 @@ class _CreateCampaignDialogState extends State<_CreateCampaignDialog> {
             TextField(
               controller: _dmCtrl,
               maxLines: 4,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: '冒险背景（可选，喂给主持人）',
-                labelStyle: TextStyle(fontSize: 13),
-                border: OutlineInputBorder(),
-                contentPadding: EdgeInsets.symmetric(
+                labelStyle: const TextStyle(fontSize: 13),
+                border: const OutlineInputBorder(),
+                contentPadding: const EdgeInsets.symmetric(
                   horizontal: 10,
                   vertical: 8,
                 ),
                 alignLabelWithHint: true,
+                suffixIcon: IconButton(
+                  onPressed: _openFullscreenEditor,
+                  tooltip: '全屏编辑',
+                  icon: const Icon(Icons.open_in_full, size: 18),
+                ),
               ),
               style: const TextStyle(fontSize: 13),
             ),
@@ -352,6 +371,84 @@ class _CampaignCard extends StatelessWidget {
                 ),
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 全屏编辑页 — 用于编辑较长的冒险背景等内容（共享同一个输入控制器）
+class _FullscreenEditPage extends StatefulWidget {
+  final String title;
+  final TextEditingController controller;
+  final String hintText;
+
+  const _FullscreenEditPage({
+    required this.title,
+    required this.controller,
+    this.hintText = '',
+  });
+
+  @override
+  State<_FullscreenEditPage> createState() => _FullscreenEditPageState();
+}
+
+class _FullscreenEditPageState extends State<_FullscreenEditPage> {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        toolbarHeight: 44,
+        backgroundColor: Colors.white,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        title: Text(
+          widget.title,
+          style: const TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF333333),
+          ),
+        ),
+        centerTitle: true,
+        leading: IconButton(
+          icon: const Icon(Icons.close, size: 20, color: Color(0xFF666666)),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text(
+              '完成',
+              style: TextStyle(fontSize: 13, color: Color(0xFF4D6BFE)),
+            ),
+          ),
+        ],
+        bottom: const PreferredSize(
+          preferredSize: Size.fromHeight(1),
+          child: Divider(height: 1, color: Color(0xFFEEEEEE)),
+        ),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+        child: TextField(
+          controller: widget.controller,
+          maxLines: null,
+          expands: true,
+          textAlignVertical: TextAlignVertical.top,
+          autofocus: true,
+          style: const TextStyle(
+            fontSize: 14,
+            height: 1.6,
+            color: Color(0xFF333333),
+          ),
+          decoration: InputDecoration(
+            hintText: widget.hintText,
+            hintStyle: const TextStyle(fontSize: 13, color: Color(0xFFBBBBBB)),
+            border: InputBorder.none,
+            contentPadding: EdgeInsets.zero,
           ),
         ),
       ),

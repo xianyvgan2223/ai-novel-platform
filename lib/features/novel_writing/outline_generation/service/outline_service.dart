@@ -235,6 +235,18 @@ $laterContent
 
 ''';
 
+    // 从本块大事件框架中提取全局编号范围，明确告知模型，防止跳号/重复编号
+    final nums = <int>[];
+    for (final line in actContent.split('\n')) {
+      final m = RegExp(r'^大事件\s*(\d+)\s*[：:]').firstMatch(line.trim());
+      if (m != null) nums.add(int.parse(m.group(1)!));
+    }
+    final numberHint = nums.isEmpty
+        ? ''
+        : (nums.length == 1
+              ? '本块只需输出编号为「大事件${nums.first}」的大事件'
+              : '本块需按顺序输出编号为「大事件${nums.first}」至「大事件${nums.last}」的大事件');
+
     return '''
 请展开第$actIndex幕（$actName）的详细内容。
 
@@ -270,6 +282,9 @@ $actContent
 
 注意：
 - 只输出当前这一幕的内容，不要输出其他幕
+- $numberHint，每个大事件只允许输出一次，编号必须与「当前幕已有的大事件框架」完全一致
+- 严禁重复或回显任何已出现的大事件（包括全局框架中其他事件、前一块已展开的详细内容），
+  如发现与本块重复的事件请直接省略，宁缺毋滥
 - 保持大事件标题和概述与已有框架一致
 - 小事件要有递进关系，禁止平铺流水账
 - 参照全局框架中其他幕的人物状态与伏笔，避免前后矛盾

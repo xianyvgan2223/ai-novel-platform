@@ -164,6 +164,42 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
     if (mounted) setState(() => _hasDraft = has);
   }
 
+  // 气泡 Widget 实例缓存：内容未变化的气泡复用同一实例，
+  // Flutter 对 identical 的旧实例会跳过 rebuild/layout，避免流式更新时
+  // 每 300ms 全量重建几十个大段 SelectableText 导致卡顿。
+  String? _bubbleCacheKey;
+  List<Widget> _bubbleCacheWidgets = const [];
+
+  List<Widget> _bubbleWidgetsFor(List<OutlineStepBubble> bubbles) {
+    final key = StringBuffer();
+    for (final b in bubbles) {
+      key
+        ..write(b.label)
+        ..write('\u0001')
+        ..write(b.isError ? '1' : '0')
+        ..write('\u0001')
+        ..write(b.content)
+        ..write('\u0002');
+    }
+    final k = key.toString();
+    if (k == _bubbleCacheKey) return _bubbleCacheWidgets;
+    _bubbleCacheKey = k;
+    _bubbleCacheWidgets = List.unmodifiable([
+      for (final b in bubbles)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: RepaintBoundary(
+            child: _buildBubble(
+              label: b.label,
+              content: b.content,
+              isError: b.isError,
+            ),
+          ),
+        ),
+    ]);
+    return _bubbleCacheWidgets;
+  }
+
   Future<void> _onResume() async {
     await _controller.resume();
     await _refreshDraft();
@@ -381,15 +417,8 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
                     ),
                   ),
                 // 已提交的多气泡（步骤结果 / 失败尝试的思考与输出）
-                for (final b in c.bubbles)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: _buildBubble(
-                      label: b.label,
-                      content: b.content,
-                      isError: b.isError,
-                    ),
-                  ),
+                // 缓存复用实例：流式更新时未变化的气泡直接跳过重建
+                ..._bubbleWidgetsFor(c.bubbles),
                 // 回退：无气泡但有历史/预览内容（如断点续跑恢复）
                 if (c.bubbles.isEmpty &&
                     c.displayText.isNotEmpty &&
@@ -402,14 +431,18 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
                       isError: false,
                     ),
                   ),
-                // 实时流式气泡
+                // 实时流式气泡：每 300ms 更新，用 RepaintBoundary 隔离重绘，
+                // 用普通 Text 而非 SelectableText（后者布局成本高，流式期间不可选也无妨）
                 if (c.liveText.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 10),
-                    child: _buildBubble(
-                      label: '生成中',
-                      content: c.liveText,
-                      isError: false,
+                    child: RepaintBoundary(
+                      child: _buildBubble(
+                        label: '生成中',
+                        content: c.liveText,
+                        isError: false,
+                        selectable: false,
+                      ),
                     ),
                   )
                 else if (c.loading)
@@ -930,10 +963,13 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
   }
 
   /// 渲染单个生成内容气泡
+  /// [selectable] 为 false 时（流式更新中的内容）用普通 Text 渲染，
+  /// 布局成本远低于 SelectableText，显著降低大文档流式刷新时的卡顿。
   Widget _buildBubble({
     String? label,
     required String content,
     required bool isError,
+    bool selectable = true,
   }) {
     return Container(
       width: double.infinity,
@@ -975,14 +1011,24 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
             ),
             const SizedBox(height: 6),
           ],
-          SelectableText(
-            content.isEmpty ? '（无内容）' : content,
-            style: const TextStyle(
-              fontSize: 12,
-              height: 1.5,
-              color: Color(0xFF444444),
+          if (selectable)
+            SelectableText(
+              content.isEmpty ? '（无内容）' : content,
+              style: const TextStyle(
+                fontSize: 12,
+                height: 1.5,
+                color: Color(0xFF444444),
+              ),
+            )
+          else
+            Text(
+              content.isEmpty ? '（无内容）' : content,
+              style: const TextStyle(
+                fontSize: 12,
+                height: 1.5,
+                color: Color(0xFF444444),
+              ),
             ),
-          ),
         ],
       ),
     );

@@ -95,6 +95,7 @@ class OutlineController extends ChangeNotifier {
   List<_ExpandChunk> _chunks = [];
   int _flushIndex = 0; // 已按序刷入 rawText 的块数
   int _completedChunkCount = 0; // 已完成的块数（含乱序完成）
+  final Set<String> _seenEventTitles = {}; // 已实际输出过的大事件标题（归一化键），用于跨块去重回显
 
   // ─── 检查点（生成暂停审查）状态 ──────────────────────────────
   bool paused = false; // 是否处于检查点暂停
@@ -580,11 +581,9 @@ class OutlineController extends ChangeNotifier {
       if (!pos.hasContentDimensions) return;
       final max = pos.maxScrollExtent;
       if (pos.pixels < max - 200) return;
-      scrollController.animateTo(
-        max,
-        duration: const Duration(milliseconds: 80),
-        curve: Curves.easeOut,
-      );
+      // 流式期间每 300ms 触发一次，animateTo 动画会逐帧布局整份大文档导致卡顿，
+      // 改用 jumpTo 直接定位，开销最小
+      scrollController.jumpTo(max);
     });
   }
 
@@ -1912,6 +1911,9 @@ class OutlineController extends ChangeNotifier {
     const actNames = ['第一幕', '第二幕', '第三幕'];
     final acts = _step2Json!.acts;
     _chunks = [];
+    // 重置跨块去重集合；续跑恢复时 rawText 已含此前展开的内容，预置其标题
+    _seenEventTitles.clear();
+    _seedSeenTitlesFromRawText();
     var globalIndex = 0;
     for (int i = 0; i < acts.length; i++) {
       final events = acts[i].events;
@@ -2051,6 +2053,11 @@ class OutlineController extends ChangeNotifier {
         chunk: chunk,
       );
       if (_cancelled) return;
+      // 归一化本块输出：按全局骨架对齐大事件编号、丢弃跨块/块内重复的事件，
+      // 避免模型回显或跳号导致最终大纲出现「大事件45 → 又出现大事件5」的重复
+      _normalizeChunkBuffer(chunk);
+      _liveText = _mergeChunkLiveText();
+      notifyListeners();
       chunk.done = true;
       if (truncated) {
         chunk.truncated = true;
@@ -2123,9 +2130,11 @@ class OutlineController extends ChangeNotifier {
       }
       String roundFinish = '';
       var attempt = 0;
+      final roundText = StringBuffer(); // 本轮新增内容（续写重叠裁剪用）
+      var roundStartLen = 0; // 本轮开始前 buffer 长度（续写重叠裁剪用，循环外声明供轮末使用）
       while (true) {
         if (_cancelled) return false;
-        final roundStartLen = chunk.buffer.length;
+        roundStartLen = chunk.buffer.length;
         final completer = Completer<void>();
         try {
           await _outlineService.streamGenerate(
@@ -2147,6 +2156,7 @@ class OutlineController extends ChangeNotifier {
               final content = delta?['content'] as String?;
               if (content != null && content.isNotEmpty) {
                 chunk.buffer += content;
+                roundText.write(content);
                 _liveText = _mergeChunkLiveText();
                 _throttledNotify();
                 _throttledScroll();
@@ -2186,6 +2196,19 @@ class OutlineController extends ChangeNotifier {
           rethrow;
         }
         break;
+      }
+      // 续写去重：模型在 max_tokens 截断续写时，经常把上一轮结尾的段落
+      // 原样重复一遍再继续。检测本轮开头与已有内容尾部的重叠并裁掉，
+      // 避免重复段落被拼入最终大纲。
+      if (continuation > 0) {
+        final raw = roundText.toString();
+        final trimmed = _trimContinuationOverlap(
+          chunk.buffer.substring(0, roundStartLen),
+          raw,
+        );
+        if (trimmed.length != raw.length) {
+          chunk.buffer = chunk.buffer.substring(0, roundStartLen) + trimmed;
+        }
       }
       if (_cancelled) return false;
 
@@ -2228,6 +2251,166 @@ class OutlineController extends ChangeNotifier {
       parts.add(c.isActStart ? '${c.header}\n$body' : body);
     }
     return parts.join('\n\n');
+  }
+
+  // ─── 展开输出归一化（编号对齐 + 跨块去重） ────────────────────
+
+  /// 续写重叠裁剪：检测 [existing] 尾部与 [newText] 开头的最长公共重叠并裁掉。
+  /// 重叠少于 [minOverlap] 个字符时不裁剪，避免误伤正常内容。
+  String _trimContinuationOverlap(
+    String existing,
+    String newText, {
+    int minOverlap = 8,
+  }) {
+    if (existing.isEmpty || newText.isEmpty) return newText;
+    // 只取 existing 尾部窗口比较，避免长文本 O(n²)
+    final tail = existing.length <= 240
+        ? existing
+        : existing.substring(existing.length - 240);
+    if (tail.isEmpty) return newText;
+    final maxL = tail.length < newText.length ? tail.length : newText.length;
+    for (int l = maxL; l >= minOverlap; l--) {
+      if (tail.endsWith(newText.substring(0, l))) {
+        return newText.substring(l);
+      }
+    }
+    return newText;
+  }
+
+  /// 归一化单个展开块：解析模型输出中的「大事件」块，
+  /// 丢弃跨块回显/块内重复的事件，按骨架标题匹配到正确位置（容忍乱序/轻微改写），
+  /// 最后把标题行统一重写为「══ 大事件N：标题 ══」，编号为全局正确序号。
+  /// 这是 App 侧的最后一道防线：无论模型如何跳号/重复，最终大纲编号始终连续且唯一。
+  void _normalizeChunkBuffer(_ExpandChunk chunk) {
+    final expected = _chunkExpectedTitles(chunk);
+    if (expected.isEmpty) return;
+    final blocks = _splitEventBlocks(chunk.buffer);
+    if (blocks.isEmpty) return;
+    // 存在无标题的块（模型未按格式输出标题行）时不归一化，原样保留避免破坏内容
+    if (blocks.any((b) => b.title.trim().isEmpty)) return;
+
+    // 第一遍：丢弃标题重复的块。规则：
+    // - 跨块回显（标题不在本块预期标题中，且此前已输出过）→ 丢弃
+    // - 块内重复（本块内已输出过相同标题）→ 丢弃
+    // - 骨架自身存在重复标题时（AI 粗骨架的合法输出），标题属于本块预期 → 保留
+    final unique = <_EventBlock>[];
+    final seen = <String>{..._seenEventTitles};
+    final expectedKeys = {for (final t in expected) _normalizeTitleKey(t)};
+    for (final b in blocks) {
+      final key = _normalizeTitleKey(b.title);
+      if (key.isEmpty) continue;
+      if (seen.contains(key) && !expectedKeys.contains(key)) continue;
+      if (unique.any((u) => _normalizeTitleKey(u.title) == key)) continue;
+      seen.add(key);
+      unique.add(b);
+    }
+    if (unique.isEmpty) {
+      // 极端情况：全部被判为重复，保留第一个块避免内容完全丢失
+      unique.add(blocks.first);
+    }
+
+    // 第二遍：按骨架标题匹配正确位置；未匹配的块按顺序填充剩余空位，
+    // 超出预期数量的块（模型多输出的）自然丢弃
+    final used = <int>{};
+    final placed = <(int, _EventBlock)>[];
+    final unmatched = <_EventBlock>[];
+    for (final b in unique) {
+      final key = _normalizeTitleKey(b.title);
+      int? pos;
+      for (int i = 0; i < expected.length; i++) {
+        if (!used.contains(i) && _normalizeTitleKey(expected[i]) == key) {
+          pos = i;
+          break;
+        }
+      }
+      if (pos != null) {
+        used.add(pos);
+        placed.add((pos, b));
+      } else {
+        unmatched.add(b);
+      }
+    }
+    for (final b in unmatched) {
+      for (int i = 0; i < expected.length; i++) {
+        if (!used.contains(i)) {
+          used.add(i);
+          placed.add((i, b));
+          break;
+        }
+      }
+    }
+    placed.sort((a, b) => a.$1.compareTo(b.$1));
+
+    // 记录本次实际输出的标题，供后续块去重回显
+    for (final (_, b) in placed) {
+      _seenEventTitles.add(_normalizeTitleKey(b.title));
+    }
+
+    final buf = StringBuffer();
+    for (int k = 0; k < placed.length; k++) {
+      final (_, b) = placed[k];
+      buf.writeln('══ 大事件${chunk.globalStartIndex + k}：${b.title} ══');
+      final body = b.body.trim();
+      if (body.isNotEmpty) buf.writeln(body);
+      buf.writeln();
+    }
+    chunk.buffer = buf.toString().trim();
+  }
+
+  /// 解析模型输出文本中的事件块：标题行（大事件N：标题）开始，正文到下一个标题行结束。
+  List<_EventBlock> _splitEventBlocks(String text) {
+    final headerRe = RegExp(r'^\s*═*\s*大事件\s*[0-9Xx]*\s*[：:]\s*(.+?)\s*═*\s*$');
+    final blocks = <_EventBlock>[];
+    String? curTitle;
+    final bodyBuf = StringBuffer();
+    void flush() {
+      if (curTitle != null) {
+        blocks.add(_EventBlock(curTitle!, bodyBuf.toString().trim()));
+      }
+      curTitle = null;
+      bodyBuf.clear();
+    }
+
+    for (final raw in text.split('\n')) {
+      final line = raw.trimRight();
+      final m = headerRe.firstMatch(line.trim());
+      if (m != null) {
+        flush();
+        curTitle = m.group(1)!.trim();
+        continue;
+      }
+      if (curTitle != null) bodyBuf.writeln(line);
+    }
+    flush();
+    return blocks;
+  }
+
+  /// 本块骨架中的预期事件标题（按顺序），来源：_buildChunks 生成的块内容
+  List<String> _chunkExpectedTitles(_ExpandChunk chunk) {
+    final re = RegExp(r'^大事件\s*\d+\s*[：:]\s*(.+)$');
+    return [
+      for (final line in chunk.content.split('\n'))
+        if (re.hasMatch(line.trim()))
+          re.firstMatch(line.trim())!.group(1)!.trim(),
+    ];
+  }
+
+  /// 标题归一化键：去空白、去结尾标点，用于标题比对
+  String _normalizeTitleKey(String title) => title
+      .replaceAll(RegExp(r'\s+'), '')
+      .replaceAll(RegExp(r'[。．.！？!?，,、；;：:…~～]+$'), '');
+
+  /// 断点续跑恢复时，把 rawText 中已刷入内容的大事件标题预置进去重集合，
+  /// 防止后续块回显续跑前已生成的事件。
+  void _seedSeenTitlesFromRawText() {
+    if (rawText.isEmpty) return;
+    final re = RegExp(r'^\s*═*\s*大事件\s*\d+\s*[：:]\s*(.+?)\s*═*\s*$');
+    for (final line in rawText.split('\n')) {
+      final m = re.firstMatch(line.trim());
+      if (m != null) {
+        _seenEventTitles.add(_normalizeTitleKey(m.group(1)!.trim()));
+      }
+    }
   }
 
   /// 将连续完成的块按序刷入 rawText，并为每块提交一个展示气泡
@@ -2412,6 +2595,7 @@ class OutlineController extends ChangeNotifier {
     _chunks = [];
     _flushIndex = 0;
     _completedChunkCount = 0;
+    _seenEventTitles.clear();
     paused = false;
     checkpointKind = null;
     checkpointText = '';
@@ -2726,6 +2910,13 @@ class _ExpandChunk {
     required this.globalStartIndex,
     required this.globalEndIndex,
   });
+}
+
+/// 模型输出中解析出的事件块：标题 + 正文（含小事件展开等后续内容）
+class _EventBlock {
+  final String title;
+  final String body;
+  _EventBlock(this.title, this.body);
 }
 
 /// 步骤 2 的一个精写批次：某幕内连续的一段大事件（粗骨架定位）
