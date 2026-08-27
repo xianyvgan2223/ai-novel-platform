@@ -101,6 +101,17 @@ class OutlineChapterDbHelper {
     );
   }
 
+  /// 更新本章独立的剧情账本（story_state 列）
+  Future<void> updateStoryState(int id, String storyState) async {
+    final db = await database;
+    await db.update(
+      'outline_chapters',
+      {'story_state': storyState, 'updated_at': DateTime.now().toIso8601String()},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
   /// 删除某个大纲的所有章节
   Future<void> deleteByOutlineId(int outlineId) async {
     final db = await database;

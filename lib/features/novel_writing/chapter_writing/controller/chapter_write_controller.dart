@@ -39,6 +39,10 @@ class ChapterWriteController {
   String protagonistThinking = ''; // 主角档案提炼的思考过程（独立气泡展示）
   String reviewThinking = ''; // 章节审查的思考过程（独立气泡展示，位于正文下方）
   String storyStateThinking = ''; // 账本提炼的思考过程（独立气泡展示）
+  bool reviewingProtagonist = false; // 主角档案审查阶段（独立于章节审查的 UI 状态）
+  String protagonistReviewText = ''; // 主角档案审查意见（独立气泡，位于主角区，区别于章节审查）
+  String protagonistReviewThinking = ''; // 档案审查思考过程（独立气泡展示）
+  String errorText = ''; // 最近一次生成失败的错误信息（写视图错误气泡展示，避免静默失败）
   CancelToken? _cancelToken;
   bool _cancelled = false;
 
@@ -74,6 +78,7 @@ class ChapterWriteController {
           content: old.content,
           status: 'completed',
           aiSummary: old.aiSummary,
+          storyState: old.storyState,
         );
       }
     }
@@ -173,6 +178,16 @@ class ChapterWriteController {
         await _reloadChapters();
       }
     } catch (_) {}
+    // 清理遗留的 generating 状态：页面退出/进程被杀可能留下「生成中」但无正文的
+    // 章节（旧版本返回键取消生成的产物），统一恢复为待生成，避免卡死后续章节的
+    // 「写」按钮；有正文的章节在生成流程中已落盘为 completed，不受影响。
+    for (int i = 0; i < chapters.length; i++) {
+      final c = chapters[i];
+      if (c.status == 'generating' && c.content.trim().isEmpty && c.id != null) {
+        await OutlineChapterDbHelper().updateStatus(c.id!, 'pending');
+        chapters[i] = c.copyWith(status: 'pending');
+      }
+    }
     isLoading = false;
   }
 
@@ -208,56 +223,6 @@ class ChapterWriteController {
       return;
     }
 
-    // 一次性加载章节列表与记录，避免前文/小结/状态多处重复查库
-    final allRows = await OutlineChapterDbHelper().getByOutlineId(outline.id!);
-    final allChapters = allRows.map((m) => OutlineChapter.fromMap(m)).toList();
-    final prevContent = _buildPrevContent(ch, allChapters);
-    // 读取最新的剧情状态、人物档案与伏笔清单（写章节期间可能已累积）
-    var freshRow = await OutlineRecordDbHelper().getById(outline.id!);
-    var allCharacters = _parseCharacters(
-      freshRow?['characters'] as String? ?? '',
-    );
-    // 第一章生成前：人物档案为空时先自动提炼主角档案（提炼 + 审查，过程可见气泡），
-    // 确保章节提示词能注入主角档案；已有档案则跳过
-    if (allCharacters.isEmpty && outline.protagonist.trim().isNotEmpty) {
-      await _seedProtagonistFromOutline(onUpdate: onUpdate);
-      freshRow = await OutlineRecordDbHelper().getById(outline.id!);
-      allCharacters = _parseCharacters(
-        freshRow?['characters'] as String? ?? '',
-      );
-    }
-    // 只直接注入主角档案，其他人物由模型按需调用工具查询
-    final protagonists = allCharacters.where((c) => c.isProtagonist).toList();
-    final directChars = protagonists.isNotEmpty
-        ? protagonists
-        : (allCharacters.isNotEmpty
-              ? [allCharacters.first]
-              : const <CharacterProfile>[]);
-    // 用户指定本章字数时：min=max=目标字数（提示词显示「字数 N 字」），
-    // 并按目标放大单次输出上限（约 2 token/字，封顶 8192），避免被 max_tokens 截断
-    final minWords = targetWords ?? settings.chapterSetting.chapterMinWords;
-    final maxWords = targetWords ?? settings.chapterSetting.chapterMaxWords;
-    final baseMaxTokens = settings.chapterSetting.maxTokens;
-    final effectiveMaxTokens = targetWords != null
-        ? (targetWords * 2).clamp(baseMaxTokens, 8192).toInt()
-        : baseMaxTokens;
-    final prompt = ChapterWritePromptTemplate.buildWritePrompt(
-      outline: outline,
-      outlineExcerpt: _buildLocalOutline(ch),
-      ch: ch,
-      prevContent: prevContent,
-      prevEnding: _buildPrevEnding(ch, allChapters),
-      storyState: freshRow?['story_state'] as String? ?? '',
-      characters: _renderCharactersText(directChars),
-      foreshadows: freshRow?['foreshadows'] as String? ?? '',
-      parentMajor: _findParentMajor(ch),
-      prevEventTitle: _findAdjacentTitle(ch, -1),
-      nextEvents: _findNextEvents(ch, 3),
-      isLastOfMajor: _isLastMinorOfMajor(ch),
-      minWords: minWords,
-      maxWords: maxWords,
-    );
-
     isWriting = true;
     writingId = ch.id;
     writingText = '';
@@ -270,16 +235,77 @@ class ChapterWriteController {
     protagonistThinking = '';
     reviewThinking = '';
     storyStateThinking = '';
+    protagonistReviewText = '';
+    protagonistReviewThinking = '';
     reviewing = false;
+    reviewingProtagonist = false;
     extractingStory = false;
     extractingProtagonist = false;
+    errorText = '';
     _cancelled = false;
     _cancelToken = CancelToken();
     onUpdate();
 
-    await OutlineChapterDbHelper().updateStatus(ch.id!, 'generating');
-
     try {
+      // 一次性加载章节列表与记录，避免前文/小结/状态多处重复查库
+      final allRows = await OutlineChapterDbHelper().getByOutlineId(outline.id!);
+      final allChapters = allRows.map((m) => OutlineChapter.fromMap(m)).toList();
+      final prevContent = _buildPrevContent(ch, allChapters);
+      // 读取最新的剧情状态、人物档案与伏笔清单（写章节期间可能已累积）
+      var freshRow = await OutlineRecordDbHelper().getById(outline.id!);
+      var allCharacters = _parseCharacters(
+        freshRow?['characters'] as String? ?? '',
+      );
+      // 第一章生成前：人物档案为空时先自动提炼主角档案（提炼 + 审查，过程可见气泡），
+      // 确保章节提示词能注入主角档案；已有档案则跳过
+      if (allCharacters.isEmpty && outline.protagonist.trim().isNotEmpty) {
+        await _seedProtagonistFromOutline(onUpdate: onUpdate);
+        freshRow = await OutlineRecordDbHelper().getById(outline.id!);
+        allCharacters = _parseCharacters(
+          freshRow?['characters'] as String? ?? '',
+        );
+      }
+      // 只直接注入主角档案，其他人物由模型按需调用工具查询
+      final protagonists = allCharacters.where((c) => c.isProtagonist).toList();
+      final directChars = protagonists.isNotEmpty
+          ? protagonists
+          : (allCharacters.isNotEmpty
+                ? [allCharacters.first]
+                : const <CharacterProfile>[]);
+      // 仅当存在主角以外的人物档案时才启用按需查询工具：
+      // 第一章通常只有主角档案，禁用工具让模型直接写作，避免模型为查询
+      // 并不存在的配角档案而多轮调用工具，导致正文生成失败
+      final enableCharacterLookup = allCharacters.any((c) => !c.isProtagonist);
+      // 用户指定本章字数时：min=max=目标字数（提示词显示「字数 N 字」），
+      // 并按目标放大单次输出上限（约 2 token/字，封顶 8192），避免被 max_tokens 截断；
+      // 设置值异常（>8192 或 <1，如误填大数）时不参与 clamp，直接沿用设置值，
+      // 避免 clamp 上下界非法抛 ArgumentError 导致生成在开始前就失败
+      final minWords = targetWords ?? settings.chapterSetting.chapterMinWords;
+      final maxWords = targetWords ?? settings.chapterSetting.chapterMaxWords;
+      final baseMaxTokens = settings.chapterSetting.maxTokens;
+      final effectiveMaxTokens =
+          (targetWords != null && baseMaxTokens >= 1 && baseMaxTokens <= 8192)
+              ? (targetWords * 2).clamp(baseMaxTokens, 8192).toInt()
+              : baseMaxTokens;
+      final prompt = ChapterWritePromptTemplate.buildWritePrompt(
+        outline: outline,
+        outlineExcerpt: _buildLocalOutline(ch),
+        ch: ch,
+        prevContent: prevContent,
+        prevEnding: _buildPrevEnding(ch, allChapters),
+        // 全局剧情状态取上一章账本（第一章为空），与账本提炼的输入保持一致
+        storyState: _prevChapterLedger(ch, allChapters),
+        characters: _renderCharactersText(directChars),
+        foreshadows: freshRow?['foreshadows'] as String? ?? '',
+        parentMajor: _findParentMajor(ch),
+        prevEventTitle: _findAdjacentTitle(ch, -1),
+        nextEvents: _findNextEvents(ch, 3),
+        isLastOfMajor: _isLastMinorOfMajor(ch),
+        minWords: minWords,
+        maxWords: maxWords,
+        enableCharacterLookup: enableCharacterLookup,
+      );
+      await OutlineChapterDbHelper().updateStatus(ch.id!, 'generating');
       final messages = <Map<String, dynamic>>[
         {
           'role': 'system',
@@ -308,6 +334,7 @@ class ChapterWriteController {
           messages: messages,
           initialText: chapterBuffer.toString(),
           initialThinking: thinkingText,
+          tools: enableCharacterLookup ? characterLookupTools : null,
           onUpdate: onUpdate,
         );
         if (_cancelled) break;
@@ -320,6 +347,10 @@ class ChapterWriteController {
         messages.add({
           'role': 'assistant',
           'content': result.content.isEmpty ? null : result.content,
+          // 推理模型（deepseek-v4 思考模式）多轮工具调用：必须把上一轮 assistant 的
+          // reasoning_content 原样回传，否则 API 报 400「Missing reasoning_content
+          // in assistant message history」，章节生成会静默失败
+          if (result.reasoning.isNotEmpty) 'reasoning_content': result.reasoning,
           'tool_calls': result.toolCalls
               .map(
                 (tc) => {
@@ -343,6 +374,9 @@ class ChapterWriteController {
 
       // 正常结束或取消：保留已生成内容
       if (writingText.isNotEmpty) {
+        // 先落盘正文：在慢速尾段（AI 审查/账本提炼/整章小结）之前保存，
+        // 即使中途返回页面、误触返回键或进程被杀也不丢内容
+        await OutlineChapterDbHelper().updateContent(ch.id!, writingText);
         // 生成完成后插入 AI 审查修正（只修不合理处，不改变伏笔/剧情走向），
         // 审查失败或输出异常时保留原文
         if (!_cancelled) {
@@ -352,17 +386,23 @@ class ChapterWriteController {
             ch: ch,
             content: writingText,
             prevEnding: _buildPrevEnding(ch, allChapters),
+            storyState: _prevChapterLedger(ch, allChapters),
             characters: _renderCharactersText(directChars),
             onUpdate: onUpdate,
           );
           reviewing = false;
           onUpdate();
+          // 审查可能修正正文：修正后再落盘一次
+          await OutlineChapterDbHelper().updateContent(ch.id!, writingText);
         }
-        // 先落盘正文
-        await OutlineChapterDbHelper().updateContent(ch.id!, writingText);
         // 账本/小结更新计入章节生成流程：基于修正后的正文提炼，
         // 完成后再把章节置为「已完成」，避免出现正文已生成但账本未更新的情况
-        await _updateStoryState(ch, writingText, onUpdate: onUpdate);
+        await _updateStoryState(
+          ch,
+          writingText,
+          onUpdate: onUpdate,
+          allChapters: allChapters,
+        );
         await _summarizeChapter(ch, writingText);
         final idx = chapters.indexWhere((c) => c.id == ch.id);
         if (idx != -1) {
@@ -371,22 +411,38 @@ class ChapterWriteController {
             status: 'completed',
           );
         }
-      } else if (!_cancelled) {
-        // 工具循环耗尽仍未产出正文，恢复待生成避免卡在 generating
-        await OutlineChapterDbHelper().updateStatus(ch.id!, 'pending');
       }
     } catch (e) {
-      if (e is! DioException || e.type != DioExceptionType.cancel) {
-        if (writingText.isNotEmpty) {
-          await OutlineChapterDbHelper().updateContent(ch.id!, writingText);
-        } else {
-          await OutlineChapterDbHelper().updateStatus(ch.id!, 'pending');
-        }
+      // 任何失败（含网络错误/取消）都不丢弃已生成的正文；状态兜底在 finally。
+      // 记录错误信息供写视图展示，避免正文未生成时静默失败无从排查
+      errorText = e.toString().replaceFirst('Exception: ', '');
+      if (writingText.isNotEmpty) {
+        await OutlineChapterDbHelper().updateContent(ch.id!, writingText);
       }
     } finally {
       _cancelToken = null;
       isWriting = false;
       writingId = null;
+      // 状态兜底：任何路径都不允许章节卡在 generating（会锁住后续章节的
+      // 「写」按钮），也不允许内存状态与已落盘正文不一致
+      if (writingText.isNotEmpty) {
+        final idx = chapters.indexWhere((c) => c.id == ch.id);
+        if (idx != -1) {
+          final cur = chapters[idx];
+          if (cur.status != 'completed' || cur.content != writingText) {
+            chapters[idx] = cur.copyWith(
+              content: writingText,
+              status: 'completed',
+            );
+          }
+        }
+      } else {
+        await OutlineChapterDbHelper().updateStatus(ch.id!, 'pending');
+        final idx = chapters.indexWhere((c) => c.id == ch.id);
+        if (idx != -1) {
+          chapters[idx] = chapters[idx].copyWith(status: 'pending');
+        }
+      }
       onUpdate();
     }
   }
@@ -395,6 +451,8 @@ class ChapterWriteController {
   ///
   /// [initialText] / [initialThinking] 前几轮已生成的正文/思考，仅用于流式展示时
   /// 拼接显示，返回的 `content` 仍只包含本轮新增内容，由调用方累积保存。
+  /// [tools] 可传 null 禁用工具（第一章只有主角档案时直接写作，避免多轮工具调用失败）。
+  /// 流式请求失败或未产出任何内容（既无正文也无工具调用）时，回退一次非流式请求。
   Future<_StreamChapterResult> _streamChapterWithTools({
     required String apiKey,
     required Map<String, dynamic> apiParams,
@@ -402,67 +460,99 @@ class ChapterWriteController {
     required VoidCallback onUpdate,
     String initialText = '',
     String initialThinking = '',
+    List<Map<String, dynamic>>? tools,
   }) async {
     final completer = Completer<void>();
     final content = StringBuffer();
     final thinking = StringBuffer();
     final toolAccs = <int, _ToolCallAcc>{};
-    await _service.streamWrite(
-      apiKey: apiKey,
-      apiParams: {...apiParams, 'stream': true},
-      messages: messages,
-      tools: characterLookupTools,
-      cancelToken: _cancelToken,
-      onChunk: (chunk) {
-        final choices = chunk['choices'] as List?;
-        if (choices == null || choices.isEmpty) return;
-        final delta = choices[0]['delta'] as Map<String, dynamic>?;
-        if (delta == null) return;
-        final text = delta['content'] as String?;
-        if (text != null && text.isNotEmpty) {
-          content.write(text);
+    String? streamError;
+    try {
+      await _service.streamWrite(
+        apiKey: apiKey,
+        apiParams: {...apiParams, 'stream': true},
+        messages: messages,
+        tools: tools,
+        cancelToken: _cancelToken,
+        onChunk: (chunk) {
+          final choices = chunk['choices'] as List?;
+          if (choices == null || choices.isEmpty) return;
+          final delta = choices[0]['delta'] as Map<String, dynamic>?;
+          if (delta == null) return;
+          final text = delta['content'] as String?;
+          if (text != null && text.isNotEmpty) {
+            content.write(text);
+            writingText = initialText.isEmpty
+                ? content.toString()
+                : '$initialText${content.toString()}';
+            onUpdate();
+          }
+          final reasoning = delta['reasoning_content'] as String?;
+          if (reasoning != null && reasoning.isNotEmpty) {
+            thinking.write(reasoning);
+            thinkingText = initialThinking.isEmpty
+                ? thinking.toString()
+                : '$initialThinking${thinking.toString()}';
+            onUpdate();
+          }
+          final tcs = delta['tool_calls'] as List?;
+          if (tcs != null) {
+            for (final raw in tcs) {
+              if (raw is! Map) continue;
+              final index = raw['index'] as int? ?? 0;
+              final acc = toolAccs.putIfAbsent(index, () => _ToolCallAcc());
+              final id = raw['id'] as String?;
+              if (id != null && id.isNotEmpty) acc.id = id;
+              final fn = raw['function'];
+              if (fn is Map<String, dynamic>) {
+                final name = fn['name'] as String?;
+                if (name != null && name.isNotEmpty) acc.name = name;
+                final args = fn['arguments'] as String?;
+                if (args != null && args.isNotEmpty) acc.arguments += args;
+              }
+            }
+          }
+        },
+        onDone: () {
+          if (!completer.isCompleted) completer.complete();
+        },
+        onError: (msg) {
+          if (!completer.isCompleted) completer.completeError(msg);
+        },
+      );
+      await completer.future;
+    } catch (e) {
+      streamError = e.toString();
+    }
+    final toolCalls = toolAccs.values.where((t) => t.name.isNotEmpty).toList();
+    // 流式失败或未产出任何内容时回退一次非流式请求，
+    // 避免接口对 stream+tools 组合不兼容时正文静默为空
+    if ((streamError != null || (content.isEmpty && toolCalls.isEmpty)) &&
+        !_cancelled) {
+      try {
+        final fallback = await _service.chatOnce(
+          apiKey: apiKey,
+          apiParams: apiParams,
+          messages: messages,
+        );
+        if (fallback.isNotEmpty) {
+          content.write(fallback);
           writingText = initialText.isEmpty
               ? content.toString()
               : '$initialText${content.toString()}';
           onUpdate();
+        } else if (streamError != null && content.isEmpty) {
+          // 流式失败且兜底也无结果：记录错误供界面展示，不再静默
+          errorText = streamError.replaceFirst('Exception: ', '');
         }
-        final reasoning = delta['reasoning_content'] as String?;
-        if (reasoning != null && reasoning.isNotEmpty) {
-          thinking.write(reasoning);
-          thinkingText = initialThinking.isEmpty
-              ? thinking.toString()
-              : '$initialThinking${thinking.toString()}';
-          onUpdate();
-        }
-        final tcs = delta['tool_calls'] as List?;
-        if (tcs != null) {
-          for (final raw in tcs) {
-            if (raw is! Map) continue;
-            final index = raw['index'] as int? ?? 0;
-            final acc = toolAccs.putIfAbsent(index, () => _ToolCallAcc());
-            final id = raw['id'] as String?;
-            if (id != null && id.isNotEmpty) acc.id = id;
-            final fn = raw['function'];
-            if (fn is Map<String, dynamic>) {
-              final name = fn['name'] as String?;
-              if (name != null && name.isNotEmpty) acc.name = name;
-              final args = fn['arguments'] as String?;
-              if (args != null && args.isNotEmpty) acc.arguments += args;
-            }
-          }
-        }
-      },
-      onDone: () {
-        if (!completer.isCompleted) completer.complete();
-      },
-      onError: (msg) {
-        if (!completer.isCompleted) completer.completeError(msg);
-      },
-    );
-    await completer.future;
+      } catch (_) {}
+    }
     return _StreamChapterResult(
       content: content.toString(),
-      toolCalls: toolAccs.values.where((t) => t.name.isNotEmpty).toList(),
+      // 本轮思考过程随结果返回：模型先思考再调工具时，下一轮请求需回传
+      // reasoning_content（见 startWrite 中 assistant 消息构造）
+      reasoning: thinking.toString(),
+      toolCalls: toolCalls,
     );
   }
 
@@ -509,22 +599,77 @@ class ChapterWriteController {
   /// 清空某章节已生成的内容，恢复为待生成状态
   Future<void> resetChapter(OutlineChapter ch) => resetChapters([ch]);
 
-  /// 批量清空已生成的内容（正文 + AI 小结），恢复为待生成状态
+  /// 批量清空已生成的内容（正文 + AI 小结 + 本章账本），恢复为待生成状态。
+  /// 清空后 outline_records.story_state 自动回退到剩余已完成章节中最新一章的账本，
+  /// 实现「重新生成后剧情账本可退回」。
   Future<void> resetChapters(List<OutlineChapter> items) async {
     for (final ch in items) {
       if (ch.id == null) continue;
       await OutlineChapterDbHelper().updateContent(ch.id!, '');
       // 同时清空 AI 小结，避免下一章承接已删除的内容
       await OutlineChapterDbHelper().updateAiSummary(ch.id!, '');
+      // 同时清空本章独立账本，重新生成后按上一章账本重新提炼
+      await OutlineChapterDbHelper().updateStoryState(ch.id!, '');
       final idx = chapters.indexWhere((c) => c.id == ch.id);
       if (idx != -1) {
         chapters[idx] = chapters[idx].copyWith(
           content: '',
           status: 'pending',
           aiSummary: '',
+          storyState: '',
         );
       }
     }
+    // 账本页展示的全局账本回退到剩余已完成章节中最新一章
+    await _syncLatestLedgerToRecord();
+  }
+
+  /// 把 outline_records.story_state 同步为当前最新已完成小事件的账本
+  /// （账本页展示最新一章内容；无已完成章节时清空）。
+  Future<void> _syncLatestLedgerToRecord() async {
+    if (outline.id == null) return;
+    try {
+      final all = await OutlineChapterDbHelper().getByOutlineId(outline.id!);
+      final completed = all
+          .map((m) => OutlineChapter.fromMap(m))
+          .where((c) => c.eventType == 'minor' && c.status == 'completed')
+          .toList()
+        ..sort((a, b) => a.eventIndex.compareTo(b.eventIndex));
+      final latest = completed.isEmpty ? null : completed.last;
+      await OutlineRecordDbHelper().update(outline.id!, {
+        'story_state': latest?.storyState ?? '',
+      });
+    } catch (_) {
+      // 同步失败静默，不影响主流程
+    }
+  }
+
+  /// 保存某章节的剧情账本（章节独立字段），若本章是当前最新已完成章节，
+  /// 同步到 outline_records.story_state（账本页展示最新一章）。
+  Future<void> saveChapterLedger(OutlineChapter ch, String content) async {
+    if (ch.id == null) return;
+    await OutlineChapterDbHelper().updateStoryState(ch.id!, content);
+    await _syncLatestLedgerToRecord();
+    final idx = chapters.indexWhere((c) => c.id == ch.id);
+    if (idx != -1) {
+      chapters[idx] = chapters[idx].copyWith(storyState: content);
+    }
+  }
+
+  /// 上一章账本：当前章节之前最近一个已完成章节所保存的剧情账本。
+  /// 第一章或前序无已完成章节时返回空串（账本从本章起全新提炼）。
+  String _prevChapterLedger(OutlineChapter ch, List<OutlineChapter> all) {
+    final ordered = List<OutlineChapter>.from(all)
+      ..sort((a, b) => a.eventIndex.compareTo(b.eventIndex));
+    final idx = ordered.indexWhere((c) => c.id == ch.id);
+    if (idx <= 0) return '';
+    for (int i = idx - 1; i >= 0; i--) {
+      final prev = ordered[i];
+      if (prev.status == 'completed' && prev.storyState.trim().isNotEmpty) {
+        return prev.storyState;
+      }
+    }
+    return '';
   }
 
   /// 保存手动编辑后的章节内容
@@ -533,7 +678,12 @@ class ChapterWriteController {
     // 用户改写了正文（可能重写伏笔/结局），与章节生成一致：账本/小结更新完成才算保存完成，
     // 避免后续章节沿用基于旧正文提炼的状态
     if (content.trim().isNotEmpty) {
-      await _updateStoryState(ch, content);
+      final all = await OutlineChapterDbHelper().getByOutlineId(outline.id!);
+      await _updateStoryState(
+        ch,
+        content,
+        allChapters: all.map((m) => OutlineChapter.fromMap(m)).toList(),
+      );
       await _summarizeChapter(ch, content);
     }
     final idx = chapters.indexWhere((c) => c.id == ch.id);
@@ -597,9 +747,10 @@ class ChapterWriteController {
     _cancelToken = null;
   }
 
-  void dispose() {
-    stopWrite();
-  }
+  /// 释放资源。注意：不再在此取消进行中的生成——用户误触返回键退出页面后，
+  /// 生成流程继续在后台完成并落盘（正文/账本/小结），避免已生成内容丢失、
+  /// 章节状态卡在 generating。主动停止仍走 [stopWrite]（停止按钮）。
+  void dispose() {}
 
   Future<void> _reloadChapters() async {
     final rows = await OutlineChapterDbHelper().getByOutlineId(outline.id!);
@@ -839,6 +990,7 @@ class ChapterWriteController {
     required OutlineChapter ch,
     required String content,
     required String prevEnding,
+    String storyState = '',
     required String characters,
     required VoidCallback onUpdate,
   }) async {
@@ -863,7 +1015,7 @@ class ChapterWriteController {
           eventTitle: ch.eventTitle,
           eventSummary: ch.eventSummary,
           prevEnding: prevEnding,
-          storyState: fresh?['story_state'] as String? ?? '',
+          storyState: storyState,
           characters: characters,
           foreshadows: fresh?['foreshadows'] as String? ?? '',
           chapterContent: content,
@@ -960,10 +1112,14 @@ class ChapterWriteController {
   /// 提炼过程流式写入 [storyStateText]（供全屏生成视图气泡实时查看），
   /// [onUpdate] 可选：章节生成流程中传入以刷新 UI，手动编辑保存时可不传。
   /// 性格字段由代码层按姓名回填保留，AI 不会覆盖用户维护的性格。
+  /// [allChapters] 章节列表（含各章独立账本）：上一章账本作为本章提炼的输入，
+  /// 第一章（或前序无已完成章节）时从空开始；提炼结果写入本章 story_state 列，
+  /// 并同步 outline_records.story_state 为最新已完成章节的账本（账本页展示最新一章）。
   Future<void> _updateStoryState(
     OutlineChapter ch,
     String content, {
     VoidCallback? onUpdate,
+    List<OutlineChapter>? allChapters,
   }) async {
     if (outline.id == null || content.trim().isEmpty) return;
     try {
@@ -971,7 +1127,13 @@ class ChapterWriteController {
       if (!settings.chapterSetting.enableStoryState) return;
       if (settings.apiKey.isEmpty) return;
       final fresh = await OutlineRecordDbHelper().getById(outline.id!);
-      final prevState = fresh?['story_state'] as String? ?? '';
+      // 上一章账本：取最近一个已完成章节的独立账本（第一章为空），
+      // 不再使用全局 story_state——每章账本独立保存，重新生成后可回退
+      final prevChapters = allChapters ??
+          (await OutlineChapterDbHelper().getByOutlineId(outline.id!))
+              .map((m) => OutlineChapter.fromMap(m))
+              .toList();
+      final prevState = _prevChapterLedger(ch, prevChapters);
       final oldChars = _parseCharacters(fresh?['characters'] as String? ?? '');
       final contentBuf = StringBuffer();
       final thinkingBuf = StringBuffer();
@@ -1048,8 +1210,16 @@ class ChapterWriteController {
       final newChars = _parseCharacters(jsonEncode(decoded['characters']));
       final merged = _mergeCharacters(oldChars, newChars);
       if (newState.isEmpty && merged.isEmpty) return;
+      final ledger = newState.isEmpty ? prevState : newState;
+      // 本章账本独立落盘到 outline_chapters.story_state
+      await OutlineChapterDbHelper().updateStoryState(ch.id!, ledger);
+      final idx = chapters.indexWhere((c) => c.id == ch.id);
+      if (idx != -1) {
+        chapters[idx] = chapters[idx].copyWith(storyState: ledger);
+      }
+      // 全局账本镜像为最新已完成章节的账本（账本页展示最新一章）
+      await _syncLatestLedgerToRecord();
       await OutlineRecordDbHelper().update(outline.id!, {
-        'story_state': newState.isEmpty ? prevState : newState,
         'characters': jsonEncode(merged.map((c) => c.toJson()).toList()),
       });
     } catch (_) {
@@ -1113,12 +1283,15 @@ class ChapterWriteController {
       var p = decoded['protagonist'];
       if (p is! Map<String, dynamic>) return false;
 
-      // 2) 对提炼结果执行一轮 AI 审查（遵循提炼约束，修正不合理处）
+      // 2) 对提炼结果执行一轮 AI 审查（遵循提炼约束，修正不合理处）。
+      // 使用独立的 reviewingProtagonist / protagonistReviewText / protagonistReviewThinking，
+      // 与章节审查（reviewing / reviewText / reviewThinking）区分展示，
+      // 避免用户误以为「AI 审查」在审查尚未生成的章节正文
       final profileJson = jsonEncode({'protagonist': p});
       final reviewBuf = StringBuffer();
       final reviewThinkBuf = StringBuffer();
-      var reviewThinkShown = 0; // 已追加到 thinkingText 的档案审查思考长度
-      reviewing = true;
+      var reviewThinkShown = 0; // 已追加到 protagonistReviewThinking 的档案审查思考长度
+      reviewingProtagonist = true;
       onUpdate?.call();
       String reviewedRaw;
       try {
@@ -1139,26 +1312,26 @@ class ChapterWriteController {
           content: reviewBuf,
           thinking: reviewThinkBuf,
           onUpdate: () {
-            reviewText = reviewBuf.toString();
+            protagonistReviewText = reviewBuf.toString();
             // 档案审查思考过程实时写入独立气泡，不再丢弃
             final t = reviewThinkBuf.toString();
             if (t.length > reviewThinkShown) {
-              reviewThinking += t.substring(reviewThinkShown);
+              protagonistReviewThinking += t.substring(reviewThinkShown);
               reviewThinkShown = t.length;
             }
             onUpdate?.call();
           },
         );
       } finally {
-        reviewing = false;
+        reviewingProtagonist = false;
         onUpdate?.call();
       }
       // 从审查输出中解析【修正后档案】JSON；解析失败则沿用提炼结果
       const marker = '【修正后档案】';
       final cleaned = _stripMarkdownFence(reviewedRaw);
       if (cleaned.contains(marker)) {
-        // 审查气泡只保留【审查意见】
-        reviewText = cleaned.substring(0, cleaned.indexOf(marker)).trim();
+        // 档案审查气泡只保留【审查意见】
+        protagonistReviewText = cleaned.substring(0, cleaned.indexOf(marker)).trim();
       }
       final reviewedJson = cleaned.contains(marker)
           ? cleaned.substring(cleaned.indexOf(marker) + marker.length).trim()
@@ -1381,8 +1554,13 @@ class ChapterWriteController {
 /// 单轮流式章节生成结果
 class _StreamChapterResult {
   final String content;
+  final String reasoning; // 本轮思考过程（reasoning_content，工具调用多轮时需回传 API）
   final List<_ToolCallAcc> toolCalls;
-  _StreamChapterResult({required this.content, required this.toolCalls});
+  _StreamChapterResult({
+    required this.content,
+    required this.reasoning,
+    required this.toolCalls,
+  });
 }
 
 /// 流式 tool_calls 增量累积器（按 index 归并 id/name/arguments 分片）

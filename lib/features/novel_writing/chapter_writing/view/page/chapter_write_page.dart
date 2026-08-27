@@ -24,6 +24,7 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
   bool _followOutput = true; // 是否自动跟随流式输出滚到底部（用户上滑阅读时暂停跟随）
   DateTime? _lastScrollJump; // 自动滚动节流时间戳
   int _lastChapterWords = 0; // 上一次章节生成的字数（连续生成时预填，避免重复输入）
+  OutlineChapter? _lastWriteChapter; // 最近一次尝试生成的章节（失败后写视图提供「重新生成」）
 
   @override
   void initState() {
@@ -181,6 +182,7 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
                           onView: () => _openViewPage(ch),
                           onEdit: (c) => _openEditPage(c),
                           onEditOutline: (c) => _showEditOutlineDialog(c),
+                          onEditLedger: (c) => _openLedgerDialog(c),
                           onOpenWriteView: () =>
                               setState(() => _showWriteView = true),
                           onDelete: () async {
@@ -233,6 +235,7 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
     );
     if (!mounted || target == null) return;
     _lastChapterWords = target;
+    _lastWriteChapter = ch;
     _followOutput = true;
     setState(() => _showWriteView = true);
     _controller.startWrite(context, ch, () {
@@ -291,11 +294,15 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
     final story = _controller.storyStateText;
     final protagonist = _controller.protagonistText;
     final protagonistThink = _controller.protagonistThinking;
+    final protagonistReview = _controller.protagonistReviewText;
+    final protagonistReviewThink = _controller.protagonistReviewThinking;
     final reviewThink = _controller.reviewThinking;
     final storyThink = _controller.storyStateThinking;
     final String status;
     if (_controller.extractingProtagonist) {
       status = '正在提炼主角档案...';
+    } else if (_controller.reviewingProtagonist) {
+      status = '主角档案审查中...';
     } else if (_controller.reviewing) {
       status = 'AI 审查修正中...';
     } else if (_controller.extractingStory) {
@@ -304,6 +311,8 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
       status = '正在生成：${ch?.eventTitle ?? ''}';
     } else if (_controller.wasCancelled) {
       status = '已停止，已保留部分内容';
+    } else if (_controller.errorText.trim().isNotEmpty && text.isEmpty) {
+      status = '生成失败：${_controller.errorText}';
     } else {
       status = text.isEmpty ? '未开始生成' : '生成完成';
     }
@@ -317,6 +326,7 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
             children: [
               if (writing ||
                   _controller.extractingProtagonist ||
+                  _controller.reviewingProtagonist ||
                   _controller.reviewing ||
                   _controller.extractingStory)
                 const SizedBox(
@@ -374,7 +384,7 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // ── 主角档案提炼（含思考），位于最上方 ──
+                  // ── 主角档案提炼（含思考、档案审查），位于最上方 ──
                   if (_controller.extractingProtagonist ||
                       protagonist.trim().isNotEmpty) ...[
                     if (protagonistThink.trim().isNotEmpty) ...[
@@ -393,6 +403,27 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
                       emptyHint: '正在提炼中...',
                     ),
                     const SizedBox(height: 12),
+                    // 档案审查独立气泡：审查对象是主角档案而非章节正文，
+                    // 与正文下方的「AI 审查」（章节审查）区分
+                    if (_controller.reviewingProtagonist ||
+                        protagonistReview.trim().isNotEmpty) ...[
+                      if (protagonistReviewThink.trim().isNotEmpty) ...[
+                        _buildProcessBubble(
+                          icon: Icons.psychology_alt,
+                          title: '档案审查思考',
+                          content: protagonistReviewThink,
+                          emptyHint: '',
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+                      _buildProcessBubble(
+                        icon: Icons.verified_user_outlined,
+                        title: '档案审查',
+                        content: protagonistReview,
+                        emptyHint: '正在审查档案中...',
+                      ),
+                      const SizedBox(height: 12),
+                    ],
                   ],
                   // ── 正文生成思考（仅生成阶段） ──
                   if (thinking.trim().isNotEmpty) ...[
@@ -401,6 +432,45 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
                       title: '思考过程',
                       content: thinking,
                       emptyHint: '',
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  // ── 生成失败错误提示（正文为空且失败时展示，避免静默） ──
+                  if (!writing &&
+                      _controller.errorText.trim().isNotEmpty &&
+                      text.isEmpty) ...[
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFF3F0),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: const Color(0xFFFFCCBC)),
+                      ),
+                      child: SelectableText(
+                        '生成失败：${_controller.errorText}',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          height: 1.6,
+                          color: Color(0xFFD84315),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    // 失败后提供「重新生成」入口，一键重试本章
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: _lastWriteChapter == null
+                            ? null
+                            : () => _startWrite(_lastWriteChapter!),
+                        icon: const Icon(Icons.refresh, size: 18),
+                        label: const Text('重新生成'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF4D6BFE),
+                          foregroundColor: Colors.white,
+                        ),
+                      ),
                     ),
                     const SizedBox(height: 12),
                   ],
@@ -859,6 +929,74 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
     }
   }
 
+  /// 查看/编辑本章独立的剧情账本（每章生成时自动保存，重新生成后可回退）
+  void _openLedgerDialog(OutlineChapter ch) {
+    final ctrl = TextEditingController(text: ch.storyState);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        titlePadding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+        contentPadding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+        actionsPadding: const EdgeInsets.fromLTRB(8, 0, 8, 6),
+        title: Text(
+          '剧情账本 · ' + ch.eventTitle,
+          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        content: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.6,
+          ),
+          child: SingleChildScrollView(
+            child: TextField(
+              controller: ctrl,
+              maxLines: null,
+              decoration: const InputDecoration(
+                hintText: '本章剧情账本（角色处境 / 时间地点 / 伏笔 / 悬念 / 冲突）。生成章节后自动提炼，可在此手动修改',
+                border: OutlineInputBorder(),
+                contentPadding: EdgeInsets.all(10),
+                filled: true,
+                fillColor: Color(0xFFFAFAFA),
+              ),
+              style: const TextStyle(fontSize: 13, height: 1.6),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              WidgetsBinding.instance.addPostFrameCallback(
+                (_) => ctrl.dispose(),
+              );
+            },
+            child: const Text('取消', style: TextStyle(fontSize: 13)),
+          ),
+          TextButton(
+            onPressed: () async {
+              final text = ctrl.text.trim();
+              Navigator.of(ctx).pop();
+              WidgetsBinding.instance.addPostFrameCallback(
+                (_) => ctrl.dispose(),
+              );
+              await _controller.saveChapterLedger(ch, text);
+              if (mounted) setState(() {});
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('本章账本已保存'),
+                  duration: Duration(seconds: 1),
+                ),
+              );
+            },
+            style: TextButton.styleFrom(foregroundColor: const Color(0xFF4D6BFE)),
+            child: const Text('保存', style: TextStyle(fontSize: 13)),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// 打开章节编辑全屏页面
   void _openEditPage(OutlineChapter ch) {
     if (ch.id == null) return;
@@ -891,6 +1029,7 @@ class _ChapterTile extends StatelessWidget {
   final VoidCallback? onToggleSelect;
   final void Function(OutlineChapter) onEdit;
   final void Function(OutlineChapter) onEditOutline;
+  final void Function(OutlineChapter) onEditLedger; // 查看/编辑本章剧情账本
 
   const _ChapterTile({
     required this.chapter,
@@ -902,6 +1041,7 @@ class _ChapterTile extends StatelessWidget {
     required this.onDelete,
     required this.onEdit,
     required this.onEditOutline,
+    required this.onEditLedger,
     required this.onOpenWriteView,
     required this.selectMode,
     required this.selected,
@@ -1130,6 +1270,14 @@ class _ChapterTile extends StatelessWidget {
                   ),
                   const SizedBox(width: 12),
                   GestureDetector(
+                    onTap: () => onEditLedger(chapter),
+                    child: const Text(
+                      '账本',
+                      style: TextStyle(fontSize: 11, color: Color(0xFF00897B)),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  GestureDetector(
                     onTap: () {
                       showDialog(
                         context: context,
@@ -1163,17 +1311,30 @@ class _ChapterTile extends StatelessWidget {
                 ],
               ),
             ],
-            if (!isCompleted && !isWriting && !selectMode)
-              GestureDetector(
-                onTap: () => onEditOutline(chapter),
-                child: Padding(
-                  padding: const EdgeInsets.only(top: 6),
-                  child: Text(
-                    '修改大纲',
-                    style: TextStyle(fontSize: 11, color: Color(0xFF4D6BFE)),
-                  ),
+            if (!isCompleted && !isWriting && !selectMode) ...[
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Row(
+                  children: [
+                    GestureDetector(
+                      onTap: () => onEditOutline(chapter),
+                      child: const Text(
+                        '修改大纲',
+                        style: TextStyle(fontSize: 11, color: Color(0xFF4D6BFE)),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    GestureDetector(
+                      onTap: () => onEditLedger(chapter),
+                      child: const Text(
+                        '账本',
+                        style: TextStyle(fontSize: 11, color: Color(0xFF00897B)),
+                      ),
+                    ),
+                  ],
                 ),
               ),
+            ],
             if (isWriting && writingContent.isEmpty) ...[
               // 思考阶段无正文，仍提供进入全屏生成视图的入口
               const SizedBox(height: 6),

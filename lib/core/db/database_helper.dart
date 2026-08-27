@@ -6,7 +6,7 @@ import 'package:path/path.dart' as p;
 
 class DatabaseHelper {
   static const _dbName = 'deepseek.db';
-  static const _dbVersion = 31;
+  static const _dbVersion = 32;
   static Database? _database;
 
   /// 单例入口，全局复用同一个数据库连接
@@ -249,6 +249,7 @@ class DatabaseHelper {
         content TEXT NOT NULL DEFAULT '',
         status TEXT NOT NULL DEFAULT 'pending',
         ai_summary TEXT NOT NULL DEFAULT '',
+        story_state TEXT NOT NULL DEFAULT '',
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         FOREIGN KEY (outline_id) REFERENCES outline_records(id) ON DELETE CASCADE
@@ -882,6 +883,19 @@ class DatabaseHelper {
       if (!columns.any((c) => c['name'] == 'skeleton')) {
         await db.execute(
           "ALTER TABLE outline_records ADD COLUMN skeleton TEXT NOT NULL DEFAULT ''",
+        );
+      }
+    }
+
+    // V31 → V32：outline_chapters 新增 story_state 列（每章独立的剧情账本）。
+    // 每章生成时把本章账本保存到章节行，上一章账本作为下一章生成的上下文，
+    // outline_records.story_state 仅镜像最新已完成章节的账本（账本页展示），
+    // 章节重新生成后可回退查看/编辑历史账本
+    if (oldVersion < 32) {
+      final columns = await db.rawQuery('PRAGMA table_info(outline_chapters)');
+      if (!columns.any((c) => c['name'] == 'story_state')) {
+        await db.execute(
+          "ALTER TABLE outline_chapters ADD COLUMN story_state TEXT NOT NULL DEFAULT ''",
         );
       }
     }

@@ -60,6 +60,7 @@ class ChapterWritePromptTemplate {
     String foreshadows = '',
     int minWords = 2000,
     int maxWords = 3000,
+    bool enableCharacterLookup = true,
   }) {
     final isMinor = ch.eventType == 'minor';
     final parentSection = parentMajor != null && isMinor
@@ -97,6 +98,11 @@ class ChapterWritePromptTemplate {
     final charactersRule = characters.trim().isEmpty
         ? ''
         : '\n- 人物行为、言谈必须符合【人物档案】中设定的性格与能力，禁止擅自改变角色性格';
+    // 存在可查询的配角档案时提示模型调用工具；只有主角档案时禁用工具，
+    // 避免模型为查询并不存在的配角而多轮调用工具导致正文生成失败
+    final characterLookupRule = enableCharacterLookup
+        ? '- 剧情中涉及主角以外的其他人物时，先调用 get_character_profiles 工具查询其人物档案，再结合档案写作；未查询到的人物不要凭空设定其外貌、能力或性格'
+        : '- 剧情中涉及主角以外的人物时，其外貌、能力与性格等设定细节尽量从简或保持模糊，不要展开设定';
     return '''
 你是一位小说作家。请根据以下大纲设定，完整写出指定事件的详细章节内容。
 
@@ -124,7 +130,7 @@ $roleInstruction
 - 结尾自然衔接【后续事件】中的下一个事件（若存在）$lastOfMajorHint
 - 若当前事件涉及【伏笔清单】中的伏笔，按其计划埋设或回收；清单未涉及的不要强行引入
 - 角色状态、位置与悬念需与【全局剧情状态】保持连续一致$charactersRule
-- 剧情中涉及主角以外的其他人物时，先调用 get_character_profiles 工具查询其人物档案，再结合档案写作；未查询到的人物不要凭空设定其外貌、能力或性格
+$characterLookupRule
 - 只写当前事件的内容，不要超出范围
 - 直接输出正文，不要添加注释说明
 ''';

@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../../../shared/domain/character_profile.dart';
 import '../../../shared/data/outline_record_db_helper.dart';
+import '../../../shared/data/outline_chapter_db_helper.dart';
+import '../../../shared/domain/outline_chapter.dart';
 import '../../controller/chapter_write_controller.dart';
 
 /// 剧情状态账本查看/编辑页
@@ -27,6 +29,7 @@ class _StoryStatePageState extends State<StoryStatePage> {
   final _storyStateCtrl = TextEditingController();
   bool _loading = true;
   bool _generatingProtagonist = false;
+  OutlineChapter? _latestChapter; // 最新已完成章节（账本页展示其内容）
 
   @override
   void initState() {
@@ -47,6 +50,14 @@ class _StoryStatePageState extends State<StoryStatePage> {
         _characters = _parseCharacters(row['characters'] as String? ?? '');
         _storyStateCtrl.text = row['story_state'] as String? ?? '';
       }
+      // 最新已完成章节：账本页展示的是最新一章的账本
+      final all = await OutlineChapterDbHelper().getByOutlineId(widget.outlineId);
+      final completed = all
+          .map((m) => OutlineChapter.fromMap(m))
+          .where((c) => c.eventType == 'minor' && c.status == 'completed')
+          .toList()
+        ..sort((a, b) => a.eventIndex.compareTo(b.eventIndex));
+      _latestChapter = completed.isEmpty ? null : completed.last;
     } catch (_) {}
     if (mounted) setState(() => _loading = false);
   }
@@ -71,6 +82,13 @@ class _StoryStatePageState extends State<StoryStatePage> {
       'characters': jsonEncode(chars.map((c) => c.toJson()).toList()),
       'story_state': _storyStateCtrl.text,
     });
+    // 同步到最新已完成章节的独立账本，保持每章账本与全局展示一致
+    if (_latestChapter?.id != null) {
+      await OutlineChapterDbHelper().updateStoryState(
+        _latestChapter!.id!,
+        _storyStateCtrl.text,
+      );
+    }
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('账本已保存'), duration: Duration(seconds: 1)),
@@ -344,7 +362,9 @@ class _StoryStatePageState extends State<StoryStatePage> {
                 const SizedBox(height: 8),
                 _buildSectionHeader(
                   title: '剧情状态',
-                  subtitle: 'AI 每章完成后自动更新：角色处境 / 时间地点 / 伏笔 / 悬念 / 冲突',
+                  subtitle: _latestChapter != null
+                      ? '最新一章「' + _latestChapter!.eventTitle + '」的账本（AI 生成可手动修改；每章账本可在章节列表的「账本」按钮查看/回退）'
+                      : 'AI 每章完成后自动更新：角色处境 / 时间地点 / 伏笔 / 悬念 / 冲突',
                 ),
                 const SizedBox(height: 12),
                 Container(
