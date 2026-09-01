@@ -1459,22 +1459,70 @@ class _ChapterEditPage extends StatefulWidget {
 }
 
 class _ChapterEditPageState extends State<_ChapterEditPage> {
-  late TextEditingController _controller;
+  late final TextEditingController _controller;
+  // 编辑历史：文本快照栈，支持撤回（undo）/ 前进（redo），最多保留 100 步
+  static const _maxHistory = 100;
+  final List<String> _undoStack = [];
+  final List<String> _redoStack = [];
+  String _lastSnapshot = '';
+  bool _restoring = false; // 撤回/前进回写文本时不重复记录历史
 
   @override
   void initState() {
     super.initState();
     _controller = TextEditingController(text: widget.chapter.content);
+    _lastSnapshot = _controller.text;
+    _controller.addListener(_onTextChanged);
   }
 
   @override
   void dispose() {
+    _controller.removeListener(_onTextChanged);
     _controller.dispose();
     super.dispose();
   }
 
+  /// 每次文本变更前把上一个快照压入撤销栈；新输入清空前进栈
+  void _onTextChanged() {
+    if (_restoring) return;
+    final current = _controller.text;
+    if (current == _lastSnapshot) return;
+    _undoStack.add(_lastSnapshot);
+    if (_undoStack.length > _maxHistory) _undoStack.removeAt(0);
+    _redoStack.clear();
+    _lastSnapshot = current;
+    setState(() {}); // 刷新字数与撤回/前进按钮可用态
+  }
+
+  void _undo() {
+    if (_undoStack.isEmpty) return;
+    _redoStack.add(_lastSnapshot);
+    _lastSnapshot = _undoStack.removeLast();
+    _applySnapshot();
+  }
+
+  void _redo() {
+    if (_redoStack.isEmpty) return;
+    _undoStack.add(_lastSnapshot);
+    if (_undoStack.length > _maxHistory) _undoStack.removeAt(0);
+    _lastSnapshot = _redoStack.removeLast();
+    _applySnapshot();
+  }
+
+  /// 回写快照文本并恢复光标到末尾（不记录历史）
+  void _applySnapshot() {
+    _restoring = true;
+    _controller.text = _lastSnapshot;
+    _controller.selection = TextSelection.collapsed(
+      offset: _controller.text.length,
+    );
+    _restoring = false;
+    setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
+    final wordCount = _controller.text.characters.length;
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
@@ -1525,6 +1573,30 @@ class _ChapterEditPageState extends State<_ChapterEditPage> {
           },
         ),
         actions: [
+          // 当前页面字数（实时更新）
+          Padding(
+            padding: const EdgeInsets.only(left: 4),
+            child: Center(
+              child: Text(
+                '$wordCount 字',
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: Color(0xFF666666),
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.undo, size: 20, color: Color(0xFF4D6BFE)),
+            tooltip: '撤回',
+            onPressed: _undoStack.isEmpty ? null : _undo,
+          ),
+          IconButton(
+            icon: const Icon(Icons.redo, size: 20, color: Color(0xFF4D6BFE)),
+            tooltip: '前进',
+            onPressed: _redoStack.isEmpty ? null : _redo,
+          ),
           TextButton(
             onPressed: _saveAndGoBack,
             child: const Text(
