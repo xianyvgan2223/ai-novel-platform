@@ -1199,13 +1199,17 @@ class OutlineController extends ChangeNotifier {
     worldViewController.text = record.worldview;
     _fallbackForeshadows = record.foreshadows;
 
-    if (!_restoreSkeletonFromRecord(record.skeleton)) {
-      final titleConcept = _parseRecordTitleConcept(record);
-      if (titleConcept == null) return false;
+    // 优先从最新 content 解析三幕骨架：「大纲转章节」的「修改大纲」等操作会就地
+    // 更新记录 content（标题/概要），而持久化的 skeleton JSON 是生成时的快照，
+    // 可能已过期——若继续优先用骨架 JSON，编辑粗骨/大事件时展示与重生成的
+    // 仍是旧的大事件。仅当 content 不完整（如小事件中断后保存、缺少后幕）
+    // 无法解析出完整三幕时，才回退到持久化骨架 JSON。
+    final titleConcept = _parseRecordTitleConcept(record);
+    final acts = titleConcept == null ? null : _parseRecordActs(record.content);
+    if (titleConcept == null || acts == null || acts.length != 3) {
+      if (!_restoreSkeletonFromRecord(record.skeleton)) return false;
+    } else {
       _step1Json = titleConcept;
-
-      final acts = _parseRecordActs(record.content);
-      if (acts == null || acts.length != 3) return false;
       _step2Json = _Step2Result(acts: acts);
     }
 

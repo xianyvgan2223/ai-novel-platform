@@ -43,6 +43,9 @@ class ChapterWriteController {
   String protagonistReviewText = ''; // 主角档案审查意见（独立气泡，位于主角区，区别于章节审查）
   String protagonistReviewThinking = ''; // 档案审查思考过程（独立气泡展示）
   String errorText = ''; // 最近一次生成失败的错误信息（写视图错误气泡展示，避免静默失败）
+  bool isRefreshingForeshadows = false; // 伏笔清单后台提炼中（账本页/章节页显示加载提示）
+  String foreshadowThinkingText = ''; // 伏笔提炼 AI 思考过程（流式累积，供详情页实时展示）
+  String foreshadowOutputText = ''; // 伏笔提炼 AI 输出（流式累积）
   CancelToken? _cancelToken;
   bool _cancelled = false;
 
@@ -65,20 +68,48 @@ class ChapterWriteController {
   bool get wasCancelled => _cancelled;
 
   /// 重新从大纲内容解析事件并更新数据库（保留已完成的正文内容）
-  Future<void> resync() async {
+  ///
+  /// [previousChapters] 重同步前的旧章节（含已生成正文）。调用方必须传入：
+  /// 页面加载时若从空的 [chapters] 字段取旧数据，已完成内容将全部丢失。
+  /// 匹配策略：先按标题精确匹配（内容随标题保留）；标题对不上（事件被改名）时
+  /// 按序号兜底匹配，避免改名/重排导致正文被误删。
+  Future<void> resync({List<OutlineChapter>? previousChapters}) async {
     needsResync = false;
-    final oldChapters = Map.fromEntries(
-      chapters.map((c) => MapEntry(c.eventTitle, c)),
+    final oldChapters = previousChapters ?? chapters;
+    final oldByTitle = Map.fromEntries(
+      oldChapters.map((c) => MapEntry(c.eventTitle, c)),
     );
     final newChapters = _parseEvents(outlineContent);
+    final matchedIndexes = <int>{}; // 已被标题匹配占用的旧序号，序号兜底时跳过
     for (int i = 0; i < newChapters.length; i++) {
-      final old = oldChapters[newChapters[i].eventTitle];
-      if (old != null && old.status == 'completed' && old.content.isNotEmpty) {
+      final byTitle = oldByTitle[newChapters[i].eventTitle];
+      if (byTitle != null &&
+          byTitle.status == 'completed' &&
+          byTitle.content.isNotEmpty) {
+        final oldIdx = oldChapters.indexOf(byTitle);
+        if (oldIdx >= 0) matchedIndexes.add(oldIdx);
         newChapters[i] = newChapters[i].copyWith(
-          content: old.content,
+          content: byTitle.content,
           status: 'completed',
-          aiSummary: old.aiSummary,
-          storyState: old.storyState,
+          aiSummary: byTitle.aiSummary,
+          storyState: byTitle.storyState,
+        );
+      }
+    }
+    // 标题未匹配到的（改名/新增事件）：若同一序号位置的旧章节已完成且有正文，
+    // 且该旧章节尚未被其他新章节以标题匹配占用，则按序号继承内容
+    for (int i = 0; i < newChapters.length; i++) {
+      if (newChapters[i].status == 'completed') continue;
+      if (matchedIndexes.contains(i)) continue;
+      if (i >= oldChapters.length) break;
+      final byIndex = oldChapters[i];
+      if (byIndex.status == 'completed' && byIndex.content.isNotEmpty) {
+        matchedIndexes.add(i);
+        newChapters[i] = newChapters[i].copyWith(
+          content: byIndex.content,
+          status: 'completed',
+          aiSummary: byIndex.aiSummary,
+          storyState: byIndex.storyState,
         );
       }
     }
@@ -124,15 +155,18 @@ class ChapterWriteController {
         final newLine = trimmed.replaceFirst(oldCh.eventTitle, newTitle);
         final indent = lines[i].length - lines[i].trimLeft().length;
         lines[i] = ' ' * indent + newLine.trimLeft();
-        if (newSummary.isNotEmpty && i + 1 < lines.length) {
-          final t = lines[i + 1].trimLeft();
-          if (t.isNotEmpty &&
-              !t.startsWith('══') &&
-              !t.startsWith('○') &&
-              !t.startsWith('-')) {
-            final indent2 =
-                lines[i + 1].length - lines[i + 1].trimLeft().length;
-            lines[i + 1] = ' ' * indent2 + newSummary;
+        // 概要替换：小事件标题行后常跟空行（实际格式），需跳过空行
+        // 找到第一个非空内容行再替换，否则概要修改不会写回大纲文本
+        if (newSummary.isNotEmpty) {
+          for (int j = i + 1; j < lines.length; j++) {
+            final t = lines[j].trimLeft();
+            if (t.startsWith('══') || t.startsWith('○') || t.startsWith('-'))
+              break;
+            if (t.isNotEmpty) {
+              final indent2 = lines[j].length - lines[j].trimLeft().length;
+              lines[j] = ' ' * indent2 + newSummary;
+              break;
+            }
           }
         }
         break;
@@ -154,19 +188,31 @@ class ChapterWriteController {
     try {
       final rows = await OutlineChapterDbHelper().getByOutlineId(outline.id!);
       if (rows.isNotEmpty) {
-        // 以最新大纲内容为准重新解析，与 DB 中的旧数据比较
+        // 以最新大纲内容为准重新解析，与 DB 中的旧数据比较。
+        // 标题/序号之外还要比较事件类型与概要：历史详情页就地编辑大纲
+        // 常只改事件概要（标题不变），若只按标题比较会漏判，章节卡片
+        // 会一直显示旧概要
         final freshChapters = _parseEvents(outlineContent);
         final dirty =
             freshChapters.length != rows.length ||
             freshChapters.asMap().entries.any((entry) {
               final c = OutlineChapter.fromMap(rows[entry.key]);
               return c.eventTitle != entry.value.eventTitle ||
-                  c.eventIndex != entry.value.eventIndex;
+                  c.eventIndex != entry.value.eventIndex ||
+                  c.eventType != entry.value.eventType ||
+                  c.eventSummary != entry.value.eventSummary;
             });
         if (dirty) {
           // 大纲已更新：自动重同步章节结构（保留已完成的正文内容），
-          // 确保事件列表始终与大纲标题一致
-          await resync();
+          // 确保事件列表始终与大纲标题一致。
+          // 注意必须传入旧行：此时 chapters 字段尚未赋值（为空），
+          // 若 resync 从 chapters 取旧数据会拿不到任何已完成内容，
+          // deleteByOutlineId 会把已生成的正文全部删光（致命数据丢失）
+          await resync(
+            previousChapters: rows
+                .map((m) => OutlineChapter.fromMap(m))
+                .toList(),
+          );
         } else {
           chapters = rows.map((m) => OutlineChapter.fromMap(m)).toList();
         }
@@ -711,35 +757,10 @@ class ChapterWriteController {
         eventSummary: summary,
       );
     }
-    // 大纲已变化：同步重提伏笔清单（失败静默），与保存流程一体，
-    // 避免后续章节注入过期伏笔
-    await _refreshForeshadows();
+    // 注意：不再在保存时自动提炼伏笔清单——改为账本页手动「重新提炼」触发，
+    // 避免保存流程被 AI 调用拖慢，也避免频繁触发消耗额度
   }
 
-  /// 依据最新大纲内容重提伏笔清单并写回记录（失败静默，不影响主流程）
-  Future<void> _refreshForeshadows() async {
-    if (outline.id == null) return;
-    try {
-      final settings = await _service.loadSettings();
-      if (settings.apiKey.isEmpty) return;
-      final text = await OutlineFormatService().extractForeshadows(
-        apiKey: settings.apiKey,
-        apiParams: {
-          'model': settings.chapterSetting.model,
-          'temperature': 0.3,
-          'max_tokens': settings.chapterSetting.maxTokens,
-        },
-        outlineContent: outlineContent,
-      );
-      if (text.trim().isNotEmpty) {
-        await OutlineRecordDbHelper().update(outline.id!, {
-          'foreshadows': text,
-        });
-      }
-    } catch (_) {
-      // 提炼失败不影响章节生成，静默跳过
-    }
-  }
 
   void stopWrite() {
     _cancelled = true;
@@ -1374,6 +1395,64 @@ class ChapterWriteController {
       return '大纲未设置主角人设，无法生成';
     }
     return '生成失败，请检查 API Key 或稍后重试';
+  }
+
+  /// 供账本页「重新提炼伏笔」调用：从最新大纲内容**流式**提炼伏笔清单并写库，
+  /// 思考过程（reasoning_content）与清单输出实时累积到 [foreshadowThinkingText] /
+  /// [foreshadowOutputText]，供「AI 伏笔生成详情」页实时展示；返回用户可读结果（失败保留旧清单）。
+  Future<String> regenerateForeshadows() async {
+    if (outline.id == null) return '大纲记录不存在';
+    try {
+      final settings = await _service.loadSettings();
+      if (settings.apiKey.isEmpty) return '请先填写 API Key';
+      isRefreshingForeshadows = true;
+      foreshadowThinkingText = '';
+      foreshadowOutputText = '';
+      final contentBuf = StringBuffer();
+      final thinkingBuf = StringBuffer();
+      try {
+        // 读取旧伏笔清单：结合旧清单修改/补充/删除，避免每次从零提取覆盖
+        final fresh = await OutlineRecordDbHelper().getById(outline.id!);
+        final existingForeshadows = fresh?['foreshadows'] as String? ?? '';
+        final completer = Completer<void>();
+        await OutlineFormatService().streamExtractForeshadows(
+          apiKey: settings.apiKey,
+          apiParams: {
+            'model': settings.chapterSetting.model,
+            'temperature': 0.3,
+            'max_tokens': settings.chapterSetting.maxTokens,
+          },
+          outlineContent: outlineContent,
+          existingForeshadows: existingForeshadows,
+          onContent: (c) {
+            contentBuf.write(c);
+            foreshadowOutputText = contentBuf.toString();
+          },
+          onReasoning: (r) {
+            thinkingBuf.write(r);
+            foreshadowThinkingText = thinkingBuf.toString();
+          },
+          onDone: () {
+            if (!completer.isCompleted) completer.complete();
+          },
+          onError: (msg) {
+            if (!completer.isCompleted) completer.completeError(msg);
+          },
+        );
+        await completer.future;
+        final text = contentBuf.toString().trim();
+        if (text.isEmpty) return '未提炼出伏笔内容，已保留原清单';
+        await OutlineRecordDbHelper().update(outline.id!, {
+          'foreshadows': text,
+        });
+        return '伏笔清单已重新提炼';
+      } finally {
+        isRefreshingForeshadows = false;
+      }
+    } catch (e) {
+      isRefreshingForeshadows = false;
+      return '提炼失败：${e.toString().replaceFirst('Exception: ', '')}';
+    }
   }
 
   /// 从 JSON 字符串解析人物档案列表（容错返回空列表）

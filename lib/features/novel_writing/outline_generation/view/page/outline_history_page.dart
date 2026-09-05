@@ -1,9 +1,7 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import '../../../shared/domain/outline_record.dart';
 import '../../../shared/data/outline_record_db_helper.dart';
-import '../../../outline_format/service/outline_format_service.dart';
 import 'outline_generation_page.dart';
 
 /// 历史生成大纲列表页面
@@ -233,9 +231,12 @@ class _OutlineEditPageState extends State<_OutlineEditPage> {
   /// 将本记录的小说设定带入「一键生成大纲」页面重新生成：
   /// 不关闭当前历史详情页（历史记录不会被替换），生成的新记录会作为新历史保存。
   Future<void> _regenerate() async {
+    if (!await _ensureSavedBeforeProceed()) return;
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => OutlineGenerationPage(initialRecord: widget.record),
+        builder: (_) => OutlineGenerationPage(
+          initialRecord: _recordWithLatestContent(),
+        ),
       ),
     );
     widget.onSaved();
@@ -244,10 +245,11 @@ class _OutlineEditPageState extends State<_OutlineEditPage> {
   /// 局部重新生成：进入「编辑粗骨/大事件」检查点，仅重写对应下游内容，
   /// 结果另存为新大纲记录，不覆盖当前原记录。
   Future<void> _reedit(String kind) async {
+    if (!await _ensureSavedBeforeProceed()) return;
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => OutlineGenerationPage(
-          initialRecord: widget.record,
+          initialRecord: _recordWithLatestContent(),
           reeditKind: kind,
         ),
       ),
@@ -257,10 +259,11 @@ class _OutlineEditPageState extends State<_OutlineEditPage> {
 
   /// 继续生成未完成大纲：从未完成的小事件展开块继续生成，结果另存为新记录。
   Future<void> _continueGeneration() async {
+    if (!await _ensureSavedBeforeProceed()) return;
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => OutlineGenerationPage(
-          initialRecord: widget.record,
+          initialRecord: _recordWithLatestContent(),
           reeditKind: 'continue',
         ),
       ),
@@ -313,50 +316,87 @@ class _OutlineEditPageState extends State<_OutlineEditPage> {
     }
   }
 
-  Future<void> _save() async {
+  /// 保存当前编辑内容到记录（不退出页面），返回是否实际写入了修改
+  Future<bool> _saveCore() async {
     final newContent = _mergedContent;
     final r = widget.record;
-    if (newContent != r.content) {
-      await OutlineRecordDbHelper().update(r.id!, {
-        'content': newContent,
-        'title': r.title,
-        'genre': r.genre,
-        'theme': r.theme,
-        'protagonist': r.protagonist,
-        'worldview': r.worldview,
-      });
-      // 大纲内容被修改，后台重新提炼伏笔清单，避免注入过期信息
-      unawaited(_refreshForeshadows(r.id!, newContent));
-      widget.onSaved();
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('大纲已更新')));
-      }
+    if (newContent == r.content) return false;
+    await OutlineRecordDbHelper().update(r.id!, {
+      'content': newContent,
+      'title': r.title,
+      'genre': r.genre,
+      'theme': r.theme,
+      'protagonist': r.protagonist,
+      'worldview': r.worldview,
+    });
+    // 注意：不再在保存时自动提炼伏笔清单——改为剧情账本页手动「重新提炼」触发
+    widget.onSaved();
+    if (mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('大纲已更新')));
     }
+    return true;
+  }
+
+  Future<void> _save() async {
+    await _saveCore();
     if (mounted) Navigator.of(context).pop();
   }
 
-  /// 后台重新提炼伏笔清单（不阻塞、失败静默）
-  Future<void> _refreshForeshadows(int id, String content) async {
-    try {
-      final service = OutlineFormatService();
-      final settings = await service.loadSettings();
-      if (settings.apiKey.isEmpty) return;
-      final foreshadows = await service.extractForeshadows(
-        apiKey: settings.apiKey,
-        apiParams: {
-          'model': settings.outlineSetting.model,
-          'temperature': 0.3,
-          'max_tokens': settings.outlineSetting.maxTokens,
-        },
-        outlineContent: content,
-      );
-      if (foreshadows.isNotEmpty) {
-        await OutlineRecordDbHelper().update(id, {'foreshadows': foreshadows});
-      }
-    } catch (_) {}
+  /// 带未保存修改进入其他流程（重新生成/编辑粗骨/编辑大事件/继续生成）前确认：
+  /// 返回 true 表示可以继续（已按选择保存或无需保存）；false 表示用户取消。
+  Future<bool> _ensureSavedBeforeProceed() async {
+    if (!_isDirty) return true;
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('未保存的修改'),
+        content: const Text('大纲内容已修改，要保存后继续吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop('discard'),
+            child: const Text(
+              '不保存',
+              style: TextStyle(color: Color(0xFF999999)),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop('cancel'),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop('save'),
+            child: const Text(
+              '保存并继续',
+              style: TextStyle(color: Color(0xFF4D6BFE)),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (choice == 'cancel' || choice == null) return false;
+    if (choice == 'save') await _saveCore();
+    return true;
   }
+
+  /// 以最新编辑内容构造记录传给生成页（OutlineRecord 不可变，直接传
+  /// widget.record 会丢失刚编辑/保存的内容快照）
+  OutlineRecord _recordWithLatestContent() => OutlineRecord(
+    id: widget.record.id,
+    title: widget.record.title,
+    genre: widget.record.genre,
+    theme: widget.record.theme,
+    protagonist: widget.record.protagonist,
+    worldview: widget.record.worldview,
+    content: _mergedContent,
+    foreshadows: widget.record.foreshadows,
+    storyState: widget.record.storyState,
+    characters: widget.record.characters,
+    skeleton: widget.record.skeleton,
+    createdAt: widget.record.createdAt,
+  );
+
 
   @override
   Widget build(BuildContext context) {

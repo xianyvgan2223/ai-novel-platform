@@ -150,4 +150,56 @@ class OutlineFormatService {
     final content = msg?['content'] as String? ?? '';
     return content.trim();
   }
+
+  /// 流式提炼伏笔清单：content（清单）与 reasoning_content（AI 思考过程）
+  /// 分别累积回调，供「AI 伏笔生成详情」界面实时展示。
+  /// [existingForeshadows] 旧伏笔清单：结合旧清单修改/补充/删除，而非从零提取覆盖。
+  Future<void> streamExtractForeshadows({
+    required String apiKey,
+    required Map<String, dynamic> apiParams,
+    required String outlineContent,
+    String existingForeshadows = '',
+    required void Function(String content) onContent,
+    required void Function(String reasoning) onReasoning,
+    required void Function() onDone,
+    required void Function(String error) onError,
+    CancelToken? cancelToken,
+  }) async {
+    await _apiService.streamChat(
+      apiKey: apiKey,
+      apiParams: {...apiParams, 'stream': true},
+      messages: [
+        {
+          'role': 'system',
+          'content':
+              '你是小说大纲伏笔提炼助手。请结合【原有伏笔清单】与当前大纲内容，输出更新后的伏笔清单。\n'
+              '- 原有清单中仍然有效的伏笔要保留（埋设位置/计划回收时机可随大纲变化调整）；\n'
+              '- 按当前大纲补充新出现的伏笔、悬念与回收点；\n'
+              '- 大纲中已不存在的旧伏笔删除，不要保留；\n'
+              '- 每条一行，形如：「伏笔内容（埋设位置 / 计划回收时机）」。\n'
+              '- 只输出清单本身，不要多余说明；若没有明显伏笔，输出「（暂无）」。',
+        },
+        {
+          'role': 'user',
+          'content':
+              '【原有伏笔清单】\n'
+              '${existingForeshadows.trim().isEmpty ? '（无）' : existingForeshadows.trim()}\n\n'
+              '【当前大纲内容】\n$outlineContent',
+        },
+      ],
+      cancelToken: cancelToken,
+      onChunk: (chunk) {
+        final choices = chunk['choices'] as List?;
+        if (choices == null || choices.isEmpty) return;
+        final delta = choices[0]['delta'] as Map<String, dynamic>?;
+        if (delta == null) return;
+        final c = delta['content'] as String?;
+        if (c != null && c.isNotEmpty) onContent(c);
+        final r = delta['reasoning_content'] as String?;
+        if (r != null && r.isNotEmpty) onReasoning(r);
+      },
+      onDone: onDone,
+      onError: onError,
+    );
+  }
 }

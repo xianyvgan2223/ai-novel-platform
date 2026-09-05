@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../../../shared/domain/character_profile.dart';
@@ -27,19 +28,26 @@ class StoryStatePage extends StatefulWidget {
 class _StoryStatePageState extends State<StoryStatePage> {
   List<CharacterProfile> _characters = [];
   final _storyStateCtrl = TextEditingController();
+  final _foreshadowsCtrl = TextEditingController(); // 伏笔清单（可查看/编辑）
   bool _loading = true;
   bool _generatingProtagonist = false;
+  bool _regeneratingForeshadows = false;
+  bool _lastRefreshingForeshadows = false; // 后台提炼状态快照（轮询刷新显示）
+  Timer? _foreshadowWatchTimer; // 轻量轮询：后台伏笔提炼开始/结束时刷新界面
   OutlineChapter? _latestChapter; // 最新已完成章节（账本页展示其内容）
 
   @override
   void initState() {
     super.initState();
     _load();
+    _startForeshadowWatch();
   }
 
   @override
   void dispose() {
+    _foreshadowWatchTimer?.cancel();
     _storyStateCtrl.dispose();
+    _foreshadowsCtrl.dispose();
     super.dispose();
   }
 
@@ -49,6 +57,7 @@ class _StoryStatePageState extends State<StoryStatePage> {
       if (row != null) {
         _characters = _parseCharacters(row['characters'] as String? ?? '');
         _storyStateCtrl.text = row['story_state'] as String? ?? '';
+        _foreshadowsCtrl.text = row['foreshadows'] as String? ?? '';
       }
       // 最新已完成章节：账本页展示的是最新一章的账本
       final all = await OutlineChapterDbHelper().getByOutlineId(widget.outlineId);
@@ -76,11 +85,47 @@ class _StoryStatePageState extends State<StoryStatePage> {
     }
   }
 
+  /// 轻量轮询：控制器后台伏笔提炼状态变化时刷新界面（提炼开始显示加载提示，
+  /// 完成自动消失）；提炼结束后停止轮询
+  void _startForeshadowWatch() {
+    _foreshadowWatchTimer?.cancel();
+    _foreshadowWatchTimer = Timer.periodic(
+      const Duration(milliseconds: 800),
+      (t) {
+        if (!mounted) {
+          t.cancel();
+          return;
+        }
+        final refreshing = widget.controller.isRefreshingForeshadows;
+        if (refreshing != _lastRefreshingForeshadows) {
+          _lastRefreshingForeshadows = refreshing;
+          setState(() {});
+        }
+        if (!refreshing) t.cancel();
+      },
+    );
+  }
+
+  /// 手动重新提炼伏笔清单（后台 AI 调用），完成后刷新列表
+  Future<void> _regenerateForeshadows() async {
+    if (_regeneratingForeshadows) return;
+    setState(() => _regeneratingForeshadows = true);
+    final result = await widget.controller.regenerateForeshadows();
+    await _load();
+    if (mounted) {
+      setState(() => _regeneratingForeshadows = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(result), duration: const Duration(seconds: 1)),
+      );
+    }
+  }
+
   Future<void> _save() async {
     final chars = _characters.where((c) => c.name.trim().isNotEmpty).toList();
     await OutlineRecordDbHelper().update(widget.outlineId, {
       'characters': jsonEncode(chars.map((c) => c.toJson()).toList()),
       'story_state': _storyStateCtrl.text,
+      'foreshadows': _foreshadowsCtrl.text,
     });
     // 同步到最新已完成章节的独立账本，保持每章账本与全局展示一致
     if (_latestChapter?.id != null) {
@@ -169,6 +214,134 @@ class _StoryStatePageState extends State<StoryStatePage> {
             ),
             onPressed: () {
               _storyStateCtrl.text = editCtrl.text;
+              Navigator.of(ctx).pop();
+              WidgetsBinding.instance.addPostFrameCallback(
+                (_) => editCtrl.dispose(),
+              );
+            },
+            child: const Text(
+              '确定',
+              style: TextStyle(fontSize: 12, color: Color(0xFF4D6BFE)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 伏笔清单按行展示（每条一行，空行跳过）
+  List<Widget> _buildForeshadowLines() {
+    final lines = _foreshadowsCtrl.text.split('\n');
+    return [
+      for (final line in lines)
+        if (line.trim().isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Padding(
+                  padding: EdgeInsets.only(top: 4),
+                  child: Icon(Icons.circle, size: 6, color: Color(0xFF4D6BFE)),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    line.trim(),
+                    style: const TextStyle(
+                      fontSize: 11,
+                      height: 1.5,
+                      color: Color(0xFF666666),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+    ];
+  }
+
+  /// 打开 AI 伏笔生成详情页：流式展示 AI 思考过程与生成清单
+  void _openForeshadowDetail() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => _ForeshadowDetailPage(
+          outlineId: widget.outlineId,
+          controller: widget.controller,
+        ),
+      ),
+    );
+  }
+
+  /// 打开伏笔进度详情页：当前伏笔清单 + 各已完成章节账本中的【伏笔】记录
+  void _openForeshadowProgress() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => _ForeshadowProgressPage(outlineId: widget.outlineId),
+      ),
+    );
+  }
+
+  /// 伏笔清单编辑弹窗：多行文本编辑后写回 _foreshadowsCtrl
+  void _showForeshadowsEditDialog() {
+    final editCtrl = TextEditingController(text: _foreshadowsCtrl.text);
+    final screenHeight = MediaQuery.of(context).size.height;
+    final screenWidth = MediaQuery.of(context).size.width;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        titlePadding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+        contentPadding: const EdgeInsets.fromLTRB(4, 6, 4, 0),
+        actionsPadding: const EdgeInsets.fromLTRB(4, 0, 4, 4),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+        title: const Text(
+          '伏笔清单',
+          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+        ),
+        content: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: screenHeight * 0.72,
+            maxWidth: screenWidth * 0.92,
+          ),
+          child: TextField(
+            controller: editCtrl,
+            maxLines: null,
+            expands: true,
+            textAlignVertical: TextAlignVertical.top,
+            decoration: const InputDecoration(
+              hintText: '每条伏笔一行，形如：伏笔内容（埋设位置 / 计划回收时机）',
+              border: InputBorder.none,
+              contentPadding: EdgeInsets.fromLTRB(4, 2, 4, 2),
+              filled: true,
+              fillColor: Color(0xFFFAFAFA),
+            ),
+            style: const TextStyle(fontSize: 10, height: 1.6),
+          ),
+        ),
+        actions: [
+          TextButton(
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              WidgetsBinding.instance.addPostFrameCallback(
+                (_) => editCtrl.dispose(),
+              );
+            },
+            child: const Text('取消', style: TextStyle(fontSize: 12)),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            onPressed: () {
+              _foreshadowsCtrl.text = editCtrl.text;
+              setState(() {});
               Navigator.of(ctx).pop();
               WidgetsBinding.instance.addPostFrameCallback(
                 (_) => editCtrl.dispose(),
@@ -433,6 +606,172 @@ class _StoryStatePageState extends State<StoryStatePage> {
                                     color: Color(0xFF4D6BFE),
                                   ),
                                 ),
+                              ),
+                            ),
+                          ],
+                        ),
+                ),
+                const SizedBox(height: 20),
+                _buildSectionHeader(
+                  title: '伏笔清单',
+                  subtitle: 'AI 从大纲提炼，章节写作时注入【伏笔清单】；可手动修改',
+                  trailing: (_regeneratingForeshadows ||
+                          widget.controller.isRefreshingForeshadows)
+                      ? Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              '伏笔提炼中...',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[600],
+                              ),
+                            ),
+                          ],
+                        )
+                      : OutlinedButton.icon(
+                        onPressed: _regenerateForeshadows,
+                        icon: const Icon(Icons.auto_awesome, size: 16),
+                        label: const Text('重新提炼'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFF4D6BFE),
+                          side: const BorderSide(color: Color(0xFF4D6BFE)),
+                          visualDensity: VisualDensity.compact,
+                          textStyle: const TextStyle(fontSize: 12),
+                        ),
+                      ),
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFE8ECF4)),
+                  ),
+                  child: _foreshadowsCtrl.text.trim().isEmpty
+                      ? Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(
+                                  Icons.flag_outlined,
+                                  size: 18,
+                                  color: Colors.grey[300],
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    '暂无伏笔清单，可点击「重新提炼」从大纲生成，或点击「编辑」手动填写',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.grey[400],
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            const Divider(height: 16),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  GestureDetector(
+                                    onTap: _showForeshadowsEditDialog,
+                                    child: const Text(
+                                      '编辑',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: Color(0xFF4D6BFE),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 16),
+                                  GestureDetector(
+                                    onTap: _openForeshadowProgress,
+                                    child: const Text(
+                                      '伏笔进度',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: Color(0xFF00897B),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 16),
+                                  GestureDetector(
+                                    onTap: _openForeshadowDetail,
+                                    child: const Text(
+                                      'AI 生成详情',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: Color(0xFF7C4DFF),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        )
+                      : Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            ..._buildForeshadowLines(),
+                            const SizedBox(height: 4),
+                            const Divider(height: 16),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  GestureDetector(
+                                    onTap: _showForeshadowsEditDialog,
+                                    child: const Text(
+                                      '编辑',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: Color(0xFF4D6BFE),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 16),
+                                  GestureDetector(
+                                    onTap: _openForeshadowProgress,
+                                    child: const Text(
+                                      '伏笔进度',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: Color(0xFF00897B),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 16),
+                                  GestureDetector(
+                                    onTap: _openForeshadowDetail,
+                                    child: const Text(
+                                      'AI 生成详情',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: Color(0xFF7C4DFF),
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                           ],
@@ -873,6 +1212,465 @@ class _CharacterEditorState extends State<_CharacterEditor> {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// 伏笔进度详情页：展示当前伏笔清单 + 各已完成章节账本中的【伏笔】记录，
+/// 按章节顺序查看每条伏笔的埋设/回收进展。
+class _ForeshadowProgressPage extends StatefulWidget {
+  final int outlineId;
+  const _ForeshadowProgressPage({required this.outlineId});
+
+  @override
+  State<_ForeshadowProgressPage> createState() =>
+      _ForeshadowProgressPageState();
+}
+
+class _ForeshadowProgressPageState extends State<_ForeshadowProgressPage> {
+  String _foreshadows = '';
+  final List<({String title, String storyState})> _chapters = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final row = await OutlineRecordDbHelper().getById(widget.outlineId);
+      _foreshadows = row?['foreshadows'] as String? ?? '';
+      final all = await OutlineChapterDbHelper().getByOutlineId(widget.outlineId);
+      final completed = all
+          .map((m) => OutlineChapter.fromMap(m))
+          .where((c) => c.eventType == 'minor' && c.status == 'completed')
+          .toList()
+        ..sort((a, b) => a.eventIndex.compareTo(b.eventIndex));
+      _chapters
+        ..clear()
+        ..addAll(completed.map((c) => (title: c.eventTitle, storyState: c.storyState)));
+    } catch (_) {}
+    if (mounted) setState(() => _loading = false);
+  }
+
+  /// 从章节账本文本中提取【伏笔】分区内容（无则返回空串）
+  String _extractForeshadowSection(String storyState) {
+    if (storyState.trim().isEmpty) return '';
+    final buf = <String>[];
+    var inSection = false;
+    for (final line in storyState.split('\n')) {
+      final t = line.trim();
+      if (t.startsWith('【')) {
+        if (inSection) break;
+        if (t.startsWith('【伏笔】')) {
+          inSection = true;
+          final rest = t.substring(t.indexOf('】') + 1).trim();
+          if (rest.isNotEmpty) buf.add(rest);
+        }
+        continue;
+      }
+      if (inSection && t.isNotEmpty) buf.add(t);
+    }
+    return buf.join('\n');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        title: const Text(
+          '伏笔进度',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+        ),
+        backgroundColor: Colors.white,
+        elevation: 0.5,
+        centerTitle: true,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Color(0xFF333333)),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                // ── 当前伏笔清单 ──
+                _sectionHeader('当前伏笔清单', '账本页可编辑/重新提炼'),
+                const SizedBox(height: 8),
+                _card(
+                  child: _foreshadows.trim().isEmpty
+                      ? Text(
+                          '（暂无伏笔清单，可到剧情账本页点击「重新提炼」生成）',
+                          style: TextStyle(fontSize: 12, color: Colors.grey[400]),
+                        )
+                      : Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            for (final line in _foreshadows.split('\n'))
+                              if (line.trim().isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 6),
+                                  child: Row(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      const Padding(
+                                        padding: EdgeInsets.only(top: 4),
+                                        child: Icon(
+                                          Icons.circle,
+                                          size: 6,
+                                          color: Color(0xFF4D6BFE),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          line.trim(),
+                                          style: const TextStyle(
+                                            fontSize: 12,
+                                            height: 1.5,
+                                            color: Color(0xFF333333),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                          ],
+                        ),
+                ),
+                const SizedBox(height: 20),
+                // ── 各章伏笔进度 ──
+                _sectionHeader('各章伏笔进度', '按章节顺序展示每章账本中的【伏笔】记录'),
+                const SizedBox(height: 8),
+                if (_chapters.isEmpty)
+                  _card(
+                    child: Text(
+                      '（还没有已完成的章节，完成章节后每章账本会自动记录伏笔进展）',
+                      style: TextStyle(fontSize: 12, color: Colors.grey[400]),
+                    ),
+                  )
+                else
+                  for (final c in _chapters) ...[
+                    _card(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(
+                                Icons.menu_book_outlined,
+                                size: 16,
+                                color: Color(0xFF4D6BFE),
+                              ),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  c.title,
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: Color(0xFF333333),
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          _extractForeshadowSection(c.storyState).isEmpty
+                              ? Text(
+                                  '（本章账本无伏笔记录）',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.grey[400],
+                                  ),
+                                )
+                              : Text(
+                                _extractForeshadowSection(c.storyState),
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  height: 1.6,
+                                  color: Color(0xFF666666),
+                                ),
+                              ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                  ],
+              ],
+            ),
+    );
+  }
+
+  Widget _sectionHeader(String title, String subtitle) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: const TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF333333),
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          subtitle,
+          style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+        ),
+      ],
+    );
+  }
+
+  Widget _card({required Widget child}) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE8ECF4)),
+      ),
+      child: child,
+    );
+  }
+}
+
+/// AI 伏笔生成详情页：流式实时展示伏笔提炼的 AI 思考过程（reasoning_content）
+/// 与生成结果；提炼中实时刷新，也可在本页直接发起提炼。
+class _ForeshadowDetailPage extends StatefulWidget {
+  final int outlineId;
+  final ChapterWriteController controller;
+  const _ForeshadowDetailPage({
+    required this.outlineId,
+    required this.controller,
+  });
+
+  @override
+  State<_ForeshadowDetailPage> createState() => _ForeshadowDetailPageState();
+}
+
+class _ForeshadowDetailPageState extends State<_ForeshadowDetailPage> {
+  Timer? _watchTimer; // 轻量轮询：流式内容实时刷新
+  bool _starting = false;
+  String _lastResult = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _watchTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
+      if (!mounted) return;
+      setState(() {}); // 流式内容/状态实时刷新
+    });
+  }
+
+  @override
+  void dispose() {
+    _watchTimer?.cancel();
+    super.dispose();
+  }
+
+  /// 在本页直接发起流式提炼（与账本页「重新提炼」同一入口）
+  Future<void> _start() async {
+    if (_starting || widget.controller.isRefreshingForeshadows) return;
+    setState(() {
+      _starting = true;
+      _lastResult = '';
+    });
+    final result = await widget.controller.regenerateForeshadows();
+    if (mounted) {
+      setState(() {
+        _starting = false;
+        _lastResult = result;
+      });
+    }
+  }
+
+  Widget _bubble({
+    required IconData icon,
+    required String title,
+    required String content,
+    required String emptyHint,
+    Color color = const Color(0xFFF0F4FF),
+    Color borderColor = const Color(0xFFD8E2FF),
+    Color iconColor = const Color(0xFF4D6BFE),
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: borderColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 14, color: iconColor),
+              const SizedBox(width: 4),
+              Text(
+                title,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: iconColor,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          SelectableText(
+            content.trim().isEmpty ? emptyHint : content,
+            style: const TextStyle(
+              fontSize: 12,
+              height: 1.6,
+              color: Color(0xFF666666),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = widget.controller;
+    final refreshing = c.isRefreshingForeshadows;
+    final thinking = c.foreshadowThinkingText;
+    final output = c.foreshadowOutputText;
+    final String status;
+    if (refreshing) {
+      status = '伏笔提炼中...';
+    } else if (_starting) {
+      status = '准备中...';
+    } else if (output.trim().isNotEmpty) {
+      status = '已生成（上次结果）';
+    } else {
+      status = '尚未提炼，可点击下方「开始提炼」';
+    }
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        title: const Text(
+          'AI 伏笔生成详情',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+        ),
+        backgroundColor: Colors.white,
+        elevation: 0.5,
+        centerTitle: true,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Color(0xFF333333)),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+      ),
+      body: Column(
+        children: [
+          // 状态条
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            color: const Color(0xFFF8F9FF),
+            child: Row(
+              children: [
+                if (refreshing)
+                  const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                else
+                  const Icon(
+                    Icons.check_circle,
+                    size: 16,
+                    color: Color(0xFF4CAF50),
+                  ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    status,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: Color(0xFF666666),
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                if (_lastResult.isNotEmpty && !refreshing)
+                  Flexible(
+                    child: Text(
+                      _lastResult,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF00897B),
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                // AI 思考过程（reasoning_content 流式展示）
+                _bubble(
+                  icon: Icons.psychology_alt,
+                  title: 'AI 思考过程',
+                  content: thinking,
+                  emptyHint: refreshing ? '正在思考中...' : '（暂无思考过程）',
+                ),
+                const SizedBox(height: 12),
+                // 生成结果（伏笔清单流式展示）
+                _bubble(
+                  icon: Icons.flag_outlined,
+                  title: '生成的伏笔清单',
+                  content: output,
+                  emptyHint: refreshing ? '正在生成中...' : '（暂无输出）',
+                  color: const Color(0xFFF1F8E9),
+                  borderColor: const Color(0xFFDCEDC8),
+                  iconColor: const Color(0xFF558B2F),
+                ),
+              ],
+            ),
+          ),
+          // 底部操作：开始提炼
+          SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: (refreshing || _starting) ? null : _start,
+                  icon: refreshing
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.auto_awesome, size: 18),
+                  label: Text(refreshing ? '提炼中...' : '开始提炼伏笔'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF4D6BFE),
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

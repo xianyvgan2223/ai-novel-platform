@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../../shared/domain/outline_record.dart';
 import '../../../shared/domain/outline_chapter.dart';
@@ -25,6 +26,8 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
   DateTime? _lastScrollJump; // 自动滚动节流时间戳
   int _lastChapterWords = 0; // 上一次章节生成的字数（连续生成时预填，避免重复输入）
   OutlineChapter? _lastWriteChapter; // 最近一次尝试生成的章节（失败后写视图提供「重新生成」）
+  Timer? _foreshadowWatchTimer; // 轻量轮询：伏笔后台提炼期间保持横幅提醒直到完成
+  bool _lastForeshadowRefreshing = false; // 伏笔提炼状态快照
 
   @override
   void initState() {
@@ -45,10 +48,33 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
         );
       }
     });
+    _startForeshadowWatch();
+  }
+
+  /// 轻量轮询：控制器伏笔后台提炼状态变化时刷新界面——
+  /// 提炼开始显示常驻横幅提醒，完成自动消失；提炼结束后停止轮询
+  void _startForeshadowWatch() {
+    _foreshadowWatchTimer?.cancel();
+    _foreshadowWatchTimer = Timer.periodic(
+      const Duration(milliseconds: 800),
+      (t) {
+        if (!mounted) {
+          t.cancel();
+          return;
+        }
+        final refreshing = _controller.isRefreshingForeshadows;
+        if (refreshing != _lastForeshadowRefreshing) {
+          _lastForeshadowRefreshing = refreshing;
+          setState(() {});
+        }
+        if (!refreshing) t.cancel();
+      },
+    );
   }
 
   @override
   void dispose() {
+    _foreshadowWatchTimer?.cancel();
     _controller.dispose();
     _scrollController.dispose();
     _writeScrollController.dispose();
@@ -161,6 +187,35 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
                       ),
                     ),
                   ),
+                  // 伏笔后台提炼常驻提醒：从触发一直显示到提炼完成
+                  if (_controller.isRefreshingForeshadows)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                      color: const Color(0xFFFFF8E1),
+                      child: const Row(
+                        children: [
+                          SizedBox(
+                            width: 12,
+                            height: 12,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              '伏笔清单提炼中，完成后自动更新',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Color(0xFF8D6E63),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   Expanded(
                     child: ListView.builder(
                       controller: _scrollController,
@@ -890,6 +945,7 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
               await _controller.updateChapterSummary(ch, title, summary);
               if (mounted) setState(() {});
               if (ctx.mounted) Navigator.of(ctx).pop();
+              // 保存完成：伏笔清单在后台重新提炼，页面横幅会持续提醒直到提炼完成
             },
             child: const Text(
               '保存',
