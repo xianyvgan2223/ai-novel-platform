@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
+import '../../../shared/dialog_utils.dart';
 import '../../../shared/domain/outline_record.dart';
 import '../../../shared/data/outline_record_db_helper.dart';
 import 'outline_generation_page.dart';
@@ -78,11 +79,11 @@ class _OutlineHistoryPageState extends State<OutlineHistoryPage> {
                         content: Text('确定要删除「${r.title}」吗？'),
                         actions: [
                           TextButton(
-                            onPressed: () => Navigator.of(ctx).pop(false),
+                            onPressed: () => closeDialogSafely(ctx, result: false),
                             child: const Text('取消'),
                           ),
                           TextButton(
-                            onPressed: () => Navigator.of(ctx).pop(true),
+                            onPressed: () => closeDialogSafely(ctx, result: true),
                             style: TextButton.styleFrom(
                               foregroundColor: Colors.red,
                             ),
@@ -151,6 +152,12 @@ class _OutlineEditPageState extends State<_OutlineEditPage> {
   // EditableText，大幅降低拖动滚动条/快速滑动时的卡顿；点击行进入编辑。
   int? _editingIndex;
   final FocusNode _editFocusNode = FocusNode(); // 编辑行的焦点（复用，行间切换）
+  // 小说设定（类型/主题/主角简介/世界观）：可在详情页编辑，
+  // 保存后写入记录，影响局部重新生成与「大纲转章节」的写作提示词
+  late final TextEditingController _genreCtrl;
+  late final TextEditingController _themeCtrl;
+  late final TextEditingController _protagonistCtrl;
+  late final TextEditingController _worldviewCtrl;
 
   @override
   void initState() {
@@ -159,6 +166,10 @@ class _OutlineEditPageState extends State<_OutlineEditPage> {
       for (final line in widget.record.content.split('\n'))
         TextEditingController(text: _sanitizeLine(line)),
     ];
+    _genreCtrl = TextEditingController(text: widget.record.genre);
+    _themeCtrl = TextEditingController(text: widget.record.theme);
+    _protagonistCtrl = TextEditingController(text: widget.record.protagonist);
+    _worldviewCtrl = TextEditingController(text: widget.record.worldview);
   }
 
   @override
@@ -166,9 +177,102 @@ class _OutlineEditPageState extends State<_OutlineEditPage> {
     for (final c in _lineCtrls) {
       c.dispose();
     }
+    _genreCtrl.dispose();
+    _themeCtrl.dispose();
+    _protagonistCtrl.dispose();
+    _worldviewCtrl.dispose();
     _editFocusNode.dispose();
     _scrollCtrl.dispose();
     super.dispose();
+  }
+
+  /// 编辑小说设定弹窗（类型 / 主题 / 主角简介 / 世界观）。
+  /// 确认后写入本地控制器，随「保存」持久化到记录。
+  Future<void> _editSettings() async {
+    final genreCtrl = TextEditingController(text: _genreCtrl.text);
+    final themeCtrl = TextEditingController(text: _themeCtrl.text);
+    final protagonistCtrl = TextEditingController(text: _protagonistCtrl.text);
+    final worldviewCtrl = TextEditingController(text: _worldviewCtrl.text);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text(
+          '编辑小说设定',
+          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+        ),
+        contentPadding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: genreCtrl,
+                decoration: const InputDecoration(
+                  labelText: '类型',
+                  isDense: true,
+                ),
+                style: const TextStyle(fontSize: 14),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: themeCtrl,
+                decoration: const InputDecoration(
+                  labelText: '主题',
+                  isDense: true,
+                ),
+                style: const TextStyle(fontSize: 14),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: protagonistCtrl,
+                maxLines: 4,
+                decoration: const InputDecoration(
+                  labelText: '主角简介',
+                  alignLabelWithHint: true,
+                ),
+                style: const TextStyle(fontSize: 14, height: 1.5),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: worldviewCtrl,
+                maxLines: 4,
+                decoration: const InputDecoration(
+                  labelText: '世界观',
+                  alignLabelWithHint: true,
+                ),
+                style: const TextStyle(fontSize: 14, height: 1.5),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => closeDialogSafely(ctx, result: false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => closeDialogSafely(ctx, result: true),
+            child: const Text(
+              '确定',
+              style: TextStyle(color: Color(0xFF4D6BFE)),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      setState(() {
+        _genreCtrl.text = genreCtrl.text.trim();
+        _themeCtrl.text = themeCtrl.text.trim();
+        _protagonistCtrl.text = protagonistCtrl.text.trim();
+        _worldviewCtrl.text = worldviewCtrl.text.trim();
+      });
+    }
+    // 弹窗退场动画结束后再释放临时控制器（退场中释放会触发框架断言）
+    scheduleControllerDispose(genreCtrl);
+    scheduleControllerDispose(themeCtrl);
+    scheduleControllerDispose(protagonistCtrl);
+    scheduleControllerDispose(worldviewCtrl);
   }
 
   /// 编辑区合并文本：各行文本按 \n 重新拼接，与原内容格式完全一致
@@ -271,8 +375,13 @@ class _OutlineEditPageState extends State<_OutlineEditPage> {
     widget.onSaved();
   }
 
-  /// 内容是否有未保存的修改
-  bool get _isDirty => _mergedContent != widget.record.content;
+  /// 内容或设定是否有未保存的修改
+  bool get _isDirty =>
+      _mergedContent != widget.record.content ||
+      _genreCtrl.text != widget.record.genre ||
+      _themeCtrl.text != widget.record.theme ||
+      _protagonistCtrl.text != widget.record.protagonist ||
+      _worldviewCtrl.text != widget.record.worldview;
 
   /// 退出页面确认：有未保存修改时弹窗询问「保存并退出 / 不保存 / 取消」。
   /// AppBar 返回按钮与系统返回（PopScope）统一走此入口。
@@ -289,15 +398,15 @@ class _OutlineEditPageState extends State<_OutlineEditPage> {
         content: const Text('大纲内容已修改，要保存后退出吗？'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(ctx).pop('discard'),
+            onPressed: () => closeDialogSafely(ctx, result: 'discard'),
             child: const Text('不保存'),
           ),
           TextButton(
-            onPressed: () => Navigator.of(ctx).pop('cancel'),
+            onPressed: () => closeDialogSafely(ctx, result: 'cancel'),
             child: const Text('取消'),
           ),
           ElevatedButton(
-            onPressed: () => Navigator.of(ctx).pop('save'),
+            onPressed: () => closeDialogSafely(ctx, result: 'save'),
             child: const Text('保存并退出'),
           ),
         ],
@@ -320,14 +429,16 @@ class _OutlineEditPageState extends State<_OutlineEditPage> {
   Future<bool> _saveCore() async {
     final newContent = _mergedContent;
     final r = widget.record;
-    if (newContent == r.content) return false;
+    // 内容或设定任一有修改即写入（设定可单独修改，不能只看内容）
+    if (!_isDirty) return false;
     await OutlineRecordDbHelper().update(r.id!, {
       'content': newContent,
       'title': r.title,
-      'genre': r.genre,
-      'theme': r.theme,
-      'protagonist': r.protagonist,
-      'worldview': r.worldview,
+      // 设定取编辑后的值（详情页可编辑类型/主题/主角简介/世界观）
+      'genre': _genreCtrl.text.trim(),
+      'theme': _themeCtrl.text.trim(),
+      'protagonist': _protagonistCtrl.text.trim(),
+      'worldview': _worldviewCtrl.text.trim(),
     });
     // 注意：不再在保存时自动提炼伏笔清单——改为剧情账本页手动「重新提炼」触发
     widget.onSaved();
@@ -355,18 +466,18 @@ class _OutlineEditPageState extends State<_OutlineEditPage> {
         content: const Text('大纲内容已修改，要保存后继续吗？'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(ctx).pop('discard'),
+            onPressed: () => closeDialogSafely(ctx, result: 'discard'),
             child: const Text(
               '不保存',
               style: TextStyle(color: Color(0xFF999999)),
             ),
           ),
           TextButton(
-            onPressed: () => Navigator.of(ctx).pop('cancel'),
+            onPressed: () => closeDialogSafely(ctx, result: 'cancel'),
             child: const Text('取消'),
           ),
           TextButton(
-            onPressed: () => Navigator.of(ctx).pop('save'),
+            onPressed: () => closeDialogSafely(ctx, result: 'save'),
             child: const Text(
               '保存并继续',
               style: TextStyle(color: Color(0xFF4D6BFE)),
@@ -385,10 +496,10 @@ class _OutlineEditPageState extends State<_OutlineEditPage> {
   OutlineRecord _recordWithLatestContent() => OutlineRecord(
     id: widget.record.id,
     title: widget.record.title,
-    genre: widget.record.genre,
-    theme: widget.record.theme,
-    protagonist: widget.record.protagonist,
-    worldview: widget.record.worldview,
+    genre: _genreCtrl.text.trim(),
+    theme: _themeCtrl.text.trim(),
+    protagonist: _protagonistCtrl.text.trim(),
+    worldview: _worldviewCtrl.text.trim(),
     content: _mergedContent,
     foreshadows: widget.record.foreshadows,
     storyState: widget.record.storyState,
@@ -463,11 +574,29 @@ class _OutlineEditPageState extends State<_OutlineEditPage> {
                           ),
                         ),
                       ),
-                    _infoRow('类型', r.genre),
-                    _infoRow('主题', r.theme),
-                    _infoRow('主角', r.protagonist),
-                    _infoRow('世界观', r.worldview),
+                    _infoRow('类型', _genreCtrl.text),
+                    _infoRow('主题', _themeCtrl.text),
+                    _infoRow('主角简介', _protagonistCtrl.text),
+                    _infoRow('世界观', _worldviewCtrl.text),
                     _infoRow('生成时间', r.formattedDate),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        onPressed: _editSettings,
+                        icon: const Icon(Icons.edit_note, size: 18),
+                        label: const Text(
+                          '编辑设定（类型 / 主题 / 主角简介 / 世界观）',
+                          style: TextStyle(fontSize: 12),
+                        ),
+                        style: TextButton.styleFrom(
+                          foregroundColor: const Color(0xFF4D6BFE),
+                          visualDensity: VisualDensity.compact,
+                          padding: EdgeInsets.zero,
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                      ),
+                    ),
                     const SizedBox(height: 16),
                     if (r.isIncomplete) ...[
                       SizedBox(

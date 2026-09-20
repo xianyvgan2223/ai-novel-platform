@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../../../shared/dialog_utils.dart';
 import '../../../shared/domain/outline_record.dart';
 import '../../../shared/domain/outline_chapter.dart';
 import 'outline_setting_page.dart';
@@ -758,11 +759,11 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
         content: Text('确定删除已选 $count 个章节的已生成内容吗？删除后可重新生成。'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
+            onPressed: () => closeDialogSafely(ctx, result: false),
             child: const Text('取消', style: TextStyle(color: Color(0xFF999999))),
           ),
           TextButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
+            onPressed: () => closeDialogSafely(ctx, result: true),
             style: TextButton.styleFrom(foregroundColor: Colors.red),
             child: const Text('删除'),
           ),
@@ -912,10 +913,8 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
                                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                               ),
                               onPressed: () {
-                                Navigator.of(ctx2).pop();
-                                WidgetsBinding.instance.addPostFrameCallback(
-                                  (_) => editCtrl.dispose(),
-                                );
+                                if (!closeDialogSafely(ctx2)) return;
+                                scheduleControllerDispose(editCtrl);
                               },
                               child: const Text(
                                 '取消',
@@ -932,11 +931,9 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
                                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                               ),
                               onPressed: () {
+                                if (!closeDialogSafely(ctx2)) return;
                                 summaryCtrl.text = editCtrl.text;
-                                Navigator.of(ctx2).pop();
-                                WidgetsBinding.instance.addPostFrameCallback(
-                                  (_) => editCtrl.dispose(),
-                                );
+                                scheduleControllerDispose(editCtrl);
                               },
                               child: const Text(
                                 '确定',
@@ -959,7 +956,7 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
+            onPressed: () => closeDialogSafely(ctx),
             child: const Text(
               '取消',
               style: TextStyle(fontSize: 12, color: Color(0xFF999999)),
@@ -972,7 +969,8 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
               if (title.isEmpty && summary.isEmpty) return;
               await _controller.updateChapterSummary(ch, title, summary);
               if (mounted) setState(() {});
-              if (ctx.mounted) Navigator.of(ctx).pop();
+              // 防止等待期间重复点击造成重复 pop（会连带关闭下层页面）
+              if (ctx.mounted) closeDialogSafely(ctx);
               // 保存完成：伏笔清单在后台重新提炼，页面横幅会持续提醒直到提炼完成
             },
             child: const Text(
@@ -994,11 +992,11 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
         content: const Text('检测到大纲内容已更新，是否重新解析章节结构？\n\n注意：已完成的章节正文内容将被保留。'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
+            onPressed: () => closeDialogSafely(ctx, result: false),
             child: const Text('忽略', style: TextStyle(color: Color(0xFF999999))),
           ),
           TextButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
+            onPressed: () => closeDialogSafely(ctx, result: true),
             child: const Text(
               '重新解析',
               style: TextStyle(color: Color(0xFF4D6BFE)),
@@ -1050,20 +1048,16 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
         actions: [
           TextButton(
             onPressed: () {
-              Navigator.of(ctx).pop();
-              WidgetsBinding.instance.addPostFrameCallback(
-                (_) => ctrl.dispose(),
-              );
+              if (!closeDialogSafely(ctx)) return;
+              scheduleControllerDispose(ctrl);
             },
             child: const Text('取消', style: TextStyle(fontSize: 13)),
           ),
           TextButton(
             onPressed: () async {
               final text = ctrl.text.trim();
-              Navigator.of(ctx).pop();
-              WidgetsBinding.instance.addPostFrameCallback(
-                (_) => ctrl.dispose(),
-              );
+              if (!closeDialogSafely(ctx)) return; // 防重复点击
+              scheduleControllerDispose(ctrl);
               await _controller.saveChapterLedger(ch, text);
               if (mounted) setState(() {});
               ScaffoldMessenger.of(context).showSnackBar(
@@ -1375,12 +1369,12 @@ class _ChapterTile extends StatelessWidget {
                           content: const Text('确定要删除已生成的内容吗？'),
                           actions: [
                             TextButton(
-                              onPressed: () => Navigator.of(ctx).pop(),
+                              onPressed: () => closeDialogSafely(ctx),
                               child: const Text('取消'),
                             ),
                             TextButton(
                               onPressed: () {
-                                Navigator.of(ctx).pop();
+                                if (!closeDialogSafely(ctx)) return;
                                 onDelete();
                               },
                               style: TextButton.styleFrom(
@@ -1753,7 +1747,8 @@ class _ChapterEditPageState extends State<_ChapterEditPage> {
                   actions: [
                     TextButton(
                       onPressed: () {
-                        Navigator.of(ctx).pop();
+                        // 防重复点击：先关弹窗，再退出编辑页
+                        if (!closeDialogSafely(ctx)) return;
                         Navigator.of(context).pop();
                       },
                       child: const Text(
@@ -1763,7 +1758,7 @@ class _ChapterEditPageState extends State<_ChapterEditPage> {
                     ),
                     TextButton(
                       onPressed: () {
-                        Navigator.of(ctx).pop();
+                        if (!closeDialogSafely(ctx)) return;
                         _saveAndProcess();
                       },
                       child: const Text(

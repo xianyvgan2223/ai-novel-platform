@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import '../../../shared/dialog_utils.dart';
 import '../../../shared/domain/character_profile.dart';
 import '../../../shared/data/outline_record_db_helper.dart';
 import '../../../shared/data/outline_chapter_db_helper.dart';
@@ -199,10 +200,9 @@ class _StoryStatePageState extends State<StoryStatePage> {
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
             onPressed: () {
-              Navigator.of(ctx).pop();
-              WidgetsBinding.instance.addPostFrameCallback(
-                (_) => editCtrl.dispose(),
-              );
+              // 防止快速连点造成重复 pop（会连带关闭下层页面触发框架断言）
+              if (!closeDialogSafely(ctx)) return;
+              scheduleControllerDispose(editCtrl);
             },
             child: const Text('取消', style: TextStyle(fontSize: 12)),
           ),
@@ -213,11 +213,10 @@ class _StoryStatePageState extends State<StoryStatePage> {
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
             onPressed: () {
+              if (!closeDialogSafely(ctx)) return;
               _storyStateCtrl.text = editCtrl.text;
-              Navigator.of(ctx).pop();
-              WidgetsBinding.instance.addPostFrameCallback(
-                (_) => editCtrl.dispose(),
-              );
+              setState(() {});
+              scheduleControllerDispose(editCtrl);
             },
             child: const Text(
               '确定',
@@ -326,10 +325,8 @@ class _StoryStatePageState extends State<StoryStatePage> {
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
             onPressed: () {
-              Navigator.of(ctx).pop();
-              WidgetsBinding.instance.addPostFrameCallback(
-                (_) => editCtrl.dispose(),
-              );
+              if (!closeDialogSafely(ctx)) return;
+              scheduleControllerDispose(editCtrl);
             },
             child: const Text('取消', style: TextStyle(fontSize: 12)),
           ),
@@ -340,12 +337,10 @@ class _StoryStatePageState extends State<StoryStatePage> {
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
             onPressed: () {
+              if (!closeDialogSafely(ctx)) return;
               _foreshadowsCtrl.text = editCtrl.text;
               setState(() {});
-              Navigator.of(ctx).pop();
-              WidgetsBinding.instance.addPostFrameCallback(
-                (_) => editCtrl.dispose(),
-              );
+              scheduleControllerDispose(editCtrl);
             },
             child: const Text(
               '确定',
@@ -990,10 +985,8 @@ class _CharacterEditorState extends State<_CharacterEditor> {
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
             onPressed: () {
-              Navigator.of(ctx).pop();
-              WidgetsBinding.instance.addPostFrameCallback(
-                (_) => editCtrl.dispose(),
-              );
+              if (!closeDialogSafely(ctx)) return;
+              scheduleControllerDispose(editCtrl);
             },
             child: const Text('取消', style: TextStyle(fontSize: 12)),
           ),
@@ -1004,12 +997,10 @@ class _CharacterEditorState extends State<_CharacterEditor> {
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
             onPressed: () {
+              if (!closeDialogSafely(ctx)) return;
               targetCtrl.text = editCtrl.text;
               _emit();
-              Navigator.of(ctx).pop();
-              WidgetsBinding.instance.addPostFrameCallback(
-                (_) => editCtrl.dispose(),
-              );
+              scheduleControllerDispose(editCtrl);
             },
             child: const Text(
               '确定',

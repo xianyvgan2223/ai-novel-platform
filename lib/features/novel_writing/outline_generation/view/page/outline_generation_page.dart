@@ -2,6 +2,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import '../../controller/outline_controller.dart';
+import '../../../shared/dialog_utils.dart';
 import '../../../shared/domain/outline_record.dart';
 import 'outline_setting_page.dart';
 import 'outline_history_page.dart';
@@ -299,7 +300,12 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // 局部重新生成模式：隐藏设定区与「一键生成」按钮，直接进入检查点编辑
+              // 局部重新生成模式：显示可编辑的「小说设定」卡片（类型/主题/主角/世界观），
+              // 隐藏大/小事件数与「一键生成」按钮，直接进入检查点编辑
+              if (_isReedit) ...[
+                _buildReeditSettingCard(),
+                const SizedBox(height: 12),
+              ],
               if (!_isReedit) ...[
                 _buildInputSection(),
                 const SizedBox(height: 12),
@@ -521,6 +527,103 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  /// 局部重新生成模式的「小说设定」卡片：类型/主题/主角设定/世界观 可直接编辑。
+  /// 修改后点「继续」按新设定重新生成下游内容，并随另存的新大纲记录保存；
+  /// 不含大/小事件数（数量决定骨架结构，由检查点内容控制）。
+  Widget _buildReeditSettingCard() {
+    final c = _controller;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8F9FF),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE8ECF4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            '小说设定（可修改）',
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF333333),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '修改世界观 / 主角设定后点「继续」，将按新设定重新生成后续内容并保存到新大纲',
+            style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: c.genreController,
+            decoration: _inputDecoration('小说类型'),
+            style: const TextStyle(fontSize: 14),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: c.themeController,
+            decoration: _inputDecoration('主题（如：废土世界中的 AI 觉醒）'),
+            style: const TextStyle(fontSize: 14),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: c.protagonistController,
+                  decoration: _inputDecoration('主角设定（如：流浪剑客林墨）'),
+                  style: const TextStyle(fontSize: 14),
+                ),
+              ),
+              const SizedBox(width: 4),
+              IconButton(
+                icon: const Icon(
+                  Icons.fullscreen,
+                  size: 20,
+                  color: Color(0xFF4D6BFE),
+                ),
+                tooltip: '放大编辑',
+                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                padding: EdgeInsets.zero,
+                onPressed: () =>
+                    _showLargeEditor(context, c.protagonistController, '主角设定'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: c.worldViewController,
+                  decoration: _inputDecoration(
+                    '世界观（如：灵力为尊的大陆，科技与魔法并存）',
+                  ),
+                  style: const TextStyle(fontSize: 14),
+                ),
+              ),
+              const SizedBox(width: 4),
+              IconButton(
+                icon: const Icon(
+                  Icons.fullscreen,
+                  size: 20,
+                  color: Color(0xFF4D6BFE),
+                ),
+                tooltip: '放大编辑',
+                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                padding: EdgeInsets.zero,
+                onPressed: () =>
+                    _showLargeEditor(context, c.worldViewController, '世界观'),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -1241,7 +1344,8 @@ class _CustomGenreDialogState extends State<_CustomGenreDialog> {
                 height: 44,
                 child: ElevatedButton(
                   onPressed: () {
-                    Navigator.of(context).pop(_controller.text.trim());
+                    // 防重复点击：重复 pop 会连带关闭下层页面
+                    closeDialogSafely(context, result: _controller.text.trim());
                   },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF4D6BFE),

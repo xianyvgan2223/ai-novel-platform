@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../shared/dialog_utils.dart';
 import '../../model/battle_model.dart';
 import '../../model/db/battle_db_helper.dart';
 import '../../service/battle_ai_service.dart';
@@ -109,10 +110,8 @@ class _BattleSettingPageState extends State<BattleSettingPage> {
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
             onPressed: () {
-              Navigator.of(ctx).pop();
-              WidgetsBinding.instance.addPostFrameCallback(
-                (_) => editCtrl.dispose(),
-              );
+              if (!closeDialogSafely(ctx)) return;
+              scheduleControllerDispose(editCtrl);
             },
             child: const Text('取消', style: TextStyle(fontSize: 12)),
           ),
@@ -123,11 +122,9 @@ class _BattleSettingPageState extends State<BattleSettingPage> {
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
             onPressed: () {
+              if (!closeDialogSafely(ctx)) return;
               _systemCtrl.text = editCtrl.text;
-              Navigator.of(ctx).pop();
-              WidgetsBinding.instance.addPostFrameCallback(
-                (_) => editCtrl.dispose(),
-              );
+              scheduleControllerDispose(editCtrl);
             },
             child: const Text(
               '确定',

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../shared/dialog_utils.dart';
 import '../../../shared/domain/outline_setting.dart';
 import '../../../shared/data/outline_db_helper.dart';
 
@@ -137,10 +138,8 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
             onPressed: () {
-              Navigator.of(ctx).pop();
-              WidgetsBinding.instance.addPostFrameCallback(
-                (_) => editCtrl.dispose(),
-              );
+              if (!closeDialogSafely(ctx)) return;
+              scheduleControllerDispose(editCtrl);
             },
             child: const Text('取消', style: TextStyle(fontSize: 12)),
           ),
@@ -151,11 +150,9 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
             onPressed: () {
+              if (!closeDialogSafely(ctx)) return;
               targetCtrl.text = editCtrl.text;
-              Navigator.of(ctx).pop();
-              WidgetsBinding.instance.addPostFrameCallback(
-                (_) => editCtrl.dispose(),
-              );
+              scheduleControllerDispose(editCtrl);
             },
             child: Text(
               '确定',

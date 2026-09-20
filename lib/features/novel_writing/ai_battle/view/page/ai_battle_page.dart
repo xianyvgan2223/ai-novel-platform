@@ -1,5 +1,6 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import '../../../shared/dialog_utils.dart';
 import '../../controller/battle_controller.dart';
 import '../../model/battle_model.dart';
 import 'battle_setting_page.dart';
@@ -138,10 +139,8 @@ class _AiBattlePageState extends State<AiBattlePage> {
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
             onPressed: () {
-              Navigator.of(ctx).pop();
-              WidgetsBinding.instance.addPostFrameCallback(
-                (_) => editCtrl.dispose(),
-              );
+              if (!closeDialogSafely(ctx)) return;
+              scheduleControllerDispose(editCtrl);
             },
             child: const Text('取消', style: TextStyle(fontSize: 12)),
           ),
@@ -152,11 +151,9 @@ class _AiBattlePageState extends State<AiBattlePage> {
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
             onPressed: () {
+              if (!closeDialogSafely(ctx)) return;
               ctrl.text = editCtrl.text;
-              Navigator.of(ctx).pop();
-              WidgetsBinding.instance.addPostFrameCallback(
-                (_) => editCtrl.dispose(),
-              );
+              scheduleControllerDispose(editCtrl);
             },
             child: const Text(
               '确定',
