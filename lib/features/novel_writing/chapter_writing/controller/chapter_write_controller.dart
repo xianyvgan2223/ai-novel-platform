@@ -46,6 +46,16 @@ class ChapterWriteController {
   bool isRefreshingForeshadows = false; // 伏笔清单后台提炼中（账本页/章节页显示加载提示）
   String foreshadowThinkingText = ''; // 伏笔提炼 AI 思考过程（流式累积，供详情页实时展示）
   String foreshadowOutputText = ''; // 伏笔提炼 AI 输出（流式累积）
+  bool summarizingChapter = false; // 整章小结提炼中（编辑保存时可见）
+  String chapterSummaryThinkingText = ''; // 小结 AI 思考（流式累积）
+  String chapterSummaryOutputText = ''; // 小结输出（流式累积）
+  int? processingChapterId; // 编辑保存后正在提炼账本/小结的章节 id（列表加载显示、编辑/查看续显进度）
+
+  /// 指定章节是否正在后台提炼（账本或小结阶段）
+  bool isProcessingChapter(OutlineChapter ch) =>
+      processingChapterId != null &&
+      processingChapterId == ch.id &&
+      (extractingStory || summarizingChapter);
   CancelToken? _cancelToken;
   bool _cancelled = false;
 
@@ -718,26 +728,42 @@ class ChapterWriteController {
     return '';
   }
 
-  /// 保存手动编辑后的章节内容
+  /// 保存手动编辑后的章节内容。
+  /// 正文落盘与内存同步**即时完成**（保存返回后重新编辑/查看内容立即读到新内容）；
+  /// 账本提炼与整章小结（AI 调用，耗时长）改为后台执行——
+  /// 此前内存更新排在两次 AI 调用之后，保存退出后重新点开编辑/查看内容
+  /// 读到的还是修改前的旧内容，只有重新进入页面才刷新。
   Future<void> saveChapterContent(OutlineChapter ch, String content) async {
     await OutlineChapterDbHelper().updateContent(ch.id!, content);
-    // 用户改写了正文（可能重写伏笔/结局），与章节生成一致：账本/小结更新完成才算保存完成，
-    // 避免后续章节沿用基于旧正文提炼的状态
-    if (content.trim().isNotEmpty) {
+    final idx = chapters.indexWhere((c) => c.id == ch.id);
+    if (idx != -1) {
+      chapters[idx] = chapters[idx].copyWith(
+        content: content,
+        status: content.trim().isEmpty ? 'pending' : 'completed',
+      );
+    }
+    if (content.trim().isEmpty) return;
+    // 编辑保存后的可见提炼流程（编辑页正文下方气泡实时展示）：
+    // 账本提炼 → 整章小结，全部完成后返回（编辑页据此提醒并退出）。
+    // 正文已先落盘+同步内存，中途退出/失败均不影响已保存内容；
+    // 退出页面后流程继续在后台完成，processingChapterId 供列表/编辑/查看页显示进度
+    storyStateText = '';
+    storyStateThinking = '';
+    chapterSummaryOutputText = '';
+    chapterSummaryThinkingText = '';
+    processingChapterId = ch.id;
+    try {
       final all = await OutlineChapterDbHelper().getByOutlineId(outline.id!);
       await _updateStoryState(
         ch,
         content,
         allChapters: all.map((m) => OutlineChapter.fromMap(m)).toList(),
       );
-      await _summarizeChapter(ch, content);
-    }
-    final idx = chapters.indexWhere((c) => c.id == ch.id);
-    if (idx != -1) {
-      chapters[idx] = chapters[idx].copyWith(
-        content: content,
-        status: 'completed',
-      );
+      await _summarizeChapterVisible(ch, content);
+    } catch (_) {
+      // 提炼失败不影响正文保存
+    } finally {
+      processingChapterId = null;
     }
   }
 
@@ -1112,6 +1138,77 @@ class ChapterWriteController {
       }
     } catch (_) {
       // 提炼失败不影响章节生成，静默跳过
+    }
+  }
+
+  /// 整章小结（流式可见版）：把本章正文压缩为小结并写库；
+  /// 过程流式写入 [chapterSummaryThinkingText]（AI 思考）与
+  /// [chapterSummaryOutputText]（小结输出），供编辑保存页气泡实时展示；
+  /// 流式失败时回退一次非流式调用。失败静默不影响正文保存。
+  Future<void> _summarizeChapterVisible(OutlineChapter ch, String content) async {
+    if (ch.id == null || content.trim().isEmpty) return;
+    try {
+      final settings = await _service.loadSettings();
+      if (settings.apiKey.isEmpty) return;
+      final buf = StringBuffer();
+      final thinkBuf = StringBuffer();
+      summarizingChapter = true;
+      chapterSummaryThinkingText = '';
+      chapterSummaryOutputText = '';
+      try {
+        final completer = Completer<void>();
+        await _service.streamSummarizeChapter(
+          apiKey: settings.apiKey,
+          apiParams: {
+            'model': settings.chapterSetting.model,
+            'temperature': 0.3,
+            'max_tokens': settings.chapterSetting.maxTokens,
+            if (!settings.chapterSetting.enableThinking)
+              'thinking': {'type': 'disabled'},
+          },
+          eventTitle: ch.eventTitle,
+          eventSummary: ch.eventSummary,
+          chapterContent: content,
+          onContent: (c) {
+            buf.write(c);
+            chapterSummaryOutputText = buf.toString();
+          },
+          onReasoning: (r) {
+            thinkBuf.write(r);
+            chapterSummaryThinkingText = thinkBuf.toString();
+          },
+          onDone: () {
+            if (!completer.isCompleted) completer.complete();
+          },
+          onError: (msg) {
+            if (!completer.isCompleted) completer.completeError(msg);
+          },
+        );
+        await completer.future;
+      } finally {
+        summarizingChapter = false;
+      }
+      var summary = buf.toString().trim();
+      if (summary.isEmpty) {
+        // 流式失败或无输出：回退非流式一次
+        summary = await _service.summarizeChapter(
+          apiKey: settings.apiKey,
+          apiParams: {
+            'model': settings.chapterSetting.model,
+            'temperature': 0.3,
+            'max_tokens': settings.chapterSetting.maxTokens,
+          },
+          eventTitle: ch.eventTitle,
+          eventSummary: ch.eventSummary,
+          chapterContent: content,
+        );
+        if (summary.isNotEmpty) chapterSummaryOutputText = summary;
+      }
+      if (summary.isNotEmpty) {
+        await OutlineChapterDbHelper().updateAiSummary(ch.id!, summary);
+      }
+    } catch (_) {
+      // 提炼失败不影响正文保存
     }
   }
 

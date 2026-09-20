@@ -363,6 +363,53 @@ class ChapterWriteService {
     return content.trim();
   }
 
+  /// 整章提炼 — 流式版本：content（小结）与 reasoning_content（AI 思考）
+  /// 分别累积回调，供编辑保存页实时展示提炼过程。
+  Future<void> streamSummarizeChapter({
+    required String apiKey,
+    required Map<String, dynamic> apiParams,
+    required String eventTitle,
+    required String eventSummary,
+    required String chapterContent,
+    required void Function(String content) onContent,
+    required void Function(String reasoning) onReasoning,
+    required void Function() onDone,
+    required void Function(String error) onError,
+  }) async {
+    await _apiService.streamChat(
+      apiKey: apiKey,
+      apiParams: {...apiParams, 'stream': true},
+      messages: [
+        {
+          'role': 'system',
+          'content':
+              '你是小说章节提炼助手。请把给定的章节正文压缩为一份简明小结（800字以内），'
+              '保留：本章核心进展、结尾处的场景/时间/人物状态、结尾抛出的悬念或伏笔。'
+              '只输出小结本身，纯文本，不要任何多余说明。',
+        },
+        {
+          'role': 'user',
+          'content':
+              '【本章事件】$eventTitle\n'
+              '【本章概要】$eventSummary\n\n'
+              '【本章正文】\n$chapterContent',
+        },
+      ],
+      onChunk: (chunk) {
+        final choices = chunk['choices'] as List?;
+        if (choices == null || choices.isEmpty) return;
+        final delta = choices[0]['delta'] as Map<String, dynamic>?;
+        if (delta == null) return;
+        final c = delta['content'] as String?;
+        if (c != null && c.isNotEmpty) onContent(c);
+        final r = delta['reasoning_content'] as String?;
+        if (r != null && r.isNotEmpty) onReasoning(r);
+      },
+      onDone: onDone,
+      onError: onError,
+    );
+  }
+
   /// AI 审查修正 — 构建请求消息（流式调用由控制器执行，过程可实时查看）。
   /// 在章节生成完成与账本提炼之间执行：只修正正文中逻辑不通、前后矛盾、
   /// 细节与上文不符等不合理之处，**不改变**伏笔、剧情走向、人物设定与大纲情节；
