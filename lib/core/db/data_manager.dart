@@ -55,6 +55,10 @@ class DataManager {
       final versionError = await DatabaseHelper.validateDbFile(selectedPath);
       if (versionError != null) return versionError;
 
+      // 先把同步簿记（设备号 / 同步游标 / 行版本）取出来：
+      // 被导入的库文件里通常没有这两张表，不保留的话设备身份会变、游标会归零
+      final bookkeeping = await DatabaseHelper.exportSyncBookkeeping();
+
       // 关闭当前数据库连接
       await DatabaseHelper.closeDatabase();
 
@@ -66,6 +70,9 @@ class DataManager {
 
       // 重新打开数据库（下一次 get database 时自动重建连接）
       await DatabaseHelper.database;
+
+      // 写回同步簿记，并确保两张表存在（导入的库文件里可能没有）
+      await DatabaseHelper.importSyncBookkeeping(bookkeeping);
 
       return null;
     } catch (e) {

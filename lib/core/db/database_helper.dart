@@ -6,7 +6,7 @@ import 'package:path/path.dart' as p;
 
 class DatabaseHelper {
   static const _dbName = 'deepseek.db';
-  static const _dbVersion = 32;
+  static const _dbVersion = 33;
   static Database? _database;
 
   /// 单例入口，全局复用同一个数据库连接
@@ -181,7 +181,8 @@ class DatabaseHelper {
         system_prompt TEXT NOT NULL DEFAULT '',
         enable_thinking INTEGER NOT NULL DEFAULT 1,
         pause_after_skeleton INTEGER NOT NULL DEFAULT 0,
-        pause_after_events INTEGER NOT NULL DEFAULT 0
+        pause_after_events INTEGER NOT NULL DEFAULT 0,
+        pause_after_minor INTEGER NOT NULL DEFAULT 0
       )
     ''');
     await db.insert('outline_settings', {
@@ -371,6 +372,63 @@ class DatabaseHelper {
         FOREIGN KEY (campaign_id) REFERENCES trpg_campaigns(id) ON DELETE CASCADE
       )
     ''');
+
+    // ── 同步簿记表（本机专用，不参与同步） ──
+    await _createSyncTables(db);
+  }
+
+  /// 同步簿记表：sync_state 记录每行同步到哪个版本，sync_kv 存设备号与游标等
+  static Future<void> _createSyncTables(DatabaseExecutor db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS sync_state (
+        db_name TEXT NOT NULL,
+        table_name TEXT NOT NULL,
+        pk INTEGER NOT NULL,
+        rev INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (db_name, table_name, pk)
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS sync_kv (
+        k TEXT PRIMARY KEY,
+        v TEXT NOT NULL DEFAULT ''
+      )
+    ''');
+  }
+
+  /// 导入数据库前暂存同步簿记（被导入的库文件里没有这两张表）
+  static Future<Map<String, List<Map<String, Object?>>>>
+      exportSyncBookkeeping() async {
+    final db = await database;
+    final out = <String, List<Map<String, Object?>>>{};
+    for (final table in const <String>['sync_kv', 'sync_state']) {
+      try {
+        out[table] = await db.query(table);
+      } catch (_) {
+        out[table] = const <Map<String, Object?>>[];
+      }
+    }
+    return out;
+  }
+
+  /// 导入数据库后写回同步簿记，并确保两张表存在
+  static Future<void> importSyncBookkeeping(
+    Map<String, List<Map<String, Object?>>> data,
+  ) async {
+    final db = await database;
+    await _createSyncTables(db);
+    await db.transaction((txn) async {
+      await txn.delete('sync_kv');
+      await txn.delete('sync_state');
+      for (final row in data['sync_kv'] ?? const <Map<String, Object?>>[]) {
+        await txn.insert('sync_kv', row,
+            conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+      for (final row in data['sync_state'] ?? const <Map<String, Object?>>[]) {
+        await txn.insert('sync_state', row,
+            conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+    });
   }
 
   static Future<void> _onUpgrade(
@@ -896,6 +954,20 @@ class DatabaseHelper {
       if (!columns.any((c) => c['name'] == 'story_state')) {
         await db.execute(
           "ALTER TABLE outline_chapters ADD COLUMN story_state TEXT NOT NULL DEFAULT ''",
+        );
+      }
+    }
+
+    // V32 → V33：新增同步簿记表（sync_state / sync_kv）。
+    // 顺带补齐 outline_settings 的 pause_after_minor 列 —— 该列此前只在 V29
+    // 升级路径里创建，走 _onCreate 的全新安装缺少它，而 outline_setting.dart
+    // 的 toMap() 会写入这一列，导致新装用户保存大纲设置时报 no such column。
+    if (oldVersion < 33) {
+      await _createSyncTables(db);
+      final cols = await db.rawQuery('PRAGMA table_info(outline_settings)');
+      if (!cols.any((c) => c['name'] == 'pause_after_minor')) {
+        await db.execute(
+          'ALTER TABLE outline_settings ADD COLUMN pause_after_minor INTEGER NOT NULL DEFAULT 0',
         );
       }
     }

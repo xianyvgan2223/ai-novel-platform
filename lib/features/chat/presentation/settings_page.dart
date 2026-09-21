@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../application/setting_controller.dart';
 import '../application/chat_controller.dart'; // chatProvider
 import '../../../core/db/data_manager.dart';
+import '../../sync/presentation/sync_page.dart';
 
 /// SettingController Riverpod Provider
 final settingProvider = ChangeNotifierProvider<SettingController>(
@@ -337,6 +338,48 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   ),
                 ),
               ],
+            ),
+          ),
+
+          Padding(
+            padding: const EdgeInsets.only(top: 14),
+            child: InkWell(
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(builder: (_) => const SyncPage()),
+                );
+              },
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Row(
+                  children: [
+                    const Icon(Icons.sync, size: 18, color: Color(0xFF4D6BFE)),
+                    const SizedBox(width: 10),
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '数据同步',
+                            style: TextStyle(
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w500,
+                              color: Color(0xFF333333),
+                            ),
+                          ),
+                          SizedBox(height: 2),
+                          Text(
+                            '与电脑上的 Web 服务双向同步，不用再导文件',
+                            style: TextStyle(fontSize: 12, color: Color(0xFF999999)),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Icon(Icons.chevron_right, size: 18, color: Color(0xFFCCCCCC)),
+                  ],
+                ),
+              ),
             ),
           ),
 

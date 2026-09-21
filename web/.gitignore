@@ -1,0 +1,22 @@
+# 依赖与构建产物
+node_modules/
+dist/
+
+# 运行时数据：规范库（deepseek.db / novel.db）与同步元数据（sync.db）
+# 这里放的是真实数据，绝对不要提交
+data/*
+!data/.gitkeep
+
+# npm run seed 生成的演示数据（可随时重新生成）
+data-demo/
+
+# 本机配置
+.env
+.env.local
+
+# 导入/导出过程中产生的临时库
+tmp-*.db
+tmp-*.db-wal
+tmp-*.db-shm
+*.db-wal
+*.db-shm

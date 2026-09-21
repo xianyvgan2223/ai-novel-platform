@@ -1,0 +1,27 @@
+{
+  "name": "deepseekapp-web-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "deepseekapp Web 前端（Vue3 + Element Plus）",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "type-check": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "@element-plus/icons-vue": "^2.3.1",
+    "element-plus": "^2.14.6",
+    "pinia": "^3.0.3",
+    "vue": "^3.5.43",
+    "vue-router": "^4.5.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@vitejs/plugin-vue": "^6.0.1",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.5",
+    "vue-tsc": "^3.0.6"
+  }
+}
