@@ -94,6 +94,9 @@ class PushResultItem {
   final String db;
   final String table;
   final int pk;
+
+  /// upsert | delete —— 删除的结果要和新增/更新分开处理
+  final String op;
   final String status; // applied | unchanged | conflict | error
   final int rev;
   final Map<String, dynamic>? serverRow;
@@ -103,6 +106,7 @@ class PushResultItem {
     required this.db,
     required this.table,
     required this.pk,
+    required this.op,
     required this.status,
     required this.rev,
     required this.serverRow,
@@ -113,6 +117,7 @@ class PushResultItem {
         db: (j['db'] ?? '') as String,
         table: (j['table'] ?? '') as String,
         pk: (j['pk'] as num?)?.toInt() ?? 0,
+        op: (j['op'] ?? 'upsert') as String,
         status: (j['status'] ?? '') as String,
         // 冲突时服务端返回的是 serverRev（服务端当前版本号）
         rev: ((j['rev'] ?? j['serverRev']) as num?)?.toInt() ?? 0,
@@ -120,6 +125,21 @@ class PushResultItem {
             ? null
             : Map<String, dynamic>.from(j['serverRow'] as Map),
         message: j['message'] as String?,
+      );
+}
+
+/// 网页发起的「请手机同步」待办
+class SyncRequestInfo {
+  final int id;
+  final String status;
+  final int requestedAt;
+
+  SyncRequestInfo({required this.id, required this.status, required this.requestedAt});
+
+  factory SyncRequestInfo.fromJson(Map<String, dynamic> j) => SyncRequestInfo(
+        id: (j['id'] as num?)?.toInt() ?? 0,
+        status: (j['status'] ?? '') as String,
+        requestedAt: (j['requestedAt'] as num?)?.toInt() ?? 0,
       );
 }
 
@@ -232,6 +252,53 @@ class SyncClient {
     try {
       final res = await _dio.get<dynamic>('/api/health');
       return SyncHealth.fromJson(_unwrap(res));
+    } catch (e) {
+      _fail(e);
+    }
+  }
+
+  /// 领取网页发起的「请同步」待办；没有待办返回 null
+  Future<SyncRequestInfo?> claimPendingRequest() async {
+    try {
+      final res = await _dio.get<dynamic>('/api/sync/pending', queryParameters: <String, dynamic>{
+        'deviceId': deviceId,
+      });
+      final body = res.data;
+      if (body is! Map || body['ok'] != true) return null;
+      final data = body['data'];
+      if (data is! Map) return null;
+      return SyncRequestInfo.fromJson(Map<String, dynamic>.from(data));
+    } catch (e) {
+      _fail(e);
+    }
+  }
+
+  /// 上报同步进度（给网页显示进度条用）。失败静默 —— 进度丢了不影响同步本身
+  Future<void> reportProgress(
+    int requestId, {
+    String message = '',
+    int? current,
+    int? total,
+  }) async {
+    try {
+      await _dio.post<dynamic>('/api/sync/progress', data: <String, dynamic>{
+        'requestId': requestId,
+        'message': message,
+        'current': current,
+        'total': total,
+      });
+    } catch (_) {
+      // 忽略
+    }
+  }
+
+  /// 回报待办执行结果
+  Future<void> completeRequest(int id, {String status = 'done', String result = ''}) async {
+    try {
+      await _dio.post<dynamic>(
+        '/api/sync/request/$id/complete',
+        data: <String, dynamic>{'status': status, 'result': result},
+      );
     } catch (e) {
       _fail(e);
     }

@@ -6,6 +6,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../application/history_controller.dart';
 import '../application/chat_controller.dart'; // chatProvider
 import '../domain/chat_session.dart';
+import '../../sync/application/sync_service.dart';
+import '../../sync/data/sync_store.dart';
+import '../../sync/presentation/sync_page.dart';
 
 /// HistoryController Riverpod Provider
 final historyProvider = ChangeNotifierProvider<HistoryController>(
@@ -20,10 +23,87 @@ class HistoryPage extends ConsumerStatefulWidget {
 }
 
 class _HistoryPageState extends ConsumerState<HistoryPage> {
+  /// 数据同步状态
+  bool _syncing = false;
+  String _syncStatus = '';
+
   @override
   void initState() {
     super.initState();
     Future.microtask(() => ref.read(historyProvider).loadSessions());
+    _loadLastSyncTime();
+  }
+
+  Future<void> _loadLastSyncTime() async {
+    try {
+      final at = await SyncStore.getInt(SyncService.kLastSyncAtKey);
+      if (!mounted || at <= 0) return;
+      setState(() => _syncStatus = '上次同步 ${_formatSyncTime(at)}');
+    } catch (_) {
+      // 读不到就不显示，不影响使用
+    }
+  }
+
+  String _formatSyncTime(int ms) {
+    final d = DateTime.fromMillisecondsSinceEpoch(ms);
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${two(d.month)}-${two(d.day)} ${two(d.hour)}:${two(d.minute)}';
+  }
+
+  /// 一键同步：优先用已保存的地址；没配过就自动在局域网里找电脑
+  Future<void> _quickSync() async {
+    if (_syncing) return;
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() {
+      _syncing = true;
+      _syncStatus = '正在同步…';
+    });
+
+    try {
+      final report = await SyncService.quickSync(
+        deviceName: '我的手机',
+        onProgress: (message, {int? current, int? total}) {
+          if (!mounted) return;
+          setState(() {
+            _syncStatus = (current != null && total != null && total > 0)
+                ? '$message  ${((current / total) * 100).round()}%'
+                : message;
+          });
+        },
+      );
+      if (!mounted) return;
+      setState(() {
+        _syncStatus = report.finishedAt == null
+            ? ''
+            : '上次同步 ${_formatSyncTime(report.finishedAt!.millisecondsSinceEpoch)}';
+      });
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('同步完成：${report.summary}'),
+          duration: const Duration(seconds: 4),
+          backgroundColor: const Color(0xFF10B981),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _syncStatus = '');
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(SyncService.describeError(e)),
+          duration: const Duration(seconds: 8),
+          backgroundColor: const Color(0xFFFF4D4F),
+          action: SnackBarAction(
+            label: '同步设置',
+            textColor: Colors.white,
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const SyncPage()),
+            ),
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _syncing = false);
+    }
   }
 
   Future<void> _onNewSession() async {
@@ -64,33 +144,42 @@ class _HistoryPageState extends ConsumerState<HistoryPage> {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: _buildAppBar(context),
-      body: sessions.isEmpty
-          ? const Center(
-              child: Text(
-                '暂无历史会话',
-                style: TextStyle(fontSize: 14, color: Color(0xFF999999)),
-              ),
-            )
-          : ListView.separated(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              itemCount: sessions.length + 1, // +1 新建按钮
-              separatorBuilder: (_, _) => const Divider(
-                height: 1,
-                indent: 16,
-                color: Color(0xFFEEEEEE),
-              ),
-              itemBuilder: (context, index) {
-                if (index == 0) {
-                  return _NewSessionButton(onTap: _onNewSession);
-                }
-                final session = sessions[index - 1];
-                return _SessionTile(
-                  session: session,
-                  onTap: () => _onTapSession(session),
-                  onDelete: () => _showDeleteConfirm(session),
-                );
-              },
-            ),
+      body: Column(
+        children: [
+          Expanded(
+            child: sessions.isEmpty
+                ? const Center(
+                    child: Text(
+                      '暂无历史会话',
+                      style: TextStyle(fontSize: 14, color: Color(0xFF999999)),
+                    ),
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    itemCount: sessions.length + 1, // +1 新建按钮
+                    separatorBuilder: (_, _) => const Divider(
+                      height: 1,
+                      indent: 16,
+                      color: Color(0xFFEEEEEE),
+                    ),
+                    itemBuilder: (context, index) {
+                      if (index == 0) {
+                        return _NewSessionButton(onTap: _onNewSession);
+                      }
+                      final session = sessions[index - 1];
+                      return _SessionTile(
+                        session: session,
+                        onTap: () => _onTapSession(session),
+                        onDelete: () => _showDeleteConfirm(session),
+                      );
+                    },
+                  ),
+          ),
+          // 底部固定的数据同步入口
+          const Divider(height: 1, color: Color(0xFFEEEEEE)),
+          _SyncEntry(syncing: _syncing, status: _syncStatus, onTap: _quickSync),
+        ],
+      ),
     );
   }
 
@@ -146,6 +235,74 @@ class _HistoryPageState extends ConsumerState<HistoryPage> {
             child: const Text('删除', style: TextStyle(color: Color(0xFFFF4D4F))),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// ─── 数据同步入口（放在汉堡菜单底部） ───
+
+class _SyncEntry extends StatelessWidget {
+  final bool syncing;
+  final String status;
+  final VoidCallback onTap;
+
+  const _SyncEntry({
+    required this.syncing,
+    required this.status,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: syncing ? null : onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(
+          children: [
+            syncing
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(
+                    Icons.cloud_sync_outlined,
+                    size: 20,
+                    color: Color(0xFF4D6BFE),
+                  ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    '数据同步',
+                    style: TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w500,
+                      color: Color(0xFF333333),
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    status.isEmpty ? '与电脑上的 Web 服务双向同步' : status,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: status.isEmpty
+                          ? const Color(0xFF999999)
+                          : const Color(0xFF4D6BFE),
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right, size: 18, color: Color(0xFFCCCCCC)),
+          ],
+        ),
       ),
     );
   }

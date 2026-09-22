@@ -6,11 +6,14 @@ import 'package:flutter_displaymode/flutter_displaymode.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'features/chat/presentation/chat_page.dart';
 import 'features/chat/presentation/widgets/chat_floating_ball.dart';
+import 'features/sync/application/sync_poller.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // 请求设备最高刷新率（如 120Hz），降低帧延迟
   await FlutterDisplayMode.setHighRefreshRate();
+  // 前台轮询：电脑（网页）点「同步手机」后自动执行，不用碰手机
+  SyncPoller.instance.start();
   runApp(const ProviderScope(child: MyApp()));
 }
 
@@ -32,6 +35,8 @@ class _MyAppState extends State<MyApp> {
       debugShowCheckedModeBanner: false,
       navigatorKey: _navigatorKey,
       navigatorObservers: [_routeObserver],
+      // 让后台轮询也能弹提示（电脑请求的同步完成/失败）
+      scaffoldMessengerKey: SyncPoller.instance.messengerKey,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
           seedColor: const Color(0xFF4D6BFE),

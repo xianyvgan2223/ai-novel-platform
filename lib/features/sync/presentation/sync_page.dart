@@ -8,8 +8,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../core/db/database_helper.dart';
 import '../application/sync_service.dart';
-import '../data/sync_client.dart';
 import '../data/sync_store.dart';
 
 const Color _kPrimary = Color(0xFF4D6BFE);
@@ -31,9 +31,13 @@ class _SyncPageState extends State<SyncPage> {
   String _deviceId = '';
   int? _lastSyncAt;
   String _lastSummary = '';
+  /// 设备自带 SQLite 的版本，排查兼容性问题时很有用
+  String _sqliteVersion = '';
 
   bool _busy = false;
   String _progress = '';
+  int? _progressCurrent;
+  int? _progressTotal;
   SyncReport? _report;
   String? _error;
   bool _showAdvanced = false;
@@ -57,6 +61,18 @@ class _SyncPageState extends State<SyncPage> {
     final deviceId = await SyncService.ensureDeviceId();
     final at = await SyncStore.getInt(SyncService.kLastSyncAtKey);
     final summary = await SyncStore.getValue(SyncService.kLastSyncSummaryKey);
+
+    // 顺便读一下设备自带 SQLite 的版本：老版本缺一些 SQL 语法，
+    // 出兼容问题时这里是第一手线索
+    var sqliteVersion = '';
+    try {
+      final db = await DatabaseHelper.database;
+      final rows = await db.rawQuery('SELECT sqlite_version() AS v');
+      sqliteVersion = (rows.first['v'] ?? '').toString();
+    } catch (_) {
+      // 读不到就算了
+    }
+
     if (!mounted) return;
     setState(() {
       _urlCtrl.text = url;
@@ -64,6 +80,7 @@ class _SyncPageState extends State<SyncPage> {
       _deviceId = deviceId;
       _lastSyncAt = at > 0 ? at : null;
       _lastSummary = summary ?? '';
+      _sqliteVersion = sqliteVersion;
     });
   }
 
@@ -131,8 +148,13 @@ class _SyncPageState extends State<SyncPage> {
         baseUrl: url,
         token: _tokenCtrl.text.trim(),
         deviceName: '我的手机',
-        onProgress: (message) {
-          if (mounted) setState(() => _progress = message);
+        onProgress: (message, {int? current, int? total}) {
+          if (!mounted) return;
+          setState(() {
+            _progress = message;
+            _progressCurrent = current;
+            _progressTotal = total;
+          });
         },
       );
 
@@ -149,7 +171,8 @@ class _SyncPageState extends State<SyncPage> {
       if (!mounted) return;
       setState(() {
         _progress = '';
-        _error = e is SyncException ? e.message : e.toString();
+        // 数据库异常原文很长，用 SyncService.describeError 压成一行
+        _error = SyncService.describeError(e);
       });
       _toast('同步失败', error: true);
     } finally {
@@ -401,6 +424,25 @@ class _SyncPageState extends State<SyncPage> {
             style: const TextStyle(fontSize: 13.5, color: _kInk),
           ),
           const SizedBox(height: 16),
+          const _Label('设备 SQLite 版本'),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFAFAFA),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: _kLine),
+            ),
+            child: Text(
+              _sqliteVersion.isEmpty ? '（读取中…）' : _sqliteVersion,
+              style: const TextStyle(
+                fontSize: 12.5,
+                color: Color(0xFF666666),
+                fontFamily: 'monospace',
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
           const _Label('本机设备标识'),
           InkWell(
             onTap: () {
@@ -460,18 +502,43 @@ class _SyncPageState extends State<SyncPage> {
   }
 
   Widget _buildProgress() {
+    final current = _progressCurrent;
+    final total = _progressTotal;
+    final ratio = (current != null && total != null && total > 0)
+        ? (current / total).clamp(0.0, 1.0)
+        : null;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const LinearProgressIndicator(
+        LinearProgressIndicator(
           minHeight: 3,
-          backgroundColor: Color(0xFFEEF1FF),
-          valueColor: AlwaysStoppedAnimation<Color>(_kPrimary),
+          value: ratio,
+          backgroundColor: const Color(0xFFEEF1FF),
+          valueColor: const AlwaysStoppedAnimation<Color>(_kPrimary),
         ),
         const SizedBox(height: 8),
-        Text(
-          _progress,
-          style: const TextStyle(fontSize: 12.5, color: _kMuted),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Expanded(
+              child: Text(
+                _progress,
+                style: const TextStyle(fontSize: 12.5, color: _kMuted),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            if (ratio != null)
+              Text(
+                '${(ratio * 100).round()}%',
+                style: const TextStyle(
+                  fontSize: 12.5,
+                  color: _kPrimary,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+          ],
         ),
       ],
     );

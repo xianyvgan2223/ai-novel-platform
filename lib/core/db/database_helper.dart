@@ -6,7 +6,7 @@ import 'package:path/path.dart' as p;
 
 class DatabaseHelper {
   static const _dbName = 'deepseek.db';
-  static const _dbVersion = 33;
+  static const _dbVersion = 34;
   static Database? _database;
 
   /// 单例入口，全局复用同一个数据库连接
@@ -385,6 +385,7 @@ class DatabaseHelper {
         table_name TEXT NOT NULL,
         pk INTEGER NOT NULL,
         rev INTEGER NOT NULL DEFAULT 0,
+        hash TEXT NOT NULL DEFAULT '',
         PRIMARY KEY (db_name, table_name, pk)
       )
     ''');
@@ -968,6 +969,18 @@ class DatabaseHelper {
       if (!cols.any((c) => c['name'] == 'pause_after_minor')) {
         await db.execute(
           'ALTER TABLE outline_settings ADD COLUMN pause_after_minor INTEGER NOT NULL DEFAULT 0',
+        );
+      }
+    }
+
+    // V33 → V34：sync_state 增加 hash 列（行内容指纹）。
+    // 有它之后推送就能先在本地比对，只有真正改过的行才会发出去；
+    // 同时本地少了、簿记里还在的行会被识别成「已删除」并推给服务端。
+    if (oldVersion < 34) {
+      final cols = await db.rawQuery('PRAGMA table_info(sync_state)');
+      if (cols.isNotEmpty && !cols.any((c) => c['name'] == 'hash')) {
+        await db.execute(
+          "ALTER TABLE sync_state ADD COLUMN hash TEXT NOT NULL DEFAULT ''",
         );
       }
     }

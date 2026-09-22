@@ -2,7 +2,7 @@
 import { del, download, get, getWithMeta, post, put, uploadBinary } from './client';
 import type {
   Catalog, ConflictInfo, DbKey, DeleteResult, DeviceInfo, HealthInfo, ImportReport,
-  PagedMeta, Row, Stats, SyncOverview, WriteResult,
+  PagedMeta, Row, Stats, SyncOverview, SyncRequestInfo, WriteResult,
 } from './types';
 
 export const api = {
@@ -36,6 +36,11 @@ export const api = {
   prune: () => post<{ pruned: number; upTo: number }>('/api/sync/prune'),
   pull: (params: Record<string, unknown>) => get<Record<string, unknown>>('/api/sync/pull', params),
   push: (payload: Record<string, unknown>) => post<Record<string, unknown>>('/api/sync/push', payload),
+
+  // ── 让手机去同步：网页发起 → 手机前台轮询领取 → 回报结果 ──
+  requestPhoneSync: (targetDevice = '') =>
+    post<SyncRequestInfo>('/api/sync/request', { targetDevice }),
+  syncRequestStatus: (id: number) => get<SyncRequestInfo>('/api/sync/request/' + id),
 };
 
 export * from './types';

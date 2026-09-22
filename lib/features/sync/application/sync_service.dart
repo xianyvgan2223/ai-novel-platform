@@ -8,12 +8,14 @@
 /// 没变的行既不会写日志也不会涨版本号，所以全量推送的成本很低。
 library;
 
+import 'dart:async';
 import 'dart:math';
 
 import 'package:sqflite/sqflite.dart';
 
 import '../../../core/db/database_helper.dart';
 import '../../game/novel_game/model/db/novel_db_helper.dart';
+import '../data/server_discovery.dart';
 import '../data/sync_client.dart';
 import '../data/sync_store.dart';
 import '../data/sync_targets.dart';
@@ -54,6 +56,25 @@ class SyncReport {
     if (conflicts > 0) parts.add('冲突 $conflicts 条');
     return parts.join('，');
   }
+}
+
+/// 处理「电脑请求同步」的结果
+class PendingSyncOutcome {
+  /// 是否真的执行了一次同步（false = 没有待办 / 连接不通）
+  final bool handled;
+  final String summary;
+  final String? error;
+
+  const PendingSyncOutcome({
+    required this.handled,
+    required this.summary,
+    required this.error,
+  });
+
+  const PendingSyncOutcome.idle()
+      : handled = false,
+        summary = '',
+        error = null;
 }
 
 class SyncService {
@@ -104,14 +125,147 @@ class SyncService {
         '${health.authRequired ? ' · 已开启鉴权' : ''}';
   }
 
+  /// 把异常压成适合弹提示的一行字。
+  /// 数据库异常原文动辄几百字，直接塞进 SnackBar 会占满整个屏幕。
+  static String describeError(Object error) {
+    if (error is SyncException) return error.message;
+    final raw = error.toString().replaceAll(RegExp(r'\s+'), ' ').trim();
+    return raw.length <= 140 ? raw : '${raw.substring(0, 140)}…';
+  }
+
+  /// 在局域网里自动找一台同步服务；找到会记下地址并返回
+  static Future<String?> autoDiscover({
+    void Function(String message, {int? current, int? total})? onProgress,
+  }) async {
+    final found = await ServerDiscovery.discover(onProgress: onProgress);
+    if (found == null) return null;
+    await setBaseUrl(found.baseUrl);
+    return found.baseUrl;
+  }
+
+  /// 检查电脑（网页）有没有发起「请同步」待办；有就执行并回报。
+  ///
+  /// 返回值 handled=false 表示这次什么都没做（没配过地址 / 网络不通 / 没有待办），
+  /// 轮询方据此决定要不要提示用户 —— 网络抖动不应该每 5 秒弹一次错误。
+  static Future<PendingSyncOutcome> handlePendingRequest({
+    void Function(String message, {int? current, int? total})? onProgress,
+  }) async {
+    final url = await getBaseUrl();
+    if (url.isEmpty) return PendingSyncOutcome.idle();
+
+    final deviceId = await ensureDeviceId();
+    final token = await getToken();
+    final client = SyncClient(baseUrl: url, deviceId: deviceId, token: token);
+
+    SyncRequestInfo? claimed;
+    try {
+      claimed = await client.claimPendingRequest();
+    } catch (_) {
+      // 连接问题：静默跳过，下一轮再试
+      return PendingSyncOutcome.idle();
+    }
+    if (claimed == null) return PendingSyncOutcome.idle();
+
+    final request = claimed; // 提升为非空局部变量，闭包里才能安全引用
+    onProgress?.call('收到电脑的同步请求…');
+
+    // 进度一边给本机界面，一边回传服务端（网页那边就能显示实时进度）。
+    // 节流到约 0.7 秒一次，免得把接口刷爆。
+    var lastReportAt = 0;
+    void report(String message, {int? current, int? total}) {
+      onProgress?.call(message, current: current, total: total);
+      final nowMs = DateTime.now().millisecondsSinceEpoch;
+      if (nowMs - lastReportAt < 700) return;
+      lastReportAt = nowMs;
+      unawaited(
+        client.reportProgress(request.id, message: message, current: current, total: total),
+      );
+    }
+
+    try {
+      report('开始同步…');
+      final report0 = await run(
+        baseUrl: url,
+        token: token,
+        deviceName: '我的手机',
+        onProgress: report,
+      );
+      await client.completeRequest(request.id, status: 'done', result: report0.summary);
+      return PendingSyncOutcome(handled: true, summary: report0.summary, error: null);
+    } catch (e) {
+      final message = e is SyncException ? e.message : e.toString();
+      try {
+        await client.completeRequest(request.id, status: 'failed', result: message);
+      } catch (_) {
+        // 回报失败也无所谓，网页那边会超时提示
+      }
+      return PendingSyncOutcome(handled: true, summary: '', error: message);
+    }
+  }
+
+  /// 一键同步（主界面按钮用）：
+  ///   1. 优先用已保存的地址；没配过就自动扫描局域网
+  ///   2. 找不到时给出可操作的提示，而不是丢一句「网络异常」
+  ///   3. 地址失效（手机热点每次分配不同 IP 很常见）时自动重找一次再同步
+  static Future<SyncReport> quickSync({
+    String? preferredUrl,
+    String deviceName = '',
+    void Function(String message, {int? current, int? total})? onProgress,
+  }) async {
+    var url = (preferredUrl ?? await getBaseUrl()).trim();
+
+    if (url.isEmpty) {
+      onProgress?.call('还没配置过地址，正在局域网里查找…');
+      final found = await autoDiscover(onProgress: onProgress);
+      if (found == null) {
+        throw SyncException(
+          '没有找到电脑上的同步服务。\n'
+          '请确认：① 电脑已启动服务（web/server 目录执行 npm start）'
+          '② 手机与电脑连同一个 Wi-Fi 或热点 '
+          '③ Windows 防火墙已放行 3210 端口',
+        );
+      }
+      url = found;
+      onProgress?.call('已找到 $url');
+    }
+
+    final token = await getToken();
+    try {
+      return await run(
+        baseUrl: url,
+        token: token,
+        deviceName: deviceName,
+        onProgress: onProgress,
+      );
+    } catch (e) {
+      final retriable = e is SyncException &&
+          (e.message.contains('连不上') || e.message.contains('超时'));
+      if (!retriable) rethrow;
+
+      onProgress?.call('原地址连不上，正在重新查找…');
+      final found = await ServerDiscovery.discover(onProgress: onProgress);
+      if (found == null || found.baseUrl == url) rethrow;
+
+      await setBaseUrl(found.baseUrl);
+      onProgress?.call('改用 ${found.baseUrl}');
+      return run(
+        baseUrl: found.baseUrl,
+        token: token,
+        deviceName: deviceName,
+        onProgress: onProgress,
+      );
+    }
+  }
+
   /// 执行一次完整同步
   static Future<SyncReport> run({
     required String baseUrl,
     String token = '',
     String deviceName = '',
-    void Function(String message)? onProgress,
+    void Function(String message, {int? current, int? total})? onProgress,
   }) async {
-    void log(String m) => onProgress?.call(m);
+    void log(String m, {int? current, int? total}) =>
+        onProgress?.call(m, current: current, total: total);
 
     final report = SyncReport();
     final deviceId = await ensureDeviceId();
@@ -158,12 +312,15 @@ class SyncService {
     }
     report.sinceAfter = since;
 
-    // 3) 全量推送本机数据
-    log('正在上传本机数据…');
+    // 3) 增量推送本机数据。
+    //    推送前先在本机比对内容指纹（存在 sync_state.hash 里）：
+    //    没变过的行**根本不发**，网络传输量只跟「这次改了多少」有关。
+    log('正在对比本机数据…', current: 0, total: kSyncTargets.length);
     var done = 0;
     for (final target in kSyncTargets) {
       done++;
-      log('上传中（$done/${kSyncTargets.length}）${target.label}');
+      log('检查（$done/${kSyncTargets.length}）${target.label}',
+          current: done, total: kSyncTargets.length);
 
       final Database db = await _openDb(target.db);
       final List<Map<String, Object?>> rows;
@@ -174,26 +331,61 @@ class SyncService {
         report.skippedTables++;
         continue;
       }
-      if (rows.isEmpty) continue;
 
       final revs = await SyncStore.revsOf(target.db, target.table);
+      final hashes = await SyncStore.hashesOf(target.db, target.table);
       final sensitive = sensitiveColumnsOf(target.table).toSet();
 
       final changes = <Map<String, dynamic>>[];
+      // 推送成功后才写回的簿记：pk → 新版本号 + 这次的内容指纹
+      final pendingStates = <int, RowSyncState>{};
+      final localPks = <int>{};
+      final deletedPks = <int>{};
+
       for (final row in rows) {
         final pk = row['id'];
         if (pk is! int) continue;
+        localPks.add(pk);
+
         final clean = Map<String, dynamic>.from(row)
           ..removeWhere((k, v) => sensitive.contains(k));
+        final fingerprint = rowFingerprint(clean);
+
+        if (hashes[pk] == fingerprint) {
+          report.unchanged++; // 内容与上次同步时一致，跳过不传
+          continue;
+        }
+
+        final nextRev = (revs[pk] ?? 0) + 1;
         changes.add(<String, dynamic>{
           'db': target.db,
           'table': target.table,
           'pk': pk,
           'op': 'upsert',
-          'rev': (revs[pk] ?? 0) + 1,
+          'rev': nextRev,
           'row': clean,
         });
+        pendingStates[pk] = RowSyncState(nextRev, fingerprint);
       }
+
+      // 簿记里有、本机数据里没有 → 用户在本机删掉了，通知服务端一起删。
+      // （这一步以前是缺失的：手机上删掉的会话在服务端会一直留着）
+      for (final pk in revs.keys) {
+        if (localPks.contains(pk)) continue;
+        deletedPks.add(pk);
+        changes.add(<String, dynamic>{
+          'db': target.db,
+          'table': target.table,
+          'pk': pk,
+          'op': 'delete',
+          'rev': (revs[pk] ?? 0) + 1,
+        });
+      }
+
+      if (changes.isEmpty) continue;
+
+      log('上传（$done/${kSyncTargets.length}）${target.label} · ${changes.length} 行',
+          current: done, total: kSyncTargets.length);
 
       for (final batch in _chunk(changes, 200)) {
         final result = await client.push(batch);
@@ -201,27 +393,64 @@ class SyncService {
         report.unchanged += result.skipped;
         report.conflicts += result.conflicts;
 
-        final revUpdates = <int, int>{};
+        final stateUpdates = <int, RowSyncState>{};
+        final stateRemovals = <int>{};
+
         for (final item in result.results) {
+          final isDelete = item.op == 'delete';
+
           switch (item.status) {
             case 'applied':
-            case 'unchanged':
-              if (item.rev > 0) revUpdates[item.pk] = item.rev;
-              break;
-            case 'conflict':
-              // 服务端版本获胜：用服务端整行覆盖本机，避免两边长期不一致
-              if (item.serverRow != null) {
-                await _overwriteLocalRow(target.db, target.table, item.serverRow!);
+              if (isDelete) {
+                // 服务端也删了，本机簿记一并清掉，
+                // 否则下次推送又会把它当成「本地删除」再推一遍
+                stateRemovals.add(item.pk);
+              } else if (item.rev > 0) {
+                stateUpdates[item.pk] = RowSyncState(
+                  item.rev,
+                  pendingStates[item.pk]?.hash ?? '',
+                );
               }
-              if (item.rev > 0) revUpdates[item.pk] = item.rev;
               break;
+
+            case 'unchanged':
+              if (item.rev > 0) {
+                stateUpdates[item.pk] = RowSyncState(
+                  item.rev,
+                  pendingStates[item.pk]?.hash ?? '',
+                );
+              }
+              break;
+
+            case 'conflict':
+              if (item.serverRow != null) {
+                // 服务端版本获胜：用服务端整行覆盖本机，并按实际落库内容重算指纹
+                final applied = await _overwriteLocalRow(
+                  target.db,
+                  target.table,
+                  item.serverRow!,
+                );
+                stateUpdates[item.pk] = RowSyncState(
+                  item.rev,
+                  applied == null ? '' : rowFingerprint(applied),
+                );
+              } else if (item.rev > 0) {
+                // 删除撞上服务端更新：接受服务端版本号，避免每次都重推
+                stateUpdates[item.pk] = RowSyncState(item.rev, '');
+              }
+              break;
+
             default:
               if (item.message != null) {
                 report.errors.add('${target.label}：${item.message!}');
               }
           }
         }
-        await SyncStore.setRevs(target.db, target.table, revUpdates);
+
+        await SyncStore.setStates(target.db, target.table, stateUpdates);
+        for (final pk in stateRemovals) {
+          await SyncStore.removeState(target.db, target.table, pk);
+        }
       }
     }
 
@@ -282,7 +511,13 @@ class SyncService {
               whereArgs: <Object?>[change.pk],
             );
             deleted += n;
-            await SyncStore.setRev(dbName, change.table, change.pk, change.rev);
+            // 清掉簿记：留着的话下次推送会把「服务端删的」当成「本机删的」再推回去
+            await SyncStore.removeState(
+              dbName,
+              change.table,
+              change.pk,
+              executor: txn,
+            );
             continue;
           }
 
@@ -322,7 +557,19 @@ class SyncService {
               updated++;
             }
           }
-          await SyncStore.setRev(dbName, change.table, change.pk, change.rev);
+          // 记下服务端版本号 + 这次落库内容的指纹，
+          // 这样接下来的增量推送就能认出「这行已经和服务端一致了」
+          await SyncStore.setStates(
+            dbName,
+            change.table,
+            <int, RowSyncState>{
+              change.pk: RowSyncState(
+                change.rev,
+                rowFingerprint(data.cast<String, Object?>()),
+              ),
+            },
+            executor: txn,
+          );
         }
       });
     }
@@ -330,22 +577,23 @@ class SyncService {
     return (inserted, updated, deleted);
   }
 
-  /// 冲突时用服务端的整行覆盖本机（同样走「有则更新、无则插入」）
-  static Future<void> _overwriteLocalRow(
+  /// 冲突时用服务端的整行覆盖本机（同样走「有则更新、无则插入」）。
+  /// 返回实际落库的内容，调用方据此计算指纹 —— 必须与库里真正的内容一致。
+  static Future<Map<String, Object?>?> _overwriteLocalRow(
     String dbName,
     String table,
     Map<String, dynamic> row,
   ) async {
     final db = await _openDb(dbName);
     final cols = await _columnsOf(db, table);
-    if (cols == null) return;
+    if (cols == null) return null;
 
     final data = <String, dynamic>{};
     row.forEach((k, v) {
       if (cols.contains(k)) data[k] = v;
     });
     final pk = data['id'];
-    if (pk is! int) return;
+    if (pk is! int) return null;
 
     final exists = await db.query(
       table,
@@ -363,6 +611,7 @@ class SyncService {
         await db.update(table, patch, where: 'id = ?', whereArgs: <Object?>[pk]);
       }
     }
+    return data.cast<String, Object?>();
   }
 
   static Iterable<List<T>> _chunk<T>(List<T> list, int size) sync* {

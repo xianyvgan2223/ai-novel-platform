@@ -120,6 +120,26 @@ export interface ImportReport {
   totalUnchanged: number;
 }
 
+/** 「请手机同步」请求的状态 */
+export interface SyncRequestInfo {
+  id: number;
+  targetDevice: string;
+  requestedBy: string;
+  requestedAt: number;
+  /** pending=等待手机领取 / claimed=手机已领取 / done=完成 / failed=失败 */
+  status: 'pending' | 'claimed' | 'done' | 'failed';
+  claimedAt: number | null;
+  finishedAt: number | null;
+  result: string;
+  /** 手机上报的实时进度 */
+  progress: {
+    message: string;
+    current: number | null;
+    total: number | null;
+    updatedAt: number;
+  } | null;
+}
+
 export interface WriteResult {
   seq: number;
   rev: number;

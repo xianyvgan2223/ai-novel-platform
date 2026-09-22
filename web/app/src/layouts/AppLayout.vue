@@ -1,11 +1,73 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
-import { ChatDotRound, DataLine, Grid, Refresh, RefreshRight } from '@element-plus/icons-vue';
+import { ElMessage } from 'element-plus';
+import { ChatDotRound, DataLine, Grid, Iphone, Refresh, RefreshRight } from '@element-plus/icons-vue';
+import { api } from '@/api';
 import { useServerStore } from '@/stores/server';
 
 const store = useServerStore();
 const route = useRoute();
+
+/**
+ * 「同步手机」：网页这边读的永远是服务端实时数据，不需要同步；
+ * 需要同步的是手机 —— 但手机上的数据只有手机 App 自己能读写，
+ * 所以这里是「请求」：记一条待办，手机 App 在前台时轮询领取并执行。
+ */
+const phoneSyncBusy = ref(false);
+const phoneSyncHint = ref('');
+const phoneSyncPercent = ref<number | null>(null);
+
+async function syncPhone() {
+  if (phoneSyncBusy.value) return;
+  phoneSyncBusy.value = true;
+  phoneSyncHint.value = '已请求，等待手机响应…';
+  phoneSyncPercent.value = null;
+  try {
+    const request = await api.requestPhoneSync();
+    const deadline = Date.now() + 60000;
+
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      const status = await api.syncRequestStatus(request.id);
+      const progress = status.progress;
+
+      // 手机把进度实时写回服务端，这里直接显示
+      if (progress) {
+        phoneSyncHint.value = progress.message || '正在同步…';
+        phoneSyncPercent.value =
+          progress.current !== null && progress.total
+            ? Math.round((progress.current / progress.total) * 100)
+            : null;
+      }
+
+      if (status.status === 'claimed') {
+        if (!progress) phoneSyncHint.value = '手机已接收，正在同步…';
+      } else if (status.status === 'done') {
+        phoneSyncHint.value = '';
+        phoneSyncPercent.value = null;
+        ElMessage.success('手机同步完成' + (status.result ? '：' + status.result : ''));
+        await store.refreshStats();
+        return;
+      } else if (status.status === 'failed') {
+        phoneSyncHint.value = '';
+        phoneSyncPercent.value = null;
+        ElMessage.error('手机同步失败' + (status.result ? '：' + status.result : ''));
+        return;
+      }
+    }
+
+    phoneSyncHint.value = '';
+    phoneSyncPercent.value = null;
+    ElMessage.warning('手机没有响应（60 秒）。请确认手机 App 正在运行、且已配置过同步地址。');
+  } catch (err) {
+    phoneSyncHint.value = '';
+    phoneSyncPercent.value = null;
+    ElMessage.error(err instanceof Error ? err.message : String(err));
+  } finally {
+    phoneSyncBusy.value = false;
+  }
+}
 
 const navItems = [
   { path: '/', label: '总览', icon: DataLine, match: (p: string) => p === '/' },
@@ -69,10 +131,20 @@ onMounted(() => {
           <span v-if="store.stats" class="topbar-badge mono">seq {{ store.stats.serverSeq }}</span>
         </div>
         <div class="topbar-right">
+          <span v-if="phoneSyncHint" class="sync-hint">
+            {{ phoneSyncHint }}
+            <span v-if="phoneSyncPercent !== null" class="sync-pct">{{ phoneSyncPercent }}%</span>
+          </span>
           <div class="status-pill" :class="store.online ? 'on' : 'off'">
             <span class="dot" />
             {{ store.online ? '同步服务已连接' : '未连接同步服务' }}
           </div>
+          <el-tooltip
+            content="让手机 App 把数据同步过来（需要手机 App 正在运行）"
+            placement="bottom-end"
+          >
+            <el-button :loading="phoneSyncBusy" :icon="Iphone" @click="syncPhone">同步手机</el-button>
+          </el-tooltip>
           <el-tooltip content="重新拉取服务状态与表结构" placement="bottom-end">
             <el-button :loading="store.loading" :icon="Refresh" circle @click="store.bootstrap()" />
           </el-tooltip>
@@ -112,8 +184,8 @@ onMounted(() => {
   flex: 0 0 236px;
   display: flex;
   flex-direction: column;
-  background: linear-gradient(180deg, #161d2e 0%, #0f1521 100%);
-  border-right: 1px solid rgba(255, 255, 255, 0.04);
+  background: #ffffff;
+  border-right: 1px solid var(--line);
 }
 
 .brand {
@@ -140,13 +212,13 @@ onMounted(() => {
 .brand-name {
   font-size: 14.5px;
   font-weight: 640;
-  color: #fff;
+  color: var(--ink-1);
   letter-spacing: -0.2px;
 }
 
 .brand-sub {
   font-size: 11.5px;
-  color: #6b7a90;
+  color: var(--ink-3);
   margin-top: 1px;
 }
 
@@ -156,7 +228,7 @@ onMounted(() => {
   font-weight: 600;
   letter-spacing: 0.9px;
   text-transform: uppercase;
-  color: #4d5c72;
+  color: var(--ink-4);
 }
 
 .nav {
@@ -168,6 +240,7 @@ onMounted(() => {
 }
 
 .nav-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -175,20 +248,33 @@ onMounted(() => {
   border-radius: 9px;
   font-size: 13.5px;
   font-weight: 500;
-  color: #a9b6c8;
+  color: var(--ink-2);
   text-decoration: none;
   transition: background 0.15s ease, color 0.15s ease;
 }
 
 .nav-item:hover {
-  background: rgba(255, 255, 255, 0.05);
-  color: #e7edf6;
+  background: var(--bg-soft);
+  color: var(--ink-1);
 }
 
 .nav-item.active {
-  color: #fff;
-  background: linear-gradient(135deg, #4d6bfe, #3b57e8);
-  box-shadow: 0 6px 18px -8px rgba(77, 107, 254, 0.9);
+  color: var(--brand);
+  font-weight: 600;
+  background: var(--brand-soft);
+}
+
+/* 选中项左侧的强调条，贴在侧边栏最左边 */
+.nav-item.active::before {
+  content: '';
+  position: absolute;
+  left: -12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 18px;
+  border-radius: 0 3px 3px 0;
+  background: var(--brand);
 }
 
 .nav-icon { font-size: 15px; }
@@ -196,8 +282,8 @@ onMounted(() => {
 .sidebar-foot { padding: 14px; }
 
 .foot-card {
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
   border-radius: 10px;
   padding: 10px 12px;
 }
@@ -207,13 +293,13 @@ onMounted(() => {
   align-items: center;
   gap: 7px;
   font-size: 12px;
-  color: #c3cddb;
+  color: var(--ink-2);
 }
 
 .foot-meta {
   margin-top: 5px;
   font-size: 10.5px;
-  color: #64748b;
+  color: var(--ink-4);
   line-height: 1.5;
 }
 
@@ -279,6 +365,28 @@ onMounted(() => {
   font-size: 12.5px;
   font-weight: 500;
   border: 1px solid transparent;
+}
+
+.sync-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--brand);
+  background: var(--brand-soft);
+  padding: 4px 11px;
+  border-radius: 999px;
+  white-space: nowrap;
+  max-width: 380px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sync-pct {
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  padding-left: 7px;
+  border-left: 1px solid #c9d2ff;
 }
 
 .status-pill.on { color: #047857; background: var(--ok-soft); border-color: #d1fae5; }
