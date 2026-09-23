@@ -1,43 +1,29 @@
 import 'package:flutter/widgets.dart';
 import '../../shared/domain/outline_chapter.dart';
 
-/// 单章编辑草稿：事件标题 / 事件概要 / 正文三个控制器 + 撤回前进历史。
+/// 单章大纲草稿：事件标题 / 事件概要两个控制器。
 ///
-/// 多章编辑时每章一份草稿常驻内存，切换章节不丢失未保存内容；
-/// 是否「有修改」以最近一次保存（[markSaved]）后的值为基线比较。
+/// 「大纲编辑」只编辑大纲（标题与概要），不涉及章节正文：
+/// 保存时只写 outline_chapters 的 event_title / event_summary，
+/// 正文内容与生成状态保持原样。
 class OutlineEditDraft {
-  /// 撤回/前进最多保留的快照数
-  static const int _maxHistory = 100;
-
-  /// 进入编辑时的章节快照（保留 id / 序号 / 类型 / AI 小结 / 账本等原始信息）
+  /// 进入编辑时的章节快照（保留序号、类型、正文状态等原始信息）
   final OutlineChapter chapter;
   final TextEditingController titleCtrl;
   final TextEditingController summaryCtrl;
-  final TextEditingController contentCtrl;
 
-  /// 最近一次保存（或进入页面）时的事件标题/概要/正文，用作未保存判定基线
+  /// 最近一次保存（或进入页面）时的标题/概要，用作未保存判定基线
   String savedTitle;
   String savedSummary;
-  String savedContent;
 
-  /// 文本变更回调：由控制器注入，用于刷新页面（字数、按钮可用态）
+  /// 文本变更回调：由控制器注入，用于刷新页面（未保存标记、保存按钮状态）
   VoidCallback? onChanged;
-
-  final List<String> _undoStack = [];
-  final List<String> _redoStack = [];
-  String _lastSnapshot;
-  bool _restoring = false; // 撤回/前进回写文本时不重复记录历史
 
   OutlineEditDraft(this.chapter)
       : titleCtrl = TextEditingController(text: chapter.eventTitle),
         summaryCtrl = TextEditingController(text: chapter.eventSummary),
-        contentCtrl = TextEditingController(text: chapter.content),
         savedTitle = chapter.eventTitle,
-        savedSummary = chapter.eventSummary,
-        savedContent = chapter.content,
-        _lastSnapshot = chapter.content {
-    contentCtrl.addListener(_onContentChanged);
-    // 标题/概要也要能触发页面刷新（未保存标记、章节切换条与保存按钮状态）
+        savedSummary = chapter.eventSummary {
     titleCtrl.addListener(_notifyChanged);
     summaryCtrl.addListener(_notifyChanged);
   }
@@ -46,117 +32,55 @@ class OutlineEditDraft {
 
   int get eventIndex => chapter.eventIndex;
 
-  /// 大事件是结构节点（只有标题与概要），不支持编辑正文
+  /// 大事件是结构节点，同样只编辑标题与概要
   bool get isMajor => chapter.eventType == 'major';
 
-  bool get isDirty =>
-      titleCtrl.text.trim() != savedTitle ||
-      summaryCtrl.text.trim() != savedSummary ||
-      contentCtrl.text != savedContent;
+  String get title => titleCtrl.text.trim();
 
-  int get wordCount => contentCtrl.text.characters.length;
+  String get summary => summaryCtrl.text.trim();
 
-  bool get canUndo => _undoStack.isNotEmpty;
+  bool get isDirty => title != savedTitle || summary != savedSummary;
 
-  bool get canRedo => _redoStack.isNotEmpty;
+  /// 是否已写过正文（仅用于卡片上标注，本功能不改动正文）
+  bool get hasContent => chapter.content.trim().isNotEmpty;
 
   /// 保存成功后调用：把当前值设为新的未保存判定基线
   void markSaved() {
-    savedTitle = titleCtrl.text.trim();
-    savedSummary = summaryCtrl.text.trim();
-    savedContent = contentCtrl.text;
+    savedTitle = title;
+    savedSummary = summary;
   }
 
-  /// 标题/概要变更：仅通知界面刷新
-  void _notifyChanged() => onChanged?.call();
-
-  /// 每次文本变更前把上一个快照压入撤销栈；新输入清空前进栈
-  void _onContentChanged() {
-    if (_restoring) return;
-    final current = contentCtrl.text;
-    if (current != _lastSnapshot) {
-      _undoStack.add(_lastSnapshot);
-      if (_undoStack.length > _maxHistory) _undoStack.removeAt(0);
-      _redoStack.clear();
-      _lastSnapshot = current;
-    }
-    onChanged?.call();
-  }
-
-  void undo() {
-    if (_undoStack.isEmpty) return;
-    _redoStack.add(_lastSnapshot);
-    _lastSnapshot = _undoStack.removeLast();
-    _applySnapshot();
-  }
-
-  void redo() {
-    if (_redoStack.isEmpty) return;
-    _undoStack.add(_lastSnapshot);
-    if (_undoStack.length > _maxHistory) _undoStack.removeAt(0);
-    _lastSnapshot = _redoStack.removeLast();
-    _applySnapshot();
-  }
-
-  /// 回写快照文本并恢复光标到末尾（不记录历史）
-  void _applySnapshot() {
-    _restoring = true;
-    contentCtrl.text = _lastSnapshot;
-    contentCtrl.selection = TextSelection.collapsed(
-      offset: contentCtrl.text.length,
-    );
-    _restoring = false;
-    onChanged?.call();
-  }
-
-  /// 在正文光标处插入 AI 生成的内容（有选中文本时替换选中部分）
-  void insertIntoContent(String text) {
-    if (text.isEmpty) return;
-    final sel = contentCtrl.selection;
-    final int start = sel.isValid ? sel.start : contentCtrl.text.length;
-    final int end = sel.isValid ? sel.end : contentCtrl.text.length;
-    final newText = contentCtrl.text.replaceRange(start, end, text);
-    contentCtrl.value = TextEditingValue(
-      text: newText,
-      selection: TextSelection.collapsed(offset: start + text.length),
-    );
-  }
-
-  /// 把 AI 生成的内容追加到正文末尾（自动补换行）
-  void appendToContent(String text) {
-    if (text.isEmpty) return;
-    final cur = contentCtrl.text;
-    final needBreak = cur.isNotEmpty && !cur.endsWith('\n');
-    final newText = needBreak ? '$cur\n$text' : '$cur$text';
-    contentCtrl.value = TextEditingValue(
-      text: newText,
-      selection: TextSelection.collapsed(offset: newText.length),
-    );
-  }
-
-  /// 用 AI 生成的内容整体替换正文
-  void replaceContent(String text) {
-    if (text.isEmpty) return;
-    contentCtrl.value = TextEditingValue(
-      text: text,
-      selection: TextSelection.collapsed(offset: text.length),
-    );
-  }
-
-  /// 用 AI 生成的内容替换事件概要
+  /// 用 AI 生成的内容替换事件概要（多段概要原样保留换行）
   void replaceSummary(String text) {
     final t = text.trim();
     if (t.isEmpty) return;
     summaryCtrl.text = t;
-    onChanged?.call();
   }
 
+  /// 把 AI 生成的内容追加到事件概要末尾（自动补换行）
+  void appendSummary(String text) {
+    final t = text.trim();
+    if (t.isEmpty) return;
+    final cur = summaryCtrl.text.trimRight();
+    summaryCtrl.text = cur.isEmpty ? t : '$cur\n$t';
+  }
+
+  /// 用 AI 生成的内容替换事件标题：多行只取第一行，
+  /// 并去掉模型可能带的「标题：」前缀与书名号包装
+  void replaceTitle(String text) {
+    var t = text.trim().split('\n').first.trim();
+    t = t.replaceFirst(RegExp(r'^(标题|事件标题|章节标题)\s*[：:]\s*'), '');
+    t = t.replaceAll(RegExp(r'^[《【\[]+|[》】\]]+$'), '').trim();
+    if (t.isEmpty) return;
+    titleCtrl.text = t;
+  }
+
+  void _notifyChanged() => onChanged?.call();
+
   void dispose() {
-    contentCtrl.removeListener(_onContentChanged);
     titleCtrl.removeListener(_notifyChanged);
     summaryCtrl.removeListener(_notifyChanged);
     titleCtrl.dispose();
     summaryCtrl.dispose();
-    contentCtrl.dispose();
   }
 }

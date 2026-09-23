@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../controller/outline_edit_controller.dart';
 import '../../model/outline_edit_chat_message.dart';
 import '../../model/outline_edit_draft.dart';
 
-/// 「大纲编辑」AI 生成面板（底部弹窗）。
+/// 「大纲编辑」AI 生成面板（底部弹窗）——只生成大纲，不生成正文。
 ///
-/// 与 AI 多轮对话生成内容：AI 会读取小说设定、大纲、上一章小结、剧情账本
-/// 以及**编辑框中尚未保存的当前章节内容**；生成结果可一键替换 / 追加 / 插入正文，
-/// 也可用来替换事件概要。
+/// 与 AI 多轮对话生成事件标题与事件概要：AI 会读取小说设定、所属大事件、
+/// 前后相邻事件、剧情账本与伏笔清单，以及**编辑框中尚未保存的当前大纲**；
+/// 生成结果可一键替换 / 追加到事件概要，或替换事件标题。
 class OutlineAiChatSheet extends StatefulWidget {
   final OutlineEditController controller;
 
@@ -19,11 +20,11 @@ class OutlineAiChatSheet extends StatefulWidget {
 
 class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
   static const List<String> _quickPrompts = [
-    '按大纲写出本章正文',
-    '从正文结尾继续往下写',
-    '润色当前正文，保持原意',
-    '扩写场景与对话细节',
-    '精简正文，去掉冗余表达',
+    '按小说设定写出本节概要',
+    '细化本节的情节推进',
+    '让本节与前后事件衔接更自然',
+    '精简本节概要，去掉冗余',
+    '换一个更贴切的标题',
   ];
 
   final TextEditingController _inputCtrl = TextEditingController();
@@ -91,6 +92,11 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
     );
   }
 
+  Future<void> _copy(String text) async {
+    await Clipboard.setData(ClipboardData(text: text));
+    if (mounted) _toast('已复制到剪贴板');
+  }
+
   @override
   Widget build(BuildContext context) {
     final media = MediaQuery.of(context);
@@ -129,12 +135,17 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
   }
 
   Widget _buildHeader(OutlineEditController controller) {
-    final draft = controller.activeDraft;
-    final title = draft == null
-        ? ''
-        : (draft.titleCtrl.text.trim().isEmpty
-              ? (draft.isMajor ? '大事件' : '未命名章节')
-              : draft.titleCtrl.text.trim());
+    final draft = controller.aiTargetDraft;
+    final String label;
+    if (draft == null) {
+      label = '';
+    } else {
+      final title = draft.title.isEmpty
+          ? (draft.isMajor ? '大事件' : '未命名章节')
+          : draft.title;
+      label =
+          '${draft.isMajor ? "大事件" : "第 ${controller.aiTargetIndex + 1} 节"} · $title';
+    }
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 10, 4, 6),
       child: Row(
@@ -142,13 +153,13 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
           const Icon(Icons.auto_awesome, size: 18, color: Color(0xFF4D6BFE)),
           const SizedBox(width: 6),
           const Text(
-            'AI 生成',
+            'AI 生成大纲',
             style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
           ),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              title.isEmpty ? '' : '当前：$title',
+              label.isEmpty ? '' : '当前：$label',
               style: const TextStyle(fontSize: 11, color: Color(0xFF999999)),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
@@ -185,12 +196,12 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
               Icon(Icons.forum_outlined, size: 40, color: Color(0xFFDDDDDD)),
               SizedBox(height: 12),
               Text(
-                '和 AI 说说你想怎么写',
+                '和 AI 聊聊这一节怎么写',
                 style: TextStyle(fontSize: 13, color: Color(0xFF999999)),
               ),
               SizedBox(height: 6),
               Text(
-                'AI 会读取小说设定、大纲与当前章节内容，\n生成结果可替换 / 追加到正文',
+                'AI 会读取小说设定、所属大事件与前后章节大纲，\n只生成大纲（标题 / 概要），不改动正文',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 11,
@@ -203,7 +214,7 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
         ),
       );
     }
-    final draft = controller.activeDraft;
+    final draft = controller.aiTargetDraft;
     return ListView.builder(
       controller: _scrollCtrl,
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
@@ -213,7 +224,10 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
     );
   }
 
-  Widget _buildMessageBubble(OutlineEditChatMessage msg, OutlineEditDraft? draft) {
+  Widget _buildMessageBubble(
+    OutlineEditChatMessage msg,
+    OutlineEditDraft? draft,
+  ) {
     if (msg.isUser) {
       return Align(
         alignment: Alignment.centerRight,
@@ -285,38 +299,29 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
     );
   }
 
-  /// 生成结果的应用入口：替换 / 追加 / 插入正文，或替换事件概要
+  /// 生成结果的应用入口：只作用于大纲（事件概要 / 事件标题）
   Widget _buildApplyButtons(String text, OutlineEditDraft draft) {
-    final buttons = <Widget>[];
-    if (!draft.isMajor) {
-      buttons.add(
-        _actionButton('替换正文', () {
-          draft.replaceContent(text);
-          _toast('已用 AI 内容替换正文');
-        }),
-      );
-      buttons.add(
-        _actionButton('追加到正文', () {
-          draft.appendToContent(text);
-          _toast('已追加到正文末尾');
-        }),
-      );
-      buttons.add(
-        _actionButton('插入光标处', () {
-          draft.insertIntoContent(text);
-          _toast('已插入到正文光标处');
-        }),
-      );
-    }
-    buttons.add(
-      _actionButton('替换概要', () {
-        draft.replaceSummary(text);
-        _toast('已用 AI 内容替换事件概要');
-      }),
-    );
     return Padding(
       padding: const EdgeInsets.only(top: 8),
-      child: Wrap(spacing: 6, runSpacing: 4, children: buttons),
+      child: Wrap(
+        spacing: 6,
+        runSpacing: 4,
+        children: [
+          _actionButton('替换概要', () {
+            draft.replaceSummary(text);
+            _toast('已替换事件概要');
+          }),
+          _actionButton('追加到概要', () {
+            draft.appendSummary(text);
+            _toast('已追加到事件概要');
+          }),
+          _actionButton('替换标题', () {
+            draft.replaceTitle(text);
+            _toast('已替换事件标题');
+          }),
+          _actionButton('复制', () => _copy(text)),
+        ],
+      ),
     );
   }
 
@@ -417,7 +422,7 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
                 maxLines: 4,
                 textInputAction: TextInputAction.newline,
                 decoration: InputDecoration(
-                  hintText: '描述你的要求，例如：续写本章结尾',
+                  hintText: '描述你的要求，例如：把本节概要改成主角初遇反派',
                   hintStyle: const TextStyle(
                     fontSize: 12,
                     color: Color(0xFFBBBBBB),

@@ -153,7 +153,7 @@ class _OutlineEditChapterListPageState
                       ),
                       const SizedBox(height: 4),
                       const Text(
-                        '勾选一章或多章后可批量编辑；点右侧「编辑」直接编辑单章',
+                        '勾选一章或多章后可批量编辑大纲；点右侧「编辑」直接编辑单章',
                         style: TextStyle(
                           fontSize: 11,
                           color: Color(0xFF999999),

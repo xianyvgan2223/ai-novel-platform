@@ -9,13 +9,13 @@ import '../model/outline_edit_chat_message.dart';
 import '../model/outline_edit_draft.dart';
 import '../service/outline_edit_service.dart';
 
-/// 「大纲编辑」控制器。
+/// 「大纲编辑」控制器（只编辑大纲，不改动正文）。
 ///
 /// 负责：
-/// - 多章草稿（每章一份 OutlineEditDraft，切换章节不丢未保存内容）
-/// - 保存：写回 outline_chapters 表，并把标题/概要改动同步回大纲正文文本
-/// - AI 对话：把「小说设定 + 当前章节最新内容 + 对话历史」交给模型流式生成，
-///   生成结果由界面插入 / 追加 / 替换到当前章节
+/// - 所选章节的大纲草稿（每章一份 OutlineEditDraft，标题 + 概要）
+/// - 保存：只写 outline_chapters 的标题/概要，并把改动同步回大纲正文文本
+/// - AI 对话：针对「AI 生成」所选的那一章，把小说设定、所属大事件、前后相邻事件、
+///   剧情账本与伏笔清单交给模型流式生成**大纲文本**（不生成正文）
 class OutlineEditController extends ChangeNotifier {
   final OutlineRecord outline;
   final OutlineEditService _service;
@@ -24,11 +24,15 @@ class OutlineEditController extends ChangeNotifier {
     : outlineContent = outline.content,
       _service = service ?? OutlineEditService();
 
-  /// 参与编辑的章节草稿（顺序与章节事件序号一致）
+  /// 参与编辑的章节草稿（顺序与事件序号一致）
   final List<OutlineEditDraft> drafts = [];
 
-  /// 当前正在编辑的草稿下标
-  int activeIndex = 0;
+  /// 本小说的全部章节：AI 生成时用于取所属大事件与前后相邻事件，
+  /// 即使用户只勾选了其中几章，也能拿到完整上下文
+  List<OutlineChapter> allChapters = [];
+
+  /// AI 生成的目标章节（点某张卡片的「AI 生成」时切换）
+  int aiTargetIndex = 0;
 
   bool saving = false;
   String saveError = '';
@@ -52,9 +56,9 @@ class OutlineEditController extends ChangeNotifier {
   // 避免旧请求的收尾代码清掉新一轮的生成状态
   int _chatSeq = 0;
 
-  OutlineEditDraft? get activeDraft =>
-      activeIndex >= 0 && activeIndex < drafts.length
-      ? drafts[activeIndex]
+  OutlineEditDraft? get aiTargetDraft =>
+      aiTargetIndex >= 0 && aiTargetIndex < drafts.length
+      ? drafts[aiTargetIndex]
       : null;
 
   int get dirtyCount => drafts.where((d) => d.isDirty).length;
@@ -67,33 +71,40 @@ class OutlineEditController extends ChangeNotifier {
       if (c.id == null) continue;
       drafts.add(OutlineEditDraft(c)..onChanged = _safeNotify);
     }
-    _loadFreshRecord();
+    _loadContext();
   }
 
-  /// 读取记录中的最新伏笔清单 / 账本：进入页面时传入的 OutlineRecord
-  /// 可能是列表页加载时的快照，期间章节生成可能已更新这些字段
-  Future<void> _loadFreshRecord() async {
+  /// 读取全部章节与记录最新字段：进入页面时传入的数据可能是列表页的快照，
+  /// 期间章节生成/账本提炼可能已更新（只读，不改动正文）
+  Future<void> _loadContext() async {
     if (outline.id == null) return;
     try {
+      final rows = await OutlineChapterDbHelper().getByOutlineId(outline.id!);
+      if (rows.isNotEmpty) {
+        allChapters = rows.map((m) => OutlineChapter.fromMap(m)).toList();
+      }
       final row = await OutlineRecordDbHelper().getById(outline.id!);
-      if (row == null) return;
-      foreshadows = row['foreshadows'] as String? ?? '';
-      storyState = row['story_state'] as String? ?? '';
-      final content = row['content'] as String? ?? '';
-      if (content.isNotEmpty) outlineContent = content;
+      if (row != null) {
+        foreshadows = row['foreshadows'] as String? ?? '';
+        storyState = row['story_state'] as String? ?? '';
+        final content = row['content'] as String? ?? '';
+        if (content.isNotEmpty) outlineContent = content;
+      }
       _safeNotify();
     } catch (_) {
       // 读取失败不影响编辑，沿用进入页面时的快照
     }
   }
 
-  void setActive(int index) {
-    if (index < 0 || index >= drafts.length || index == activeIndex) return;
-    activeIndex = index;
+  void setAiTarget(int index) {
+    if (index < 0 || index >= drafts.length || index == aiTargetIndex) return;
+    aiTargetIndex = index;
     _safeNotify();
   }
 
-  /// 保存所有有改动的章节，返回实际保存的章节数
+  /// 保存所有有改动的章节大纲，返回实际保存的章节数。
+  /// 只写标题与概要（outline_chapters 的 event_title / event_summary），
+  /// 正文内容与生成状态不受影响。
   Future<int> saveAll() async {
     if (saving) return 0;
     final dirty = drafts.where((d) => d.isDirty).toList();
@@ -104,13 +115,15 @@ class OutlineEditController extends ChangeNotifier {
     int saved = 0;
     try {
       for (final d in dirty) {
-        final newTitle = d.titleCtrl.text.trim();
-        final newSummary = d.summaryCtrl.text.trim();
-        await OutlineChapterDbHelper().updateFull(
+        // 事件标题不允许为空：空标题会让大纲文本出现「大事件1：」断行，
+        // 下次解析时会被并入上一事件概要；这里回填原标题（界面同步可见）
+        if (d.title.isEmpty) d.titleCtrl.text = d.savedTitle;
+        final newTitle = d.title;
+        final newSummary = d.summary;
+        await OutlineChapterDbHelper().updateSummary(
           d.chapterId,
-          eventTitle: newTitle,
-          eventSummary: newSummary,
-          content: d.contentCtrl.text,
+          newTitle,
+          newSummary,
         );
         // 标题/概要改动同步回大纲正文：否则「大纲转章节」下次进入时会按
         // 大纲文本重解析，把手改的标题/概要吃回旧值
@@ -148,11 +161,11 @@ class OutlineEditController extends ChangeNotifier {
     });
   }
 
-  /// 发送一条对话：把当前章节最新内容作为上下文交给 AI，流式展示结果
+  /// 发送一条对话：把「AI 生成」目标章节的大纲上下文交给模型，流式返回大纲文本
   Future<void> sendChat(String input) async {
     final text = input.trim();
     if (text.isEmpty || chatting) return;
-    final draft = activeDraft;
+    final draft = aiTargetDraft;
     if (draft == null) {
       chatError = '没有可编辑的章节';
       _safeNotify();
@@ -179,18 +192,17 @@ class OutlineEditController extends ChangeNotifier {
 
     final requestMessages = _service.buildChatMessages(
       outline: outline,
-      eventTitle: draft.titleCtrl.text.trim(),
-      eventSummary: draft.summaryCtrl.text.trim(),
+      eventTitle: draft.title,
+      eventSummary: draft.summary,
       isMajor: draft.isMajor,
       userInput: text,
       // 历史不含刚插入的占位助手消息
       history: messages.sublist(0, messages.length - 1),
       parentMajor: _parentMajorText(draft),
-      prevSummary: _prevSummaryText(draft),
+      prevEvents: _adjacentText(draft, forward: false),
+      nextEvents: _adjacentText(draft, forward: true),
       storyState: _storyStateText(draft),
       foreshadows: foreshadows,
-      chapterContent: draft.contentCtrl.text,
-      rolePrompt: settings.chapterSetting.chapterSystemPrompt,
     );
     final apiParams = <String, dynamic>{
       'model': settings.chapterSetting.model,
@@ -278,44 +290,69 @@ class OutlineEditController extends ChangeNotifier {
     _safeNotify();
   }
 
+  /// 上下文章节：优先用本小说的全部章节（DB 最新），加载失败时退回所选章节
+  List<OutlineChapter> _orderedContext() {
+    final list = allChapters.isNotEmpty
+        ? allChapters
+        : drafts.map((d) => d.chapter).toList();
+    return List<OutlineChapter>.from(list)
+      ..sort((a, b) => a.eventIndex.compareTo(b.eventIndex));
+  }
+
+  /// 事件行文本：同一条目在本页有未保存改动时取最新值，保证 AI 看到的是当前大纲
+  String _eventLine(OutlineChapter c) {
+    var title = c.eventTitle;
+    var summary = c.eventSummary;
+    for (final d in drafts) {
+      if (d.chapterId == c.id) {
+        title = d.title;
+        summary = d.summary;
+        break;
+      }
+    }
+    final label = c.eventType == 'major' ? '【大事件】' : '【章节】';
+    return '$label${title.isEmpty ? "（未命名）" : title}：${summary.isEmpty ? "（无概要）" : summary}';
+  }
+
   /// 所属大事件（标题 + 概要），无则返回空串
   String _parentMajorText(OutlineEditDraft draft) {
-    OutlineEditDraft? parent;
-    for (final d in drafts) {
-      if (d.eventIndex >= draft.eventIndex) break;
-      if (d.isMajor) parent = d;
+    OutlineChapter? parent;
+    for (final c in _orderedContext()) {
+      if (c.eventIndex >= draft.eventIndex) break;
+      if (c.eventType == 'major') parent = c;
     }
     if (parent == null) return '';
-    final title = parent.titleCtrl.text.trim();
-    final summary = parent.summaryCtrl.text.trim();
-    return summary.isEmpty ? title : '$title\n$summary';
+    return _eventLine(parent).replaceFirst(RegExp(r'^【(大事件|章节)】'), '');
   }
 
-  /// 上一章小结：优先 AI 提炼的小结，缺失时回退正文末尾片段
-  String _prevSummaryText(OutlineEditDraft draft) {
-    OutlineEditDraft? prev;
-    for (final d in drafts) {
-      if (d.eventIndex >= draft.eventIndex) break;
-      prev = d;
+  /// 相邻事件文本：[forward] 为后续事件，否则为前置事件；各取最近 2 条
+  String _adjacentText(OutlineEditDraft draft, {required bool forward}) {
+    const count = 2;
+    final ordered = _orderedContext();
+    final idx = ordered.indexWhere((c) => c.id == draft.chapterId);
+    if (idx < 0) return '';
+    final picked = <OutlineChapter>[];
+    if (forward) {
+      for (int i = idx + 1; i < ordered.length && picked.length < count; i++) {
+        picked.add(ordered[i]);
+      }
+    } else {
+      // 从最近的往前取，插入头部保持时间顺序
+      for (int i = idx - 1; i >= 0 && picked.length < count; i--) {
+        picked.insert(0, ordered[i]);
+      }
     }
-    if (prev == null) return '';
-    final aiSummary = prev.chapter.aiSummary.trim();
-    if (aiSummary.isNotEmpty) return aiSummary;
-    final content = prev.contentCtrl.text.trim();
-    if (content.isEmpty) return '';
-    return content.length > 300
-        ? content.substring(content.length - 300)
-        : content;
+    return picked.map(_eventLine).join('\n');
   }
 
-  /// 全局剧情状态：优先当前章节之前最近一章保存的账本，其次记录中的账本
+  /// 剧情状态：优先当前事件之前最近一章保存的账本，其次记录中的账本
   String _storyStateText(OutlineEditDraft draft) {
-    OutlineEditDraft? prev;
-    for (final d in drafts) {
-      if (d.eventIndex >= draft.eventIndex) break;
-      prev = d;
+    OutlineChapter? prev;
+    for (final c in _orderedContext()) {
+      if (c.eventIndex >= draft.eventIndex) break;
+      prev = c;
     }
-    final prevState = prev?.chapter.storyState.trim() ?? '';
+    final prevState = prev?.storyState.trim() ?? '';
     return prevState.isNotEmpty ? prevState : storyState;
   }
 

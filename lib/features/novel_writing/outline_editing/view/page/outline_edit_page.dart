@@ -6,12 +6,11 @@ import '../../controller/outline_edit_controller.dart';
 import '../../model/outline_edit_draft.dart';
 import '../widget/outline_ai_chat_sheet.dart';
 
-/// 「大纲编辑」章节编辑页。
+/// 「大纲编辑」页面：只编辑大纲，不改动正文。
 ///
-/// - 单选一章 / 多选章节都进入本页：多章时顶部可切换，未保存内容常驻内存，一次保存全部
-/// - 每章可编辑：事件标题、事件概要、正文
-/// - 新增 AI 生成入口：与 AI 对话生成内容，结果可直接替换 / 追加 / 插入正文，
-///   也可用于替换事件概要
+/// 所选章节一次性内联铺开（不再逐章切换）：每张卡片直接编辑事件标题与事件概要，
+/// 卡片右上角「AI 生成」按章节唤起 AI 对话面板，生成结果可替换 / 追加概要或替换标题，
+/// 底部一次保存全部改动。
 class OutlineEditPage extends StatefulWidget {
   final OutlineRecord outline;
   final List<OutlineChapter> chapters;
@@ -28,6 +27,9 @@ class OutlineEditPage extends StatefulWidget {
 
 class _OutlineEditPageState extends State<OutlineEditPage> {
   late final OutlineEditController _controller;
+  final ScrollController _scrollCtrl = ScrollController();
+  // 每张卡片的 Key：AI 面板关闭后把对应卡片滚到可见位置，方便核对结果
+  final Map<int, GlobalKey> _cardKeys = {};
 
   @override
   void initState() {
@@ -39,13 +41,14 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
   @override
   void dispose() {
     _controller.dispose();
+    _scrollCtrl.dispose();
     super.dispose();
   }
 
   String get _novelTitle =>
       widget.outline.title.isNotEmpty ? widget.outline.title : '大纲编辑';
 
-  /// 保存所有改动章节
+  /// 保存所有改动章节（只写标题与概要）
   Future<void> _save({bool popAfter = false}) async {
     final count = await _controller.saveAll();
     if (!mounted) return;
@@ -57,7 +60,7 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
     }
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(count > 0 ? '已保存 $count 章修改' : '没有需要保存的修改'),
+        content: Text(count > 0 ? '已保存 $count 章大纲' : '没有需要保存的修改'),
         duration: const Duration(seconds: 1),
       ),
     );
@@ -75,7 +78,7 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('未保存的修改'),
-        content: Text('有 ${_controller.dirtyCount} 章内容已修改，要保存后退出吗？'),
+        content: Text('有 ${_controller.dirtyCount} 章大纲已修改，要保存后退出吗？'),
         actions: [
           TextButton(
             onPressed: () => closeDialogSafely(ctx, result: 'discard'),
@@ -108,9 +111,10 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
     }
   }
 
-  /// 打开 AI 生成面板（与 AI 对话生成当前章节内容）
-  Future<void> _openAiSheet() async {
-    if (_controller.activeDraft == null) return;
+  /// 打开 AI 生成面板：目标为第 [index] 章
+  Future<void> _openAiSheet(int index) async {
+    _controller.setAiTarget(index);
+    final key = _cardKeys[index];
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -118,6 +122,15 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
       backgroundColor: Colors.transparent,
       builder: (_) => OutlineAiChatSheet(controller: _controller),
     );
+    if (!mounted) return;
+    final ctx = key?.currentContext;
+    if (ctx != null && ctx.mounted) {
+      await Scrollable.ensureVisible(
+        ctx,
+        duration: const Duration(milliseconds: 250),
+        alignment: 0.15,
+      );
+    }
   }
 
   @override
@@ -125,7 +138,6 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
     return ListenableBuilder(
       listenable: _controller,
       builder: (context, _) {
-        final draft = _controller.activeDraft;
         return PopScope(
           // 拦截系统返回：有未保存修改时先询问
           canPop: false,
@@ -135,9 +147,11 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
           },
           child: Scaffold(
             backgroundColor: Colors.white,
-            appBar: _buildAppBar(draft),
-            bottomNavigationBar: draft == null ? null : _buildBottomBar(),
-            body: draft == null
+            appBar: _buildAppBar(),
+            bottomNavigationBar: _controller.drafts.isEmpty
+                ? null
+                : _buildBottomBar(),
+            body: _controller.drafts.isEmpty
                 ? const Center(
                     child: Text(
                       '没有可编辑的章节',
@@ -147,15 +161,15 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
                       ),
                     ),
                   )
-                : _buildBody(draft),
+                : _buildBody(),
           ),
         );
       },
     );
   }
 
-  PreferredSizeWidget _buildAppBar(OutlineEditDraft? draft) {
-    final multiple = _controller.drafts.length > 1;
+  PreferredSizeWidget _buildAppBar() {
+    final count = _controller.drafts.length;
     return AppBar(
       backgroundColor: Colors.white,
       elevation: 0.5,
@@ -169,15 +183,14 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
-          if (multiple)
-            Text(
-              '第 ${_controller.activeIndex + 1}/${_controller.drafts.length} 章',
-              style: const TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.w400,
-                color: Color(0xFF999999),
-              ),
+          Text(
+            '大纲编辑 · $count 章',
+            style: const TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w400,
+              color: Color(0xFF999999),
             ),
+          ),
         ],
       ),
       leading: IconButton(
@@ -185,11 +198,6 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
         onPressed: _handleExit,
       ),
       actions: [
-        IconButton(
-          icon: const Icon(Icons.auto_awesome, color: Color(0xFF4D6BFE)),
-          tooltip: 'AI 生成',
-          onPressed: _openAiSheet,
-        ),
         TextButton(
           onPressed: _controller.saving ? null : () => _save(),
           child: _controller.saving
@@ -207,89 +215,47 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
     );
   }
 
-  Widget _buildBody(OutlineEditDraft draft) {
+  Widget _buildBody() {
+    final drafts = _controller.drafts;
     return Column(
       children: [
-        if (_controller.drafts.length > 1) _buildChapterChips(),
-        _buildEventCard(draft),
-        Expanded(child: _buildContentArea(draft)),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          color: const Color(0xFFF8F9FF),
+          child: const Text(
+            '只编辑事件标题与事件概要，不改动已写正文；每章可单独让 AI 生成大纲',
+            style: TextStyle(fontSize: 12, color: Color(0xFF666666)),
+          ),
+        ),
+        Expanded(
+          child: ListView.builder(
+            controller: _scrollCtrl,
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+            itemCount: drafts.length,
+            itemBuilder: (context, index) =>
+                _buildDraftCard(index, drafts[index]),
+          ),
+        ),
       ],
     );
   }
 
-  /// 多章编辑时的章节切换条：带序号、标题与未保存标记
-  Widget _buildChapterChips() {
-    return SizedBox(
-      height: 46,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-        itemCount: _controller.drafts.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 8),
-        itemBuilder: (context, index) {
-          final d = _controller.drafts[index];
-          final active = index == _controller.activeIndex;
-          final title = d.titleCtrl.text.trim();
-          return GestureDetector(
-            onTap: () => _controller.setActive(index),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              decoration: BoxDecoration(
-                color: active ? const Color(0xFF4D6BFE) : const Color(0xFFF2F4F8),
-                borderRadius: BorderRadius.circular(16),
-                border: d.isDirty
-                    ? Border.all(
-                        color: active
-                            ? Colors.white
-                            : const Color(0xFFFF9800),
-                      )
-                    : null,
-              ),
-              child: Row(
-                children: [
-                  if (d.isDirty) ...[
-                    Container(
-                      width: 6,
-                      height: 6,
-                      decoration: BoxDecoration(
-                        color: active
-                            ? Colors.white
-                            : const Color(0xFFFF9800),
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    const SizedBox(width: 5),
-                  ],
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 130),
-                    child: Text(
-                      '${index + 1}. ${title.isEmpty ? (d.isMajor ? "大事件" : "未命名") : title}',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: active ? Colors.white : const Color(0xFF333333),
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  /// 事件标题 / 概要编辑卡片（大事件同样可编辑）
-  Widget _buildEventCard(OutlineEditDraft draft) {
+  /// 单章大纲卡片：类型 + 正文状态 + 序号 + AI 入口 + 标题 + 概要
+  Widget _buildDraftCard(int index, OutlineEditDraft draft) {
+    final key = _cardKeys.putIfAbsent(index, () => GlobalKey());
     return Container(
-      margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-      padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+      key: key,
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
       decoration: BoxDecoration(
-        color: const Color(0xFFF8F9FF),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFFE8ECF4)),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: draft.isDirty
+              ? const Color(0xFFB9C8FF)
+              : const Color(0xFFE8ECF4),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -304,7 +270,7 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
                 decoration: BoxDecoration(
                   color: draft.isMajor
                       ? const Color(0xFF4D6BFE)
-                      : const Color(0xFFE8ECF4),
+                      : const Color(0xFFEFF3FF),
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Text(
@@ -313,28 +279,63 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
                     fontSize: 10,
                     color: draft.isMajor
                         ? Colors.white
-                        : const Color(0xFF666666),
+                        : const Color(0xFF4D6BFE),
                   ),
                 ),
               ),
               const SizedBox(width: 6),
-              const Text(
-                '事件标题 / 事件概要',
-                style: TextStyle(fontSize: 11, color: Color(0xFF999999)),
+              Text(
+                '${index + 1}',
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF999999),
+                ),
               ),
-              const Spacer(),
-              if (draft.isDirty)
+              const SizedBox(width: 6),
+              Text(
+                draft.hasContent ? '已写正文' : '未写正文',
+                style: TextStyle(
+                  fontSize: 10,
+                  color: draft.hasContent
+                      ? const Color(0xFF4CAF50)
+                      : const Color(0xFFBBBBBB),
+                ),
+              ),
+              if (draft.isDirty) ...[
+                const SizedBox(width: 6),
                 const Text(
                   '已修改',
-                  style: TextStyle(fontSize: 11, color: Color(0xFFFF9800)),
+                  style: TextStyle(fontSize: 10, color: Color(0xFFFF9800)),
                 ),
+              ],
+              const Spacer(),
+              TextButton.icon(
+                onPressed: () => _openAiSheet(index),
+                icon: const Icon(Icons.auto_awesome, size: 14),
+                label: const Text(
+                  'AI 生成',
+                  style: TextStyle(fontSize: 12),
+                ),
+                style: TextButton.styleFrom(
+                  foregroundColor: const Color(0xFF4D6BFE),
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+              ),
             ],
           ),
-          const SizedBox(height: 4),
           TextField(
             controller: draft.titleCtrl,
             decoration: const InputDecoration(
               hintText: '事件标题',
+              hintStyle: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFFBBBBBB),
+              ),
               isDense: true,
               border: InputBorder.none,
               contentPadding: EdgeInsets.zero,
@@ -348,129 +349,26 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
           const SizedBox(height: 4),
           TextField(
             controller: draft.summaryCtrl,
-            minLines: 1,
-            maxLines: 3,
+            minLines: 2,
+            maxLines: null,
+            keyboardType: TextInputType.multiline,
             decoration: const InputDecoration(
-              hintText: '事件概要（可让 AI 生成后点「替换概要」写入）',
-              hintStyle: TextStyle(fontSize: 12, color: Color(0xFFBBBBBB)),
+              hintText: '事件概要（大纲内容）',
+              hintStyle: TextStyle(
+                fontSize: 12,
+                height: 1.6,
+                color: Color(0xFFBBBBBB),
+              ),
               isDense: true,
               border: InputBorder.none,
               contentPadding: EdgeInsets.zero,
             ),
             style: const TextStyle(
-              fontSize: 12,
-              height: 1.5,
+              fontSize: 12.5,
+              height: 1.6,
               color: Color(0xFF666666),
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  /// 正文编辑区：大事件是结构节点，只编辑标题与概要
-  Widget _buildContentArea(OutlineEditDraft draft) {
-    if (draft.isMajor) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.symmetric(horizontal: 32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.flag_outlined, size: 40, color: Color(0xFFDDDDDD)),
-              SizedBox(height: 12),
-              Text(
-                '大事件是结构节点，只编辑标题与概要',
-                style: TextStyle(fontSize: 13, color: Color(0xFF999999)),
-              ),
-              SizedBox(height: 6),
-              Text(
-                '正文由其下的小事件章节承载；可点右上角「AI 生成」让 AI 协助完善事件概要',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 11,
-                  height: 1.5,
-                  color: Color(0xFFBBBBBB),
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              const Text(
-                '正文',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFF333333),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                '${draft.wordCount} 字',
-                style: const TextStyle(
-                  fontSize: 11,
-                  color: Color(0xFF999999),
-                ),
-              ),
-              const Spacer(),
-              IconButton(
-                icon: const Icon(
-                  Icons.undo,
-                  size: 18,
-                  color: Color(0xFF4D6BFE),
-                ),
-                tooltip: '撤回',
-                visualDensity: VisualDensity.compact,
-                onPressed: draft.canUndo ? draft.undo : null,
-              ),
-              IconButton(
-                icon: const Icon(
-                  Icons.redo,
-                  size: 18,
-                  color: Color(0xFF4D6BFE),
-                ),
-                tooltip: '前进',
-                visualDensity: VisualDensity.compact,
-                onPressed: draft.canRedo ? draft.redo : null,
-              ),
-            ],
-          ),
-          Expanded(
-            child: TextField(
-              controller: draft.contentCtrl,
-              maxLines: null,
-              expands: true,
-              textAlignVertical: TextAlignVertical.top,
-              decoration: InputDecoration(
-                hintText: '在此编辑章节正文，或点右上角「AI 生成」与 AI 对话生成内容',
-                hintStyle: const TextStyle(
-                  fontSize: 13,
-                  color: Color(0xFFBBBBBB),
-                ),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: const BorderSide(color: Color(0xFFDDDDDD)),
-                ),
-                contentPadding: const EdgeInsets.all(12),
-                filled: true,
-                fillColor: const Color(0xFFFAFAFA),
-              ),
-              style: const TextStyle(
-                fontSize: 13.5,
-                height: 1.7,
-                color: Color(0xFF333333),
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
         ],
       ),
     );
@@ -497,27 +395,17 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
             const SizedBox(width: 6),
             Expanded(
               child: Text(
-                dirty == 0
-                    ? '所有修改已保存'
-                    : '$dirty 章有未保存的修改',
+                dirty == 0 ? '所有大纲已保存' : '$dirty 章大纲有未保存的修改',
                 style: const TextStyle(
                   fontSize: 12,
                   color: Color(0xFF666666),
                 ),
               ),
             ),
-            TextButton.icon(
-              onPressed: _openAiSheet,
-              icon: const Icon(Icons.auto_awesome, size: 16),
-              label: const Text('AI 生成', style: TextStyle(fontSize: 13)),
-              style: TextButton.styleFrom(
-                foregroundColor: const Color(0xFF4D6BFE),
-                visualDensity: VisualDensity.compact,
-              ),
-            ),
-            const SizedBox(width: 4),
             ElevatedButton(
-              onPressed: (dirty == 0 || _controller.saving) ? null : () => _save(),
+              onPressed: (dirty == 0 || _controller.saving)
+                  ? null
+                  : () => _save(),
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF4D6BFE),
                 foregroundColor: Colors.white,
