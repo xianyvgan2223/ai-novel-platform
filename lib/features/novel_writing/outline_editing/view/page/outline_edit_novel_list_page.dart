@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
-import '../../../shared/domain/outline_record.dart';
+import '../../../shared/data/outline_chapter_db_helper.dart';
 import '../../../shared/data/outline_record_db_helper.dart';
+import '../../../shared/domain/outline_record.dart';
 import 'outline_edit_chapter_list_page.dart';
 
-/// 「大纲编辑」入口页：列出「一键生成大纲」历史大纲里的每本小说。
+/// 「大纲编辑」入口页：用小卡片网格列出「一键生成大纲」历史大纲里的每本小说。
 ///
-/// 数据源与「历史大纲」页一致（outline_records 表），点击小说进入章节选择。
+/// 数据源与「历史大纲」页一致（outline_records 表）；卡片上带章节进度
+/// （章节总数 / 已完成数，来自 outline_chapters 分组统计），点击卡片进入章节选择。
 class OutlineEditNovelListPage extends StatefulWidget {
   const OutlineEditNovelListPage({super.key});
 
@@ -16,6 +18,7 @@ class OutlineEditNovelListPage extends StatefulWidget {
 
 class _OutlineEditNovelListPageState extends State<OutlineEditNovelListPage> {
   List<OutlineRecord> _records = [];
+  Map<int, ({int total, int completed})> _stats = {};
   bool _loading = true;
 
   @override
@@ -28,8 +31,22 @@ class _OutlineEditNovelListPageState extends State<OutlineEditNovelListPage> {
     try {
       final rows = await OutlineRecordDbHelper().getAll();
       _records = rows.map((m) => OutlineRecord.fromMap(m)).toList();
+      try {
+        // 章节进度：一次分组查询取全部大纲的统计，避免逐本查库
+        _stats = await OutlineChapterDbHelper().getStatsByOutline();
+      } catch (_) {}
     } catch (_) {}
     if (mounted) setState(() => _loading = false);
+  }
+
+  Future<void> _openNovel(OutlineRecord record) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => OutlineEditChapterListPage(outline: record),
+      ),
+    );
+    // 返回后刷新：章节标题/概要或进度有改动时卡片信息同步
+    if (mounted) await _load();
   }
 
   @override
@@ -83,32 +100,38 @@ class _OutlineEditNovelListPageState extends State<OutlineEditNovelListPage> {
                     vertical: 10,
                   ),
                   color: const Color(0xFFF8F9FF),
-                  child: const Text(
-                    '选择一部小说，再选择要编辑的章节',
-                    style: TextStyle(fontSize: 12, color: Color(0xFF666666)),
+                  child: Text(
+                    '共 ${_records.length} 部小说 · 点卡片选择章节编辑',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Color(0xFF666666),
+                    ),
                   ),
                 ),
                 Expanded(
-                  child: ListView.separated(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    itemCount: _records.length,
-                    separatorBuilder: (_, _) => const Divider(height: 1),
-                    itemBuilder: (context, index) {
-                      final r = _records[index];
-                      return _NovelTile(
-                        record: r,
-                        onTap: () async {
-                          await Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) =>
-                                  OutlineEditChapterListPage(outline: r),
-                            ),
-                          );
-                          // 返回后刷新（章节标题/概要有改动时列表信息同步）
-                          if (mounted) _load();
-                        },
-                      );
-                    },
+                  child: RefreshIndicator(
+                    onRefresh: _load,
+                    child: GridView.builder(
+                      // 内容不足一屏时也能下拉刷新
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
+                      gridDelegate:
+                          const SliverGridDelegateWithMaxCrossAxisExtent(
+                            maxCrossAxisExtent: 200,
+                            mainAxisSpacing: 10,
+                            crossAxisSpacing: 10,
+                            childAspectRatio: 0.85,
+                          ),
+                      itemCount: _records.length,
+                      itemBuilder: (context, index) {
+                        final r = _records[index];
+                        return _OutlineCard(
+                          record: r,
+                          stat: r.id == null ? null : _stats[r.id!],
+                          onTap: () => _openNovel(r),
+                        );
+                      },
+                    ),
                   ),
                 ),
               ],
@@ -117,57 +140,187 @@ class _OutlineEditNovelListPageState extends State<OutlineEditNovelListPage> {
   }
 }
 
-class _NovelTile extends StatelessWidget {
+/// 单部小说的小卡片：封面首字 + 书名 + 类型 + 主角简介 + 生成时间 + 章节进度
+class _OutlineCard extends StatelessWidget {
   final OutlineRecord record;
+  final ({int total, int completed})? stat;
   final VoidCallback onTap;
 
-  const _NovelTile({required this.record, required this.onTap});
+  const _OutlineCard({
+    required this.record,
+    required this.stat,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
+    final title = record.title.isNotEmpty ? record.title : '未命名大纲';
+    final genre = record.genre.trim();
+    final protagonist = record.protagonist.trim().replaceAll('\n', ' ');
+    final total = stat?.total ?? 0;
+    final completed = stat?.completed ?? 0;
+    final firstChar = title.characters.isEmpty ? '书' : title.characters.first;
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: const Color(0xFFE8ECF4)),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x0A000000),
+                blurRadius: 6,
+                offset: Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    record.title.isNotEmpty ? record.title : '未命名大纲',
-                    style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF333333),
+                  Container(
+                    width: 30,
+                    height: 30,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF4D6BFE), Color(0xFF8AA2FF)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(8),
                     ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '${record.genre} · ${record.protagonist}',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: Color(0xFF999999),
+                    child: Text(
+                      firstChar,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
                     ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    record.formattedDate,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: Color(0xFFBBBBBB),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        height: 1.25,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF333333),
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                 ],
               ),
-            ),
-            const Icon(Icons.chevron_right, color: Color(0xFFCCCCCC)),
-          ],
+              const SizedBox(height: 8),
+              if (genre.isNotEmpty)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 1,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEFF3FF),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    genre,
+                    style: const TextStyle(
+                      fontSize: 10,
+                      color: Color(0xFF4D6BFE),
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              if (protagonist.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(
+                  protagonist,
+                  style: const TextStyle(
+                    fontSize: 10.5,
+                    height: 1.4,
+                    color: Color(0xFF999999),
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+              const Spacer(),
+              Text(
+                record.formattedDate,
+                style: const TextStyle(
+                  fontSize: 10,
+                  color: Color(0xFFBBBBBB),
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 6),
+              if (total > 0) ...[
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(2),
+                  child: LinearProgressIndicator(
+                    value: completed / total,
+                    minHeight: 3,
+                    backgroundColor: const Color(0xFFF0F2F6),
+                    valueColor: const AlwaysStoppedAnimation<Color>(
+                      Color(0xFF4D6BFE),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '共 $total 章 · 已完成 $completed',
+                        style: const TextStyle(
+                          fontSize: 10,
+                          color: Color(0xFF999999),
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const Icon(
+                      Icons.edit_note,
+                      size: 14,
+                      color: Color(0xFF4D6BFE),
+                    ),
+                  ],
+                ),
+              ] else
+                const Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '未解析章节',
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: Color(0xFFBBBBBB),
+                        ),
+                      ),
+                    ),
+                    Icon(
+                      Icons.chevron_right,
+                      size: 14,
+                      color: Color(0xFFCCCCCC),
+                    ),
+                  ],
+                ),
+            ],
+          ),
         ),
       ),
     );

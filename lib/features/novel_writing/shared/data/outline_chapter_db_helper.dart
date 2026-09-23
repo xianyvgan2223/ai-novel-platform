@@ -31,6 +31,28 @@ class OutlineChapterDbHelper {
     );
   }
 
+  /// 按大纲分组统计章节数（供「大纲编辑」小说卡片显示进度）：
+  /// 返回 outlineId -> (total: 章节总数, completed: 已完成数)。
+  /// 该小说还没解析过章节时不返回条目。
+  Future<Map<int, ({int total, int completed})>> getStatsByOutline() async {
+    final db = await database;
+    final rows = await db.rawQuery(
+      'SELECT outline_id, COUNT(*) AS total, '
+      "SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed "
+      'FROM outline_chapters GROUP BY outline_id',
+    );
+    final result = <int, ({int total, int completed})>{};
+    for (final row in rows) {
+      final id = row['outline_id'] as int?;
+      if (id == null) continue;
+      result[id] = (
+        total: (row['total'] as int?) ?? 0,
+        completed: (row['completed'] as int?) ?? 0,
+      );
+    }
+    return result;
+  }
+
   /// 获取单条章节
   Future<Map<String, dynamic>?> getById(int id) async {
     final db = await database;
