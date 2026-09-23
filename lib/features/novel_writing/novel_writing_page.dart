@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'ai_battle/view/page/ai_battle_page.dart';
 import 'outline_generation/view/page/outline_generation_page.dart';
+import 'outline_editing/view/page/outline_edit_novel_list_page.dart';
 import 'chapter_writing/view/page/chapter_list_page.dart';
 import 'outline_format/view/page/outline_format_page.dart';
 
@@ -44,6 +45,16 @@ class NovelWritingPage extends StatelessWidget {
               label: '一键生成大纲',
               color: const Color(0xFF4D6BFE),
               page: const OutlineGenerationPage(),
+            ),
+            const SizedBox(height: 16),
+
+            // 大纲编辑（选小说 → 选章节 → 编辑 + AI 生成）
+            _buildNavButton(
+              context,
+              icon: Icons.edit_note,
+              label: '大纲编辑',
+              color: const Color(0xFF2196F3),
+              page: const OutlineEditNovelListPage(),
             ),
             const SizedBox(height: 16),
 

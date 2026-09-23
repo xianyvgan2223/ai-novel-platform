@@ -9,6 +9,8 @@ import '../../shared/domain/outline_chapter.dart';
 import '../../shared/domain/character_profile.dart';
 import '../../shared/data/outline_chapter_db_helper.dart';
 import '../../shared/data/outline_record_db_helper.dart';
+import '../../shared/outline_event_parser.dart';
+import '../../shared/outline_text_sync.dart';
 
 /// 章节写作控制器
 class ChapterWriteController {
@@ -89,7 +91,10 @@ class ChapterWriteController {
     final oldByTitle = Map.fromEntries(
       oldChapters.map((c) => MapEntry(c.eventTitle, c)),
     );
-    final newChapters = _parseEvents(outlineContent);
+    final newChapters = parseOutlineEvents(
+      outlineContent,
+      outlineId: outline.id!,
+    );
     final matchedIndexes = <int>{}; // 已被标题匹配占用的旧序号，序号兜底时跳过
     for (int i = 0; i < newChapters.length; i++) {
       final byTitle = oldByTitle[newChapters[i].eventTitle];
@@ -137,52 +142,14 @@ class ChapterWriteController {
     String newSummary,
   ) async {
     if (outline.id == null) return;
-    var content = outlineContent;
-    final lines = content.split('\n');
-    for (int i = 0; i < lines.length; i++) {
-      final trimmed = lines[i].trimLeft();
-      if (trimmed.startsWith('══') &&
-          trimmed.contains(oldCh.eventTitle) &&
-          trimmed.endsWith('══')) {
-        final newLine = trimmed.replaceFirst(oldCh.eventTitle, newTitle);
-        final indent = lines[i].length - lines[i].trimLeft().length;
-        lines[i] = ' ' * indent + newLine.trimLeft();
-        if (newSummary.isNotEmpty) {
-          for (int j = i + 1; j < lines.length; j++) {
-            final t = lines[j].trimLeft();
-            if (t.startsWith('══') || t.startsWith('○') || t.startsWith('-'))
-              break;
-            if (t.isNotEmpty) {
-              final indent2 = lines[j].length - lines[j].trimLeft().length;
-              lines[j] = ' ' * indent2 + newSummary;
-              break;
-            }
-          }
-        }
-        break;
-      }
-      if (trimmed.startsWith('○') && trimmed.contains(oldCh.eventTitle)) {
-        final newLine = trimmed.replaceFirst(oldCh.eventTitle, newTitle);
-        final indent = lines[i].length - lines[i].trimLeft().length;
-        lines[i] = ' ' * indent + newLine.trimLeft();
-        // 概要替换：小事件标题行后常跟空行（实际格式），需跳过空行
-        // 找到第一个非空内容行再替换，否则概要修改不会写回大纲文本
-        if (newSummary.isNotEmpty) {
-          for (int j = i + 1; j < lines.length; j++) {
-            final t = lines[j].trimLeft();
-            if (t.startsWith('══') || t.startsWith('○') || t.startsWith('-'))
-              break;
-            if (t.isNotEmpty) {
-              final indent2 = lines[j].length - lines[j].trimLeft().length;
-              lines[j] = ' ' * indent2 + newSummary;
-              break;
-            }
-          }
-        }
-        break;
-      }
-    }
-    outlineContent = lines.join('\n');
+    // 文本合并规则与「大纲编辑」共用（shared/outline_text_sync.dart），
+    // 保证两个入口改标题/概要后的写回结果一致
+    outlineContent = mergeEventIntoOutlineText(
+      outlineContent,
+      oldTitle: oldCh.eventTitle,
+      newTitle: newTitle,
+      newSummary: newSummary,
+    );
     await OutlineRecordDbHelper().update(outline.id!, {
       'content': outlineContent,
       'title': outline.title,
@@ -202,7 +169,10 @@ class ChapterWriteController {
         // 标题/序号之外还要比较事件类型与概要：历史详情页就地编辑大纲
         // 常只改事件概要（标题不变），若只按标题比较会漏判，章节卡片
         // 会一直显示旧概要
-        final freshChapters = _parseEvents(outlineContent);
+        final freshChapters = parseOutlineEvents(
+          outlineContent,
+          outlineId: outline.id!,
+        );
         final dirty =
             freshChapters.length != rows.length ||
             freshChapters.asMap().entries.any((entry) {
@@ -227,7 +197,10 @@ class ChapterWriteController {
           chapters = rows.map((m) => OutlineChapter.fromMap(m)).toList();
         }
       } else {
-        chapters = _parseEvents(outlineContent);
+        chapters = parseOutlineEvents(
+          outlineContent,
+          outlineId: outline.id!,
+        );
         await OutlineChapterDbHelper().batchInsert(
           chapters.map((c) => c.toMap()).toList(),
         );
@@ -802,82 +775,6 @@ class ChapterWriteController {
   Future<void> _reloadChapters() async {
     final rows = await OutlineChapterDbHelper().getByOutlineId(outline.id!);
     chapters = rows.map((m) => OutlineChapter.fromMap(m)).toList();
-  }
-
-  List<OutlineChapter> _parseEvents(String content) {
-    final lines = content.split('\n');
-    final result = <OutlineChapter>[];
-    int eventIndex = 0;
-
-    for (final line in lines) {
-      final trimmed = line.trim();
-      // 大事件标题行：允许可选的 ══ 包裹（模型输出常省略）、
-      // 编号为数字/占位符 X/中文数字/带圈数字
-      final majorMatch = RegExp(
-        r'^\s*═*\s*(?:大事件|Major|事件)\s*(?:[0-9Xx]|①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩|[一二三四五六七八九十]+)?\s*[：:]\s*(.+?)\s*═*\s*$',
-      ).firstMatch(trimmed);
-      if (majorMatch != null) {
-        eventIndex++;
-        final title = majorMatch.group(1)?.trim() ?? '大事件$eventIndex';
-        result.add(
-          OutlineChapter(
-            outlineId: outline.id!,
-            eventIndex: eventIndex,
-            eventType: 'major',
-            eventTitle: title,
-          ),
-        );
-        continue;
-      }
-      if (trimmed.startsWith('══') && trimmed.endsWith('══')) {
-        continue;
-      }
-      // 小事件标题行：允许 ○ / - / • / * / · 等符号（模型输出不固定）、
-      // 编号为数字/占位符 X/中文数字/带圈数字，分隔符限定冒号避免误吞概要
-      final minorMatch = RegExp(
-        r'^\s*[○\-•*\·]?\s*(?:小事件|事件)\s*(?:[0-9Xx]|①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩|[一二三四五六七八九十]+)?\s*[：:]\s*(.+?)\s*$',
-      ).firstMatch(trimmed);
-      if (minorMatch != null) {
-        eventIndex++;
-        final title = minorMatch.group(1)?.trim() ?? '小事件$eventIndex';
-        result.add(
-          OutlineChapter(
-            outlineId: outline.id!,
-            eventIndex: eventIndex,
-            eventType: 'minor',
-            eventTitle: title,
-          ),
-        );
-        continue;
-      }
-      if (result.isNotEmpty &&
-          trimmed.isNotEmpty &&
-          !trimmed.startsWith('══') &&
-          !trimmed.startsWith('○') &&
-          !trimmed.startsWith('-')) {
-        // 跳过可能的幕标题（如「第一幕：开端」），避免污染上一事件概要
-        if (RegExp(r'^第[一二三四五六0-9]+幕').hasMatch(trimmed)) continue;
-        final last = result.last;
-        // 累积多行概要（模型输出的事件概述常为多行）
-        final summary = last.eventSummary.isEmpty
-            ? trimmed
-            : '${last.eventSummary}\n$trimmed';
-        result[result.length - 1] = last.copyWith(eventSummary: summary);
-      }
-    }
-
-    if (result.isEmpty) {
-      result.add(
-        OutlineChapter(
-          outlineId: outline.id!,
-          eventIndex: 1,
-          eventType: 'major',
-          eventTitle: '正文',
-        ),
-      );
-    }
-
-    return result;
   }
 
   /// 构造前文内容：紧邻上一章注入**完整正文**（保证结尾衔接），
@@ -1680,7 +1577,7 @@ class ChapterWriteController {
 
   /// 提取当前事件附近的大纲片段，避免把整篇大纲注入提示词。
   ///
-  /// 按 `_parseEvents` 相同的规则逐行计数事件，用 [eventIndex] 直接定位
+  /// 按 `parseOutlineEvents` 相同的规则逐行计数事件，用 [eventIndex] 直接定位
   /// 当前章节所在行（不依赖标题子串匹配，标题重复或出现在概要中也不会选错块），
   /// 只取「当前事件所属大事件」的完整块（大事件标题+概述+其下全部小事件），
   /// 不取整幕——每幕大事件很多，整幕注入会撑大提示词；后续衔接由
@@ -1694,7 +1591,7 @@ class ChapterWriteController {
       r'^\s*[○\-•*\·]?\s*(?:小事件|事件)\s*(?:[0-9Xx]|①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩|[一二三四五六七八九十]+)?\s*[：:]',
     );
     final actRe = RegExp(r'^\s*══\s*第[一二三四五六0-9]+幕[^═]*══');
-    // 与 _parseEvents 一致：大/小事件标题行各计一个事件，据此定位第 eventIndex 个事件所在行
+    // 与 parseOutlineEvents 一致：大/小事件标题行各计一个事件，据此定位第 eventIndex 个事件所在行
     int seen = 0;
     int curIdx = -1;
     for (int i = 0; i < lines.length; i++) {

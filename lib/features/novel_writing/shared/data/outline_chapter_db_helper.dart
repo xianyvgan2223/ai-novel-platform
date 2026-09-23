@@ -60,6 +60,30 @@ class OutlineChapterDbHelper {
     );
   }
 
+  /// 「大纲编辑」保存：一次性写入事件标题 / 概要 / 正文。
+  /// 状态随正文推导（有内容 → completed，清空 → pending），与 [updateContent] 一致；
+  /// 标题/概要改动同步回大纲文本由调用方（OutlineEditController）负责。
+  Future<void> updateFull(
+    int id, {
+    required String eventTitle,
+    required String eventSummary,
+    required String content,
+  }) async {
+    final db = await database;
+    await db.update(
+      'outline_chapters',
+      {
+        'event_title': eventTitle,
+        'event_summary': eventSummary,
+        'content': content,
+        'status': content.trim().isEmpty ? 'pending' : 'completed',
+        'updated_at': DateTime.now().toIso8601String(),
+      },
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
   /// 更新状态
   Future<void> updateStatus(int id, String status) async {
     final db = await database;
