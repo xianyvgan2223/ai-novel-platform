@@ -30,6 +30,7 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
   final TextEditingController _inputCtrl = TextEditingController();
   final ScrollController _scrollCtrl = ScrollController();
   final FocusNode _inputFocus = FocusNode();
+  final GlobalKey _outlineBubbleKey = GlobalKey(); // 「当前大纲」气泡（应用后滚回查看）
   int _lastMessageCount = 0;
   int _lastStreamLength = 0;
   bool _followOutput = true; // 用户上滑阅读时暂停自动跟随
@@ -97,12 +98,24 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
     if (mounted) _toast('已复制到剪贴板');
   }
 
+  /// 应用 AI 结果后把「当前大纲」气泡滚回可见位置，立刻看到改动后的完整大纲
+  void _scrollToOutline() {
+    final ctx = _outlineBubbleKey.currentContext;
+    if (ctx == null || !ctx.mounted) return;
+    Scrollable.ensureVisible(
+      ctx,
+      duration: const Duration(milliseconds: 260),
+      alignment: 0,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final media = MediaQuery.of(context);
     final insets = media.viewInsets.bottom;
-    // 键盘弹出时压缩面板高度，保证标题栏与输入框始终可见
-    final height = (media.size.height * 0.85 - insets)
+    // 键盘弹出时压缩面板高度，保证标题栏与输入框始终可见；
+    // 不用满屏高度，留出上方页面可见（配合面板内的「当前大纲」预览）
+    final height = (media.size.height * 0.8 - insets)
         .clamp(260.0, media.size.height)
         .toDouble();
     return Padding(
@@ -122,6 +135,7 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
               children: [
                 _buildHeader(controller),
                 const Divider(height: 1),
+                // 「当前大纲」作为对话里的第一条气泡展示，随对话一起滚动看全文
                 Expanded(child: _buildMessageList(controller)),
                 if (controller.chatError.isNotEmpty) _buildError(controller),
                 _buildQuickPrompts(controller),
@@ -140,11 +154,9 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
     if (draft == null) {
       label = '';
     } else {
-      final title = draft.title.isEmpty
-          ? (draft.isMajor ? '大事件' : '未命名章节')
-          : draft.title;
-      label =
-          '${draft.isMajor ? "大事件" : "第 ${controller.aiTargetIndex + 1} 节"} · $title';
+      label = draft.isMajor
+          ? '大事件'
+          : '第 ${controller.aiTargetIndex + 1} 节';
     }
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 10, 4, 6),
@@ -184,43 +196,123 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
     );
   }
 
-  Widget _buildMessageList(OutlineEditController controller) {
-    final messages = controller.messages;
-    if (messages.isEmpty) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.symmetric(horizontal: 32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.forum_outlined, size: 40, color: Color(0xFFDDDDDD)),
-              SizedBox(height: 12),
-              Text(
-                '和 AI 聊聊这一节怎么写',
-                style: TextStyle(fontSize: 13, color: Color(0xFF999999)),
-              ),
-              SizedBox(height: 6),
-              Text(
-                'AI 会读取小说设定、所属大事件与前后章节大纲，\n只生成大纲（标题 / 概要），不改动正文',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 11,
-                  height: 1.5,
-                  color: Color(0xFFBBBBBB),
-                ),
-              ),
-            ],
-          ),
+  /// 「当前大纲」气泡：对话里的第一条消息，展示正在修改的事件标题与概要。
+  /// 内容随编辑实时更新，整条气泡随对话列表一起滚动（不固定在上方），
+  /// 长概要也能完整看到。
+  Widget _buildOutlineBubble(OutlineEditDraft draft) {
+    final summary = draft.summary;
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        key: _outlineBubbleKey,
+        margin: const EdgeInsets.only(bottom: 10, right: 20),
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+        decoration: BoxDecoration(
+          color: const Color(0xFFEFF3FF),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: const Color(0xFFD8E0FF)),
         ),
-      );
-    }
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(
+                  Icons.description_outlined,
+                  size: 13,
+                  color: Color(0xFF4D6BFE),
+                ),
+                const SizedBox(width: 4),
+                const Text(
+                  '当前大纲',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF4D6BFE),
+                  ),
+                ),
+                const Spacer(),
+                if (draft.isDirty)
+                  const Text(
+                    '未保存',
+                    style: TextStyle(fontSize: 10, color: Color(0xFFFF9800)),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              draft.title.isEmpty ? '（未命名章节）' : draft.title,
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF333333),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              summary.isEmpty
+                  ? '（暂无概要，可在下方告诉 AI 你想怎么写）'
+                  : summary,
+              style: TextStyle(
+                fontSize: 12,
+                height: 1.6,
+                color: summary.isEmpty
+                    ? const Color(0xFFAAAAAA)
+                    : const Color(0xFF555555),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 对话为空时的引导（排在大纲气泡下方）
+  Widget _buildEmptyHint() {
+    return const Padding(
+      padding: EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+      child: Column(
+        children: [
+          Icon(Icons.forum_outlined, size: 32, color: Color(0xFFDDDDDD)),
+          SizedBox(height: 10),
+          Text(
+            '和 AI 聊聊这一节怎么写',
+            style: TextStyle(fontSize: 12, color: Color(0xFF999999)),
+          ),
+          SizedBox(height: 4),
+          Text(
+            'AI 会读取小说设定、所属大事件与前后章节大纲，只生成大纲，不改动正文',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 11,
+              height: 1.5,
+              color: Color(0xFFBBBBBB),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 对话列表：第一条是「当前大纲」气泡，其后是对话消息，
+  /// 对话为空时再补一条引导。整列可滚动，长概要也能完整查看。
+  Widget _buildMessageList(OutlineEditController controller) {
     final draft = controller.aiTargetDraft;
+    final messages = controller.messages;
+    final outlineCount = draft == null ? 0 : 1;
+    final hintCount = messages.isEmpty ? 1 : 0;
     return ListView.builder(
       controller: _scrollCtrl,
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-      itemCount: messages.length,
-      itemBuilder: (context, index) =>
-          _buildMessageBubble(messages[index], draft),
+      itemCount: outlineCount + messages.length + hintCount,
+      itemBuilder: (context, index) {
+        if (draft != null && index == 0) return _buildOutlineBubble(draft);
+        final msgIndex = index - outlineCount;
+        if (msgIndex < messages.length) {
+          return _buildMessageBubble(messages[msgIndex], draft);
+        }
+        return _buildEmptyHint();
+      },
     );
   }
 
@@ -310,14 +402,17 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
           _actionButton('替换概要', () {
             draft.replaceSummary(text);
             _toast('已替换事件概要');
+            _scrollToOutline();
           }),
           _actionButton('追加到概要', () {
             draft.appendSummary(text);
             _toast('已追加到事件概要');
+            _scrollToOutline();
           }),
           _actionButton('替换标题', () {
             draft.replaceTitle(text);
             _toast('已替换事件标题');
+            _scrollToOutline();
           }),
           _actionButton('复制', () => _copy(text)),
         ],
