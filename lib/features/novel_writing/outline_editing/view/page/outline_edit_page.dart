@@ -198,6 +198,24 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
         onPressed: _handleExit,
       ),
       actions: [
+        IconButton(
+          icon: const Icon(Icons.undo, size: 20),
+          color: const Color(0xFF4D6BFE),
+          disabledColor: const Color(0xFFCCCCCC),
+          tooltip: '撤销',
+          onPressed: (!_controller.saving && _controller.canUndo)
+              ? _controller.undo
+              : null,
+        ),
+        IconButton(
+          icon: const Icon(Icons.redo, size: 20),
+          color: const Color(0xFF4D6BFE),
+          disabledColor: const Color(0xFFCCCCCC),
+          tooltip: '反撤销',
+          onPressed: (!_controller.saving && _controller.canRedo)
+              ? _controller.redo
+              : null,
+        ),
         TextButton(
           onPressed: _controller.saving ? null : () => _save(),
           child: _controller.saving

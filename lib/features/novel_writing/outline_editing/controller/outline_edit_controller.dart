@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import '../../shared/data/outline_chapter_db_helper.dart';
@@ -65,12 +67,28 @@ class OutlineEditController extends ChangeNotifier {
 
   bool get hasUnsaved => dirtyCount > 0;
 
+  // ---- 撤销 / 反撤销 ----
+  // 编辑历史：把「每一章标题 + 概要」整体快照成一份状态，
+  // 连续输入合并为一步（停顿后并入撤销栈），最多保留 100 步。
+  static const int _maxHistory = 100;
+  final List<_OutlineSnapshot> _undoStack = [];
+  final List<_OutlineSnapshot> _redoStack = [];
+  _OutlineSnapshot? _committed; // 最近一次已并入撤销栈的状态
+  Timer? _historyTimer; // 连续输入的合并计时器
+  bool _applyingHistory = false; // 撤销/反撤销回写文本时不重复记录历史
+  bool _pendingHistory = false; // 尚有未并入撤销栈的改动
+
+  bool get canUndo => _undoStack.isNotEmpty || _pendingHistory;
+
+  bool get canRedo => _redoStack.isNotEmpty && !_pendingHistory;
+
   /// 载入待编辑章节（仅内存，不落库）
   void init(List<OutlineChapter> chapters) {
     for (final c in chapters) {
       if (c.id == null) continue;
-      drafts.add(OutlineEditDraft(c)..onChanged = _safeNotify);
+      drafts.add(OutlineEditDraft(c)..onChanged = _onDraftChanged);
     }
+    _committed = _takeSnapshot();
     _loadContext();
   }
 
@@ -100,6 +118,87 @@ class OutlineEditController extends ChangeNotifier {
     if (index < 0 || index >= drafts.length || index == aiTargetIndex) return;
     aiTargetIndex = index;
     _safeNotify();
+  }
+
+  /// 任意一张卡片文本变化：刷新页面并（合并后）记录一步历史
+  void _onDraftChanged() {
+    _safeNotify();
+    if (_applyingHistory) return;
+    _pendingHistory = true;
+    _historyTimer?.cancel();
+    _historyTimer = Timer(const Duration(milliseconds: 600), _commitHistory);
+  }
+
+  /// 把「上一提交状态」压入撤销栈；连续输入只保留一个撤销起点
+  void _commitHistory() {
+    _historyTimer?.cancel();
+    _historyTimer = null;
+    final cur = _takeSnapshot();
+    final committed = _committed;
+    if (committed == null) {
+      _committed = cur;
+      _pendingHistory = false;
+      return;
+    }
+    _pendingHistory = false;
+    if (cur.sameAs(committed)) return;
+    _undoStack.add(committed);
+    if (_undoStack.length > _maxHistory) _undoStack.removeAt(0);
+    _redoStack.clear();
+    _committed = cur;
+    _safeNotify();
+  }
+
+  /// 撤销上一步编辑
+  void undo() {
+    if (_historyTimer != null) _commitHistory();
+    if (_undoStack.isEmpty) return;
+    _redoStack.add(_takeSnapshot());
+    final target = _undoStack.removeLast();
+    _applySnapshot(target);
+    _committed = target;
+    _pendingHistory = false;
+    _safeNotify();
+  }
+
+  /// 反撤销（重做）刚刚撤销的编辑
+  void redo() {
+    if (_historyTimer != null) _commitHistory();
+    if (_redoStack.isEmpty) return;
+    _undoStack.add(_takeSnapshot());
+    if (_undoStack.length > _maxHistory) _undoStack.removeAt(0);
+    final target = _redoStack.removeLast();
+    _applySnapshot(target);
+    _committed = target;
+    _pendingHistory = false;
+    _safeNotify();
+  }
+
+  /// 当前所有草稿的文本快照
+  _OutlineSnapshot _takeSnapshot() {
+    final states = <int, _OutlineDraftState>{};
+    for (final d in drafts) {
+      states[d.chapterId] = _OutlineDraftState(
+        d.titleCtrl.text,
+        d.summaryCtrl.text,
+      );
+    }
+    return _OutlineSnapshot(states);
+  }
+
+  /// 回写快照文本；回写过程中的监听不记录历史
+  void _applySnapshot(_OutlineSnapshot snap) {
+    _applyingHistory = true;
+    try {
+      for (final d in drafts) {
+        final s = snap.states[d.chapterId];
+        if (s == null) continue;
+        if (d.titleCtrl.text != s.title) d.titleCtrl.text = s.title;
+        if (d.summaryCtrl.text != s.summary) d.summaryCtrl.text = s.summary;
+      }
+    } finally {
+      _applyingHistory = false;
+    }
   }
 
   /// 保存所有有改动的章节大纲，返回实际保存的章节数。
@@ -365,6 +464,8 @@ class OutlineEditController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _historyTimer?.cancel();
+    _historyTimer = null;
     _chatSeq++;
     _cancelToken?.cancel();
     _cancelToken = null;
@@ -374,4 +475,30 @@ class OutlineEditController extends ChangeNotifier {
     drafts.clear();
     super.dispose();
   }
+}
+
+/// 撤销 / 反撤销用的大纲快照：按章节 id 记录该章标题与概要
+class _OutlineSnapshot {
+  final Map<int, _OutlineDraftState> states;
+
+  const _OutlineSnapshot(this.states);
+
+  bool sameAs(_OutlineSnapshot other) {
+    if (states.length != other.states.length) return false;
+    for (final e in states.entries) {
+      final o = other.states[e.key];
+      if (o == null || !o.sameAs(e.value)) return false;
+    }
+    return true;
+  }
+}
+
+class _OutlineDraftState {
+  final String title;
+  final String summary;
+
+  const _OutlineDraftState(this.title, this.summary);
+
+  bool sameAs(_OutlineDraftState other) =>
+      title == other.title && summary == other.summary;
 }
