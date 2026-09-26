@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../../../shared/data/outline_chapter_db_helper.dart';
 import '../../../shared/domain/outline_chapter.dart';
 import '../../../shared/domain/outline_record.dart';
-import '../../../shared/outline_event_parser.dart';
+import '../../../shared/outline_chapter_sync.dart';
 import 'outline_edit_page.dart';
 
 /// 「大纲编辑」章节选择页。
@@ -39,23 +39,17 @@ class _OutlineEditChapterListPageState
       return;
     }
     try {
-      var rows = await OutlineChapterDbHelper().getByOutlineId(id);
-      if (rows.isEmpty) {
-        // 首次进入且尚未解析章节：与「大纲转章节」首次进入行为一致，
-        // 解析大纲正文中的事件并入库（保留正文为空，由用户编辑或后续生成）
-        final parsed = parseOutlineEvents(
-          widget.outline.content,
-          outlineId: id,
-        );
-        await OutlineChapterDbHelper().batchInsert(
-          parsed.map((c) => c.toMap()).toList(),
-        );
-        rows = await OutlineChapterDbHelper().getByOutlineId(id);
-      }
-      _chapters = rows.map((m) => OutlineChapter.fromMap(m)).toList();
-      _selected.removeWhere(
-        (sid) => !_chapters.any((c) => c.id == sid),
+      // 与「大纲转章节」共用同一套无损校正（shared/outline_chapter_sync.dart）：
+      // 首次进入按大纲正文解析入库；之后进入则按最新正文校正结构。
+      // 旧版只在章节表为空时才解析，导致解析规则修复后旧数据永远不自愈，
+      // 页面一直显示错误的章节结构。
+      await reconcileOutlineChapters(
+        outlineId: id,
+        content: widget.outline.content,
       );
+      final rows = await OutlineChapterDbHelper().getByOutlineId(id);
+      _chapters = rows.map((m) => OutlineChapter.fromMap(m)).toList();
+      _selected.removeWhere((sid) => !_chapters.any((c) => c.id == sid));
     } catch (_) {}
     if (mounted) setState(() => _loading = false);
   }

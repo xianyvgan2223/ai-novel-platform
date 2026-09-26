@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:deepseekapp/core/network/api_service.dart';
 import 'package:deepseekapp/core/config/user_setting_service.dart';
 import '../../shared/domain/outline_setting.dart';
+import '../../shared/outline_event_syntax.dart';
 import '../../shared/domain/outline_record.dart';
 import '../../shared/data/outline_db_helper.dart';
 import '../../shared/data/outline_record_db_helper.dart';
@@ -235,17 +236,32 @@ $laterContent
 
 ''';
 
-    // 从本块大事件框架中提取全局编号范围，明确告知模型，防止跳号/重复编号
+    // 从本块大事件框架中提取全局编号范围，明确告知模型，防止跳号/重复编号。
+    // 编号识别走 outline_event_syntax，避免这里再抄一份正则
     final nums = <int>[];
     for (final line in actContent.split('\n')) {
-      final m = RegExp(r'^大事件\s*(\d+)\s*[：:]').firstMatch(line.trim());
-      if (m != null) nums.add(int.parse(m.group(1)!));
+      final n = declaredEventNumber(line);
+      if (n != null) nums.add(n);
     }
     final numberHint = nums.isEmpty
         ? ''
         : (nums.length == 1
               ? '本块只需输出编号为「大事件${nums.first}」的大事件'
               : '本块需按顺序输出编号为「大事件${nums.first}」至「大事件${nums.last}」的大事件');
+
+    // 格式范例直接用本块的真实编号：范例里写占位符 X 会被模型照抄成「大事件X：」
+    final exampleNo = nums.isEmpty ? 1 : nums.first;
+    final formatExample =
+        '''
+══ 大事件$exampleNo：大事件标题 ══
+大事件概述（写清本阶段核心危机、主角行动、埋下的长线伏笔，篇幅按重要程度自行把握）
+○ 小事件1：小标题
+小事件概要
+○ 小事件2：小标题
+小事件概要
+○ 小事件3：小标题
+小事件概要
+……（循环至$minorEventCount个小事件）''';
 
     return '''
 请展开第$actIndex幕（$actName）的详细内容。
@@ -262,17 +278,15 @@ $globalSummary
 $previousSection$laterSection=== 当前幕已有的大事件框架 ===
 $actContent
 
-请为上述每个大事件展开配套的小事件（共$minorEventCount个小事件每个），严格遵循以下格式：
+请为上述每个大事件展开配套的小事件（共$minorEventCount个小事件每个），严格遵循以下格式（纯文本，禁止任何 markdown 标记）：
 
-══ 大事件X：大事件标题 ══
-大事件概述（写清本阶段核心危机、主角行动、埋下的长线伏笔，篇幅按重要程度自行把握）
-○ 小事件1：小标题
-小事件概要
-○ 小事件2：小标题
-小事件概要
-○ 小事件3：小标题
-小事件概要
-……（循环至$minorEventCount个小事件）
+$formatExample
+
+格式硬性要求（违反会直接导致大纲解析失败）：
+- 大事件标题行必须写成「══ 大事件N：标题 ══」，N 用本块框架里的具体数字，禁止写成「大事件X」或省略编号
+- 小事件标题行必须写成「○ 小事件N：标题」，N 在每个大事件内部从 1 开始连续编号
+- 禁止使用 markdown 标题（#、##、###）、加粗（**）、分隔线（---、===）和任何列表符号
+- 事件标题必须独立成行，标题内不得再嵌套「大事件N：」这类前缀
 
 ⚠️ 小事件写作核心要求：
 1. 每个小事件必须是独立完整的情节单元，不是大事件的一个执行步骤

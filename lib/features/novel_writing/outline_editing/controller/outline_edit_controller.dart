@@ -133,6 +133,7 @@ class OutlineEditController extends ChangeNotifier {
             oldTitle: d.savedTitle,
             newTitle: newTitle,
             newSummary: newSummary,
+            eventIndex: d.eventIndex,
           );
         }
         d.markSaved();
@@ -226,7 +227,8 @@ class OutlineEditController extends ChangeNotifier {
           final delta = choices[0]['delta'] as Map<String, dynamic>?;
           if (delta == null) return;
           final content = delta['content'] as String?;
-          if (content != null && content.isNotEmpty) assistant.content += content;
+          if (content != null && content.isNotEmpty)
+            assistant.content += content;
           final reasoning = delta['reasoning_content'] as String?;
           if (reasoning != null && reasoning.isNotEmpty) {
             assistant.thinking += reasoning;

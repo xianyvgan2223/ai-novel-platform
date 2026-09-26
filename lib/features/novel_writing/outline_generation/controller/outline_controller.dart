@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import '../service/outline_service.dart';
 import '../../shared/domain/outline_setting.dart';
 import '../../shared/domain/outline_record.dart';
+import '../../shared/outline_event_syntax.dart';
 
 /// 大纲生成控制器，管理业务逻辑与状态
 ///
@@ -1371,15 +1372,12 @@ class OutlineController extends ChangeNotifier {
 
   /// 从历史大纲最终内容解析三幕骨架：每个大事件 = 标题 + 概述
   /// （概述只取标题后、第一个小事件展开之前的段落，小事件块不参与骨架）。
-  /// 容错与章节事件解析器（[_parseEvents]）保持一致，兼容旧版生成的大纲：
-  /// - 幕标题：`══ 第一幕：开端 ══` / `══ 第1幕 ══` 等（══ 装饰 + 中文/数字编号）
-  /// - 大事件行：`══ 大事件N：标题 ══` / `大事件N：标题` / `事件N：标题` 等
-  ///   （══ 包裹可有可无，前缀支持 大事件/Major/事件，编号支持数字/X/中文/带圈）
+  ///
+  /// 行识别统一走 [classifyOutlineLine]（编号支持多位数字 / X / 中文 / 带圈，
+  /// 容忍 ══ 与 markdown 前缀）。此前这里手写的副本只认一位编号，导致
+  /// 「编辑大事件 / 局部重新生成」解析出的第 2、3 幕为空而整体失败，
+  /// 于是回退到可能已经过期的骨架 JSON，读不到正文里的最新改动。
   List<_Act>? _parseRecordActs(String content) {
-    final actRe = RegExp(r'^\s*[══=]+\s*(第\s*[一二三四五六七八九十0-9]+\s*幕)');
-    final eventRe = RegExp(
-      r'^\s*═*\s*(?:大事件|Major|事件)\s*(?:[0-9Xx]|①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩|[一二三四五六七八九十]+)?\s*[：:]\s*(.+?)\s*═*\s*$',
-    );
     final acts = <_Act>[];
     _Act? curAct;
     String? curTitle;
@@ -1400,21 +1398,22 @@ class OutlineController extends ChangeNotifier {
     for (final raw in content.split('\n')) {
       final trimmed = raw.trim();
       if (trimmed.isEmpty) continue;
-      final actM = actRe.firstMatch(trimmed);
-      if (actM != null) {
+      final line = classifyOutlineLine(raw);
+      if (line.isAct) {
         flushEvent();
-        curAct = _Act(name: actM.group(1)!, events: []);
+        curAct = _Act(name: line.title, events: []);
         acts.add(curAct);
         continue;
       }
-      final evM = eventRe.firstMatch(trimmed);
-      if (evM != null) {
+      if (line.isMajor) {
         flushEvent();
-        curTitle = evM.group(1)!.trim();
+        curTitle = line.title;
         minorStarted = false;
         continue;
       }
-      if (trimmed.startsWith('○') || trimmed.startsWith('小事件')) {
+      if (line.isMinor ||
+          trimmed.startsWith('○') ||
+          trimmed.startsWith('小事件')) {
         minorStarted = true; // 进入小事件块，概述收集结束
         continue;
       }
@@ -1927,7 +1926,10 @@ class OutlineController extends ChangeNotifier {
         final content = groups[j]
             .map((e) {
               globalIndex++;
-              return '大事件$globalIndex：${e.title}\n${e.summary}';
+              // 注入给模型的框架文本也用规范写法：模型倾向照抄上下文格式，
+              // 上下文是裸标题、范例是 ══ 包裹，正是格式分叉的根源
+              final header = formatMajorHeader(globalIndex, e.title);
+              return '$header\n${e.summary}';
             })
             .join('\n\n');
         _chunks.add(
@@ -2353,17 +2355,23 @@ class OutlineController extends ChangeNotifier {
     final buf = StringBuffer();
     for (int k = 0; k < placed.length; k++) {
       final (_, b) = placed[k];
-      buf.writeln('══ 大事件${chunk.globalStartIndex + k}：${b.title} ══');
+      buf.writeln(formatMajorHeader(chunk.globalStartIndex + k, b.title));
       final body = b.body.trim();
       if (body.isNotEmpty) buf.writeln(body);
       buf.writeln();
     }
-    chunk.buffer = buf.toString().trim();
+    // 块内小事件写法也在这里统一：本块文本会作为「前一块已展开的详细内容」
+    // 注入下一块提示词，模型看到粗体/异常写法会照抄（自增强），
+    // 必须在源头统一，而不是等到落库
+    chunk.buffer = normalizeMinorHeaders(buf.toString().trim());
   }
 
-  /// 解析模型输出文本中的事件块：标题行（大事件N：标题）开始，正文到下一个标题行结束。
+  /// 解析模型输出文本中的事件块：大事件标题行开始，正文到下一个大事件标题行结束。
+  ///
+  /// 只按「大事件」切块（小事件行属于块内正文），识别走统一规则——此前这里只认
+  /// ══/裸标题，模型写成 markdown 时整块切不出来，_normalizeChunkBuffer 便直接
+  /// 放弃归一化、把 markdown 原样落库，这正是格式分叉保留到最终大纲的原因。
   List<_EventBlock> _splitEventBlocks(String text) {
-    final headerRe = RegExp(r'^\s*═*\s*大事件\s*[0-9Xx]*\s*[：:]\s*(.+?)\s*═*\s*$');
     final blocks = <_EventBlock>[];
     String? curTitle;
     final bodyBuf = StringBuffer();
@@ -2376,14 +2384,13 @@ class OutlineController extends ChangeNotifier {
     }
 
     for (final raw in text.split('\n')) {
-      final line = raw.trimRight();
-      final m = headerRe.firstMatch(line.trim());
-      if (m != null) {
+      final head = classifyOutlineLine(raw);
+      if (head.isMajor) {
         flush();
-        curTitle = m.group(1)!.trim();
+        curTitle = stripNestedEventPrefix(head.title);
         continue;
       }
-      if (curTitle != null) bodyBuf.writeln(line);
+      if (curTitle != null) bodyBuf.writeln(raw.trimRight());
     }
     flush();
     return blocks;
@@ -2391,12 +2398,12 @@ class OutlineController extends ChangeNotifier {
 
   /// 本块骨架中的预期事件标题（按顺序），来源：_buildChunks 生成的块内容
   List<String> _chunkExpectedTitles(_ExpandChunk chunk) {
-    final re = RegExp(r'^大事件\s*\d+\s*[：:]\s*(.+)$');
-    return [
-      for (final line in chunk.content.split('\n'))
-        if (re.hasMatch(line.trim()))
-          re.firstMatch(line.trim())!.group(1)!.trim(),
-    ];
+    final titles = <String>[];
+    for (final line in chunk.content.split('\n')) {
+      final head = classifyOutlineLine(line);
+      if (head.isMajor) titles.add(stripNestedEventPrefix(head.title));
+    }
+    return titles;
   }
 
   /// 标题归一化键：去空白、去结尾标点，用于标题比对
@@ -2408,11 +2415,10 @@ class OutlineController extends ChangeNotifier {
   /// 防止后续块回显续跑前已生成的事件。
   void _seedSeenTitlesFromRawText() {
     if (rawText.isEmpty) return;
-    final re = RegExp(r'^\s*═*\s*大事件\s*\d+\s*[：:]\s*(.+?)\s*═*\s*$');
     for (final line in rawText.split('\n')) {
-      final m = re.firstMatch(line.trim());
-      if (m != null) {
-        _seenEventTitles.add(_normalizeTitleKey(m.group(1)!.trim()));
+      final head = classifyOutlineLine(line);
+      if (head.isMajor) {
+        _seenEventTitles.add(_normalizeTitleKey(head.title));
       }
     }
   }
@@ -2460,7 +2466,7 @@ class OutlineController extends ChangeNotifier {
       buf.writeln(i < headers.length ? headers[i] : '══ 第${i + 1}幕 ══');
       for (final e in acts[i].events) {
         idx++;
-        buf.writeln('大事件$idx：${e.title}');
+        buf.writeln(formatMajorHeader(idx, e.title));
         buf.writeln(e.summary);
         buf.writeln();
       }
@@ -2478,7 +2484,7 @@ class OutlineController extends ChangeNotifier {
       for (final e in act.events) {
         idx++;
         if (idx < fromGlobalIndex || idx > toGlobalIndex) continue;
-        buf.writeln('大事件$idx：${e.title}');
+        buf.writeln(formatMajorHeader(idx, e.title));
         buf.writeln(e.summary);
         buf.writeln();
       }
@@ -2518,6 +2524,11 @@ class OutlineController extends ChangeNotifier {
   // ─── 内部工具 ────────────────────────────────────────────────
 
   OutlineRecord _buildRecord() {
+    // 落库前统一事件标题格式（生成侧的格式统一出口）：
+    // 模型在不同块里会写出 ══ 包裹 / 裸标题 / markdown 三种形态，这里按位置重新
+    // 编号并统一写法；只重写标题行，概要与正文逐字节保留。赋值回 rawText，
+    // 保证同一次会话里「续跑 / 继续生成」看到的前文也是规范格式。
+    rawText = normalizeOutlineText(rawText);
     final ledger = _renderLedgerText();
     return OutlineRecord(
       title: title,

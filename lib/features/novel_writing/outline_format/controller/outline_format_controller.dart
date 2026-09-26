@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import '../service/outline_format_service.dart';
 import '../../shared/domain/outline_record.dart';
+import '../../shared/outline_event_syntax.dart';
 
 /// 大纲格式匹配控制器，管理业务逻辑与状态
 class OutlineFormatController extends ChangeNotifier {
@@ -163,7 +164,9 @@ class OutlineFormatController extends ChangeNotifier {
         theme: '',
         protagonist: '',
         worldview: '',
-        content: content,
+        // 落库前统一事件标题格式：与「一键生成」共用同一套规范化，
+        // 模型偶尔带上 markdown 或跳号时，存下来的大纲结构仍然一致
+        content: normalizeOutlineText(content),
         foreshadows: foreshadows,
       );
 

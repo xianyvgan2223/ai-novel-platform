@@ -9,7 +9,9 @@ import '../../shared/domain/outline_chapter.dart';
 import '../../shared/domain/character_profile.dart';
 import '../../shared/data/outline_chapter_db_helper.dart';
 import '../../shared/data/outline_record_db_helper.dart';
+import '../../shared/outline_chapter_sync.dart';
 import '../../shared/outline_event_parser.dart';
+import '../../shared/outline_event_syntax.dart';
 import '../../shared/outline_text_sync.dart';
 
 /// 章节写作控制器
@@ -79,58 +81,20 @@ class ChapterWriteController {
   /// 最近一次生成是否被用户主动停止（用于 UI 区分「已完成/已停止」）
   bool get wasCancelled => _cancelled;
 
-  /// 重新从大纲内容解析事件并更新数据库（保留已完成的正文内容）
+  /// 重新从大纲内容解析事件并校正数据库结构（**不整表重建、不丢正文**）。
   ///
-  /// [previousChapters] 重同步前的旧章节（含已生成正文）。调用方必须传入：
-  /// 页面加载时若从空的 [chapters] 字段取旧数据，已完成内容将全部丢失。
-  /// 匹配策略：先按标题精确匹配（内容随标题保留）；标题对不上（事件被改名）时
-  /// 按序号兜底匹配，避免改名/重排导致正文被误删。
-  Future<void> resync({List<OutlineChapter>? previousChapters}) async {
+  /// 实际工作交给 [reconcileOutlineChapters]：命中的旧行原地更新序号与类型，
+  /// 行 id 不变，因此正文 / AI 小结 / 剧情账本全部原地保留；只有新增事件才插入；
+  /// 带数据的孤儿行绝不删除。
+  ///
+  /// 旧实现是 deleteByOutlineId + batchInsert 两步：中间进程被杀就会把整本小说
+  /// 的正文全部删光；且「按序号兜底继承正文」在结构变化（事件数增减）后会把正文
+  /// 挂到错误的事件上。
+  Future<void> resync() async {
     needsResync = false;
-    final oldChapters = previousChapters ?? chapters;
-    final oldByTitle = Map.fromEntries(
-      oldChapters.map((c) => MapEntry(c.eventTitle, c)),
-    );
-    final newChapters = parseOutlineEvents(
-      outlineContent,
+    await reconcileOutlineChapters(
       outlineId: outline.id!,
-    );
-    final matchedIndexes = <int>{}; // 已被标题匹配占用的旧序号，序号兜底时跳过
-    for (int i = 0; i < newChapters.length; i++) {
-      final byTitle = oldByTitle[newChapters[i].eventTitle];
-      if (byTitle != null &&
-          byTitle.status == 'completed' &&
-          byTitle.content.isNotEmpty) {
-        final oldIdx = oldChapters.indexOf(byTitle);
-        if (oldIdx >= 0) matchedIndexes.add(oldIdx);
-        newChapters[i] = newChapters[i].copyWith(
-          content: byTitle.content,
-          status: 'completed',
-          aiSummary: byTitle.aiSummary,
-          storyState: byTitle.storyState,
-        );
-      }
-    }
-    // 标题未匹配到的（改名/新增事件）：若同一序号位置的旧章节已完成且有正文，
-    // 且该旧章节尚未被其他新章节以标题匹配占用，则按序号继承内容
-    for (int i = 0; i < newChapters.length; i++) {
-      if (newChapters[i].status == 'completed') continue;
-      if (matchedIndexes.contains(i)) continue;
-      if (i >= oldChapters.length) break;
-      final byIndex = oldChapters[i];
-      if (byIndex.status == 'completed' && byIndex.content.isNotEmpty) {
-        matchedIndexes.add(i);
-        newChapters[i] = newChapters[i].copyWith(
-          content: byIndex.content,
-          status: 'completed',
-          aiSummary: byIndex.aiSummary,
-          storyState: byIndex.storyState,
-        );
-      }
-    }
-    await OutlineChapterDbHelper().deleteByOutlineId(outline.id!);
-    await OutlineChapterDbHelper().batchInsert(
-      newChapters.map((c) => c.toMap()).toList(),
+      content: outlineContent,
     );
     await _reloadChapters();
   }
@@ -149,6 +113,7 @@ class ChapterWriteController {
       oldTitle: oldCh.eventTitle,
       newTitle: newTitle,
       newSummary: newSummary,
+      eventIndex: oldCh.eventIndex,
     );
     await OutlineRecordDbHelper().update(outline.id!, {
       'content': outlineContent,
@@ -183,24 +148,14 @@ class ChapterWriteController {
                   c.eventSummary != entry.value.eventSummary;
             });
         if (dirty) {
-          // 大纲已更新：自动重同步章节结构（保留已完成的正文内容），
-          // 确保事件列表始终与大纲标题一致。
-          // 注意必须传入旧行：此时 chapters 字段尚未赋值（为空），
-          // 若 resync 从 chapters 取旧数据会拿不到任何已完成内容，
-          // deleteByOutlineId 会把已生成的正文全部删光（致命数据丢失）
-          await resync(
-            previousChapters: rows
-                .map((m) => OutlineChapter.fromMap(m))
-                .toList(),
-          );
+          // 大纲已更新：自动校正章节结构。正文按行 id 原地保留，
+          // 不再有「整表删除再插入」的窗口期
+          await resync();
         } else {
           chapters = rows.map((m) => OutlineChapter.fromMap(m)).toList();
         }
       } else {
-        chapters = parseOutlineEvents(
-          outlineContent,
-          outlineId: outline.id!,
-        );
+        chapters = parseOutlineEvents(outlineContent, outlineId: outline.id!);
         await OutlineChapterDbHelper().batchInsert(
           chapters.map((c) => c.toMap()).toList(),
         );
@@ -212,7 +167,9 @@ class ChapterWriteController {
     // 「写」按钮；有正文的章节在生成流程中已落盘为 completed，不受影响。
     for (int i = 0; i < chapters.length; i++) {
       final c = chapters[i];
-      if (c.status == 'generating' && c.content.trim().isEmpty && c.id != null) {
+      if (c.status == 'generating' &&
+          c.content.trim().isEmpty &&
+          c.id != null) {
         await OutlineChapterDbHelper().updateStatus(c.id!, 'pending');
         chapters[i] = c.copyWith(status: 'pending');
       }
@@ -277,8 +234,12 @@ class ChapterWriteController {
 
     try {
       // 一次性加载章节列表与记录，避免前文/小结/状态多处重复查库
-      final allRows = await OutlineChapterDbHelper().getByOutlineId(outline.id!);
-      final allChapters = allRows.map((m) => OutlineChapter.fromMap(m)).toList();
+      final allRows = await OutlineChapterDbHelper().getByOutlineId(
+        outline.id!,
+      );
+      final allChapters = allRows
+          .map((m) => OutlineChapter.fromMap(m))
+          .toList();
       final prevContent = _buildPrevContent(ch, allChapters);
       // 读取最新的剧情状态、人物档案与伏笔清单（写章节期间可能已累积）
       var freshRow = await OutlineRecordDbHelper().getById(outline.id!);
@@ -314,8 +275,8 @@ class ChapterWriteController {
       final baseMaxTokens = settings.chapterSetting.maxTokens;
       final effectiveMaxTokens =
           (targetWords != null && baseMaxTokens >= 1 && baseMaxTokens <= 8192)
-              ? (targetWords * 2).clamp(baseMaxTokens, 8192).toInt()
-              : baseMaxTokens;
+          ? (targetWords * 2).clamp(baseMaxTokens, 8192).toInt()
+          : baseMaxTokens;
       final prompt = ChapterWritePromptTemplate.buildWritePrompt(
         outline: outline,
         outlineExcerpt: _buildLocalOutline(ch),
@@ -379,7 +340,8 @@ class ChapterWriteController {
           // 推理模型（deepseek-v4 思考模式）多轮工具调用：必须把上一轮 assistant 的
           // reasoning_content 原样回传，否则 API 报 400「Missing reasoning_content
           // in assistant message history」，章节生成会静默失败
-          if (result.reasoning.isNotEmpty) 'reasoning_content': result.reasoning,
+          if (result.reasoning.isNotEmpty)
+            'reasoning_content': result.reasoning,
           'tool_calls': result.toolCalls
               .map(
                 (tc) => {
@@ -659,11 +621,12 @@ class ChapterWriteController {
     if (outline.id == null) return;
     try {
       final all = await OutlineChapterDbHelper().getByOutlineId(outline.id!);
-      final completed = all
-          .map((m) => OutlineChapter.fromMap(m))
-          .where((c) => c.eventType == 'minor' && c.status == 'completed')
-          .toList()
-        ..sort((a, b) => a.eventIndex.compareTo(b.eventIndex));
+      final completed =
+          all
+              .map((m) => OutlineChapter.fromMap(m))
+              .where((c) => c.eventType == 'minor' && c.status == 'completed')
+              .toList()
+            ..sort((a, b) => a.eventIndex.compareTo(b.eventIndex));
       final latest = completed.isEmpty ? null : completed.last;
       await OutlineRecordDbHelper().update(outline.id!, {
         'story_state': latest?.storyState ?? '',
@@ -759,7 +722,6 @@ class ChapterWriteController {
     // 注意：不再在保存时自动提炼伏笔清单——改为账本页手动「重新提炼」触发，
     // 避免保存流程被 AI 调用拖慢，也避免频繁触发消耗额度
   }
-
 
   void stopWrite() {
     _cancelled = true;
@@ -1042,7 +1004,10 @@ class ChapterWriteController {
   /// 过程流式写入 [chapterSummaryThinkingText]（AI 思考）与
   /// [chapterSummaryOutputText]（小结输出），供编辑保存页气泡实时展示；
   /// 流式失败时回退一次非流式调用。失败静默不影响正文保存。
-  Future<void> _summarizeChapterVisible(OutlineChapter ch, String content) async {
+  Future<void> _summarizeChapterVisible(
+    OutlineChapter ch,
+    String content,
+  ) async {
     if (ch.id == null || content.trim().isEmpty) return;
     try {
       final settings = await _service.loadSettings();
@@ -1144,10 +1109,11 @@ class ChapterWriteController {
       final fresh = await OutlineRecordDbHelper().getById(outline.id!);
       // 上一章账本：取最近一个已完成章节的独立账本（第一章为空），
       // 不再使用全局 story_state——每章账本独立保存，重新生成后可回退
-      final prevChapters = allChapters ??
-          (await OutlineChapterDbHelper().getByOutlineId(outline.id!))
-              .map((m) => OutlineChapter.fromMap(m))
-              .toList();
+      final prevChapters =
+          allChapters ??
+          (await OutlineChapterDbHelper().getByOutlineId(
+            outline.id!,
+          )).map((m) => OutlineChapter.fromMap(m)).toList();
       final prevState = _prevChapterLedger(ch, prevChapters);
       final oldChars = _parseCharacters(fresh?['characters'] as String? ?? '');
       final contentBuf = StringBuffer();
@@ -1346,7 +1312,9 @@ class ChapterWriteController {
       final cleaned = _stripMarkdownFence(reviewedRaw);
       if (cleaned.contains(marker)) {
         // 档案审查气泡只保留【审查意见】
-        protagonistReviewText = cleaned.substring(0, cleaned.indexOf(marker)).trim();
+        protagonistReviewText = cleaned
+            .substring(0, cleaned.indexOf(marker))
+            .trim();
       }
       final reviewedJson = cleaned.contains(marker)
           ? cleaned.substring(cleaned.indexOf(marker) + marker.length).trim()
@@ -1584,30 +1552,33 @@ class ChapterWriteController {
   /// 【后续事件】单独注入。找不到对应事件时回退整篇大纲。
   String _buildLocalOutline(OutlineChapter ch) {
     final lines = outlineContent.split('\n');
-    final majorRe = RegExp(
-      r'^\s*═*\s*(?:大事件|Major|事件)\s*(?:[0-9Xx]|①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩|[一二三四五六七八九十]+)?\s*[：:]',
+    // 行识别统一走 outline_event_syntax.dart：此前这里另抄了一份正则，
+    // 只认一位编号，导致「大事件10：」之后全部失配——块起点退回到上一个大事件、
+    // 块终点一直拉到下一幕，等于把四分之一篇大纲注入提示词
+    final kinds = List<OutlineLineKind>.generate(
+      lines.length,
+      (i) => classifyOutlineLine(lines[i]).kind,
+      growable: false,
     );
-    final minorRe = RegExp(
-      r'^\s*[○\-•*\·]?\s*(?:小事件|事件)\s*(?:[0-9Xx]|①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩|[一二三四五六七八九十]+)?\s*[：:]',
-    );
-    final actRe = RegExp(r'^\s*══\s*第[一二三四五六0-9]+幕[^═]*══');
     // 与 parseOutlineEvents 一致：大/小事件标题行各计一个事件，据此定位第 eventIndex 个事件所在行
     int seen = 0;
     int curIdx = -1;
     for (int i = 0; i < lines.length; i++) {
-      if (majorRe.hasMatch(lines[i]) || minorRe.hasMatch(lines[i])) {
-        seen++;
-        if (seen == ch.eventIndex) {
-          curIdx = i;
-          break;
-        }
+      final kind = kinds[i];
+      if (kind != OutlineLineKind.major && kind != OutlineLineKind.minor) {
+        continue;
+      }
+      seen++;
+      if (seen == ch.eventIndex) {
+        curIdx = i;
+        break;
       }
     }
     if (curIdx == -1) return outlineContent;
     // 块起点：当前事件所在的大事件标题行（当前事件自身为大事件时即其本身）
     int blockStart = curIdx;
     for (int i = curIdx; i >= 0; i--) {
-      if (majorRe.hasMatch(lines[i])) {
+      if (kinds[i] == OutlineLineKind.major) {
         blockStart = i;
         break;
       }
@@ -1615,7 +1586,8 @@ class ChapterWriteController {
     // 块终点：下一条大事件标题行或下一幕标题行
     int blockEnd = lines.length;
     for (int i = curIdx + 1; i < lines.length; i++) {
-      if (majorRe.hasMatch(lines[i]) || actRe.hasMatch(lines[i])) {
+      if (kinds[i] == OutlineLineKind.major ||
+          kinds[i] == OutlineLineKind.act) {
         blockEnd = i;
         break;
       }

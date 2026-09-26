@@ -128,13 +128,20 @@ class OutlineChapterDbHelper {
     final db = await database;
     await db.update(
       'outline_chapters',
-      {'story_state': storyState, 'updated_at': DateTime.now().toIso8601String()},
+      {
+        'story_state': storyState,
+        'updated_at': DateTime.now().toIso8601String(),
+      },
       where: 'id = ?',
       whereArgs: [id],
     );
   }
 
-  /// 删除某个大纲的所有章节
+  /// 删除某个大纲的所有章节（**破坏性，已不再用于结构重建**）。
+  ///
+  /// 结构校正请改用 [reconcileOutlineChapters]：它原地更新行、保留行 id，
+  /// 因而正文 / AI 小结 / 剧情账本不会丢；本方法一旦误用（例如解析失败后
+  /// 传空列表），会把整本小说的正文一次删光。
   Future<void> deleteByOutlineId(int outlineId) async {
     final db = await database;
     await db.delete(

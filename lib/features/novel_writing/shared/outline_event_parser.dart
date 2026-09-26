@@ -1,10 +1,14 @@
 import 'domain/outline_chapter.dart';
+import 'outline_event_syntax.dart';
 
 /// 从大纲正文解析事件列表（大事件 / 小事件）。
 ///
-/// 「大纲转章节」与「大纲编辑」共用同一套解析规则，保证两个入口看到的章节结构一致：
-/// - 大事件：`══...══` 包裹行，或「大事件N：标题」（编号支持数字/占位符 X/
-///   中文数字/带圈数字，模型输出常省略 `══`）
+/// 「大纲转章节」与「大纲编辑」共用同一套解析规则，保证两个入口看到的章节结构一致。
+/// 行识别（含编号、markdown 前缀、══ 包裹的容错）统一由 [classifyOutlineLine] 提供，
+/// **本文件不再自行维护正则**——历史上这里手写的副本只认一位编号，导致
+/// `大事件10：` 起的大事件整体丢失。
+///
+/// - 大事件：`══...══` 包裹行，或「大事件N：标题」
 /// - 小事件：`○ / - / • / * / ·` 前缀行，或「小事件N：标题」
 /// - 事件标题之后的非标题行累积为该事件的概要（模型输出的事件概述常为多行）
 /// - 幕标题（如「第一幕：开端」）会被跳过，避免污染上一事件的概要
@@ -15,58 +19,34 @@ List<OutlineChapter> parseOutlineEvents(
   String content, {
   required int outlineId,
 }) {
-  final lines = content.split('\n');
   final result = <OutlineChapter>[];
-  int eventIndex = 0;
+  var eventIndex = 0;
 
-  for (final line in lines) {
-    final trimmed = line.trim();
-    // 大事件标题行：允许可选的 ══ 包裹（模型输出常省略）、
-    // 编号为数字/占位符 X/中文数字/带圈数字
-    final majorMatch = RegExp(
-      r'^\s*═*\s*(?:大事件|Major|事件)\s*(?:[0-9Xx]|①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩|[一二三四五六七八九十]+)?\s*[：:]\s*(.+?)\s*═*\s*$',
-    ).firstMatch(trimmed);
-    if (majorMatch != null) {
+  for (final raw in content.split('\n')) {
+    final trimmed = raw.trim();
+    final line = classifyOutlineLine(raw);
+
+    if (line.isEvent) {
       eventIndex++;
-      final title = majorMatch.group(1)?.trim() ?? '大事件$eventIndex';
       result.add(
         OutlineChapter(
           outlineId: outlineId,
           eventIndex: eventIndex,
-          eventType: 'major',
-          eventTitle: title,
+          eventType: line.isMajor ? 'major' : 'minor',
+          eventTitle: line.title,
         ),
       );
       continue;
     }
-    if (trimmed.startsWith('══') && trimmed.endsWith('══')) {
-      continue;
-    }
-    // 小事件标题行：允许 ○ / - / • / * / · 等符号（模型输出不固定）、
-    // 编号为数字/占位符 X/中文数字/带圈数字，分隔符限定冒号避免误吞概要
-    final minorMatch = RegExp(
-      r'^\s*[○\-•*\·]?\s*(?:小事件|事件)\s*(?:[0-9Xx]|①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩|[一二三四五六七八九十]+)?\s*[：:]\s*(.+?)\s*$',
-    ).firstMatch(trimmed);
-    if (minorMatch != null) {
-      eventIndex++;
-      final title = minorMatch.group(1)?.trim() ?? '小事件$eventIndex';
-      result.add(
-        OutlineChapter(
-          outlineId: outlineId,
-          eventIndex: eventIndex,
-          eventType: 'minor',
-          eventTitle: title,
-        ),
-      );
-      continue;
-    }
+
+    // 幕标题与纯 ══ 装饰行：既不作为事件，也不并入上一事件的概要
+    if (line.isAct || line.kind == OutlineLineKind.decoration) continue;
+
     if (result.isNotEmpty &&
         trimmed.isNotEmpty &&
         !trimmed.startsWith('══') &&
         !trimmed.startsWith('○') &&
         !trimmed.startsWith('-')) {
-      // 跳过可能的幕标题（如「第一幕：开端」），避免污染上一事件概要
-      if (RegExp(r'^第[一二三四五六0-9]+幕').hasMatch(trimmed)) continue;
       final last = result.last;
       // 累积多行概要（模型输出的事件概述常为多行）
       final summary = last.eventSummary.isEmpty
