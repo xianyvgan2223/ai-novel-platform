@@ -11,6 +11,7 @@ library;
 import 'dart:async';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../../../core/db/database_helper.dart';
@@ -327,7 +328,10 @@ class SyncService {
       try {
         rows = await db.query(target.table);
       } catch (e) {
-        // 该表在本机不存在（例如老版本还没建）——跳过
+        // 该表在本机不存在（例如老版本还没建），或整表读取失败——跳过。
+        // 不要静默：像 outline_records 里有单行超过 Android CursorWindow 2 MB 上限时，
+        // 整张表会悄悄停止同步，这里把原因打出来。
+        debugPrint('[sync] 跳过表 ${target.db}.${target.table}：$e');
         report.skippedTables++;
         continue;
       }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../../shared/data/outline_chapter_db_helper.dart';
 import '../../../shared/data/outline_record_db_helper.dart';
 import '../../../shared/domain/outline_record.dart';
+import '../../../shared/outline_load_error_view.dart';
 import 'outline_edit_chapter_list_page.dart';
 
 /// 「大纲编辑」入口页：用小卡片网格列出「一键生成大纲」历史大纲里的每本小说。
@@ -20,6 +21,7 @@ class _OutlineEditNovelListPageState extends State<OutlineEditNovelListPage> {
   List<OutlineRecord> _records = [];
   Map<int, ({int total, int completed})> _stats = {};
   bool _loading = true;
+  Object? _error;
 
   @override
   void initState() {
@@ -28,18 +30,53 @@ class _OutlineEditNovelListPageState extends State<OutlineEditNovelListPage> {
   }
 
   Future<void> _load() async {
+    if (mounted) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
     try {
-      final rows = await OutlineRecordDbHelper().getAll();
+      // 列表只取小字段：带 content / skeleton 的 SELECT * 遇到超大行会抛
+      // "Row too big to fit into CursorWindow"（Android CursorWindow 仅 2 MB）。
+      final rows = await OutlineRecordDbHelper().getAllSummaries();
       _records = rows.map((m) => OutlineRecord.fromMap(m)).toList();
       try {
-        // 章节进度：一次分组查询取全部大纲的统计，避免逐本查库
+        // 章节进度：一次分组查询取全部大纲的统计，避免逐本查库。
+        // 它失败只影响进度显示，不该把整个列表判成空。
         _stats = await OutlineChapterDbHelper().getStatsByOutline();
-      } catch (_) {}
-    } catch (_) {}
+      } catch (e, st) {
+        debugPrint('[outline_edit_list] 加载章节进度失败：$e\n$st');
+        _stats = {};
+      }
+    } catch (e, st) {
+      debugPrint('[outline_edit_list] 加载大纲列表失败：$e\n$st');
+      _records = [];
+      _stats = {};
+      _error = e;
+    }
     if (mounted) setState(() => _loading = false);
   }
 
-  Future<void> _openNovel(OutlineRecord record) async {
+  /// 卡片上只有摘要（不含正文 / 骨架），点开时按 id 取完整记录。
+  Future<void> _openNovel(OutlineRecord summary) async {
+    final id = summary.id;
+    if (id == null) return;
+    final OutlineRecord record;
+    try {
+      final row = await OutlineRecordDbHelper().getById(id);
+      if (row == null) {
+        _showMessage('这部小说已不存在，可能已被删除');
+        await _load();
+        return;
+      }
+      record = OutlineRecord.fromMap(row);
+    } catch (e, st) {
+      debugPrint('[outline_edit_list] 读取大纲 id=$id 失败：$e\n$st');
+      _showMessage('读取大纲失败：$e');
+      return;
+    }
+    if (!mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => OutlineEditChapterListPage(outline: record),
@@ -47,6 +84,13 @@ class _OutlineEditNovelListPageState extends State<OutlineEditNovelListPage> {
     );
     // 返回后刷新：章节标题/概要或进度有改动时卡片信息同步
     if (mounted) await _load();
+  }
+
+  void _showMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -68,6 +112,8 @@ class _OutlineEditNovelListPageState extends State<OutlineEditNovelListPage> {
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
+          : _error != null
+          ? OutlineLoadErrorView(error: _error!, onRetry: _load)
           : _records.isEmpty
           ? const Center(
               child: Column(

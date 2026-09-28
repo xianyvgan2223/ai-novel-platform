@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../shared/domain/outline_record.dart';
 import '../../../shared/data/outline_record_db_helper.dart';
+import '../../../shared/outline_load_error_view.dart';
 import 'chapter_write_page.dart';
 
 /// 选择大纲 → 进入章节写作页面
@@ -14,6 +15,7 @@ class ChapterListPage extends StatefulWidget {
 class _ChapterListPageState extends State<ChapterListPage> {
   List<OutlineRecord> _records = [];
   bool _loading = true;
+  Object? _error;
 
   @override
   void initState() {
@@ -22,11 +24,53 @@ class _ChapterListPageState extends State<ChapterListPage> {
   }
 
   Future<void> _load() async {
+    if (mounted) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
     try {
-      final rows = await OutlineRecordDbHelper().getAll();
+      // 列表只取小字段：带 content / skeleton 的 SELECT * 遇到超大行会抛
+      // "Row too big to fit into CursorWindow"（Android CursorWindow 仅 2 MB）。
+      final rows = await OutlineRecordDbHelper().getAllSummaries();
       _records = rows.map((m) => OutlineRecord.fromMap(m)).toList();
-    } catch (_) {}
+    } catch (e, st) {
+      debugPrint('[chapter_list] 加载大纲列表失败：$e\n$st');
+      _records = [];
+      _error = e;
+    }
     if (mounted) setState(() => _loading = false);
+  }
+
+  /// 列表里只有摘要（不含正文 / 骨架），点开时按 id 取完整记录再进页面。
+  Future<void> _openOutline(OutlineRecord summary) async {
+    final id = summary.id;
+    if (id == null) return;
+    try {
+      final row = await OutlineRecordDbHelper().getById(id);
+      if (row == null) {
+        _showMessage('这条大纲已不存在，可能已被删除');
+        await _load();
+        return;
+      }
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ChapterWritePage(outline: OutlineRecord.fromMap(row)),
+        ),
+      );
+    } catch (e, st) {
+      debugPrint('[chapter_list] 读取大纲 id=$id 失败：$e\n$st');
+      _showMessage('读取大纲失败：$e');
+    }
+  }
+
+  void _showMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -46,6 +90,8 @@ class _ChapterListPageState extends State<ChapterListPage> {
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
+          : _error != null
+          ? OutlineLoadErrorView(error: _error!, onRetry: _load)
           : _records.isEmpty
               ? const Center(
                   child: Column(
@@ -69,13 +115,7 @@ class _ChapterListPageState extends State<ChapterListPage> {
                     final r = _records[index];
                     return _OutlineTile(
                       record: r,
-                      onTap: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => ChapterWritePage(outline: r),
-                          ),
-                        );
-                      },
+                      onTap: () => _openOutline(r),
                     );
                   },
                 ),

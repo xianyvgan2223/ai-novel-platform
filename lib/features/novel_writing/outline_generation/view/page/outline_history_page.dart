@@ -3,6 +3,7 @@ import 'package:flutter/cupertino.dart';
 import '../../../shared/dialog_utils.dart';
 import '../../../shared/domain/outline_record.dart';
 import '../../../shared/data/outline_record_db_helper.dart';
+import '../../../shared/outline_load_error_view.dart';
 import 'outline_generation_page.dart';
 
 /// 历史生成大纲列表页面
@@ -16,6 +17,7 @@ class OutlineHistoryPage extends StatefulWidget {
 class _OutlineHistoryPageState extends State<OutlineHistoryPage> {
   List<OutlineRecord> _records = [];
   bool _loading = true;
+  Object? _error;
 
   @override
   void initState() {
@@ -24,10 +26,22 @@ class _OutlineHistoryPageState extends State<OutlineHistoryPage> {
   }
 
   Future<void> _load() async {
+    if (mounted) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
     try {
-      final rows = await OutlineRecordDbHelper().getAll();
+      // 列表只取小字段：带 content / skeleton 的 SELECT * 遇到超大行会抛
+      // "Row too big to fit into CursorWindow"（Android CursorWindow 仅 2 MB）。
+      final rows = await OutlineRecordDbHelper().getAllSummaries();
       _records = rows.map((m) => OutlineRecord.fromMap(m)).toList();
-    } catch (_) {}
+    } catch (e, st) {
+      debugPrint('[outline_history] 加载大纲列表失败：$e\n$st');
+      _records = [];
+      _error = e;
+    }
     if (mounted) setState(() => _loading = false);
   }
 
@@ -55,6 +69,8 @@ class _OutlineHistoryPageState extends State<OutlineHistoryPage> {
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
+          : _error != null
+          ? OutlineLoadErrorView(error: _error!, onRetry: _load)
           : _records.isEmpty
           ? const Center(
               child: Text(
@@ -100,12 +116,37 @@ class _OutlineHistoryPageState extends State<OutlineHistoryPage> {
     );
   }
 
-  void _showDetail(OutlineRecord r) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => _OutlineEditPage(record: r, onSaved: _load),
-      ),
-    );
+  /// 列表里只有摘要（不含正文 / 骨架），点开时按 id 取完整记录。
+  Future<void> _showDetail(OutlineRecord summary) async {
+    final id = summary.id;
+    if (id == null) return;
+    try {
+      final row = await OutlineRecordDbHelper().getById(id);
+      if (row == null) {
+        _showMessage('这条大纲已不存在，可能已被删除');
+        await _load();
+        return;
+      }
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => _OutlineEditPage(
+            record: OutlineRecord.fromMap(row),
+            onSaved: _load,
+          ),
+        ),
+      );
+    } catch (e, st) {
+      debugPrint('[outline_history] 读取大纲 id=$id 失败：$e\n$st');
+      _showMessage('读取大纲失败：$e');
+    }
+  }
+
+  void _showMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   Widget _infoRow(String label, String value) {

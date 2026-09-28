@@ -109,8 +109,9 @@ class OutlineEditController extends ChangeNotifier {
         if (content.isNotEmpty) outlineContent = content;
       }
       _safeNotify();
-    } catch (_) {
-      // 读取失败不影响编辑，沿用进入页面时的快照
+    } catch (e, st) {
+      // 读取失败不影响编辑，沿用进入页面时的快照；但不静默，便于排查
+      debugPrint('[outline_edit] 读取大纲上下文失败：$e\n$st');
     }
   }
 

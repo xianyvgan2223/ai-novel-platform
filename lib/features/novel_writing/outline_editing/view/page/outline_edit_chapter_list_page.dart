@@ -3,6 +3,7 @@ import '../../../shared/data/outline_chapter_db_helper.dart';
 import '../../../shared/domain/outline_chapter.dart';
 import '../../../shared/domain/outline_record.dart';
 import '../../../shared/outline_chapter_sync.dart';
+import '../../../shared/outline_load_error_view.dart';
 import 'outline_edit_page.dart';
 
 /// 「大纲编辑」章节选择页。
@@ -25,6 +26,7 @@ class _OutlineEditChapterListPageState
   List<OutlineChapter> _chapters = [];
   final Set<int> _selected = {};
   bool _loading = true;
+  Object? _error;
 
   @override
   void initState() {
@@ -38,6 +40,12 @@ class _OutlineEditChapterListPageState
       if (mounted) setState(() => _loading = false);
       return;
     }
+    if (mounted) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
     try {
       // 与「大纲转章节」共用同一套无损校正（shared/outline_chapter_sync.dart）：
       // 首次进入按大纲正文解析入库；之后进入则按最新正文校正结构。
@@ -50,7 +58,12 @@ class _OutlineEditChapterListPageState
       final rows = await OutlineChapterDbHelper().getByOutlineId(id);
       _chapters = rows.map((m) => OutlineChapter.fromMap(m)).toList();
       _selected.removeWhere((sid) => !_chapters.any((c) => c.id == sid));
-    } catch (_) {}
+    } catch (e, st) {
+      // 结构校正或读取失败：以前静默吞掉，界面会误显示「没有可编辑的章节」
+      debugPrint('[outline_edit_chapters] 加载章节失败 outline=$id：$e\n$st');
+      _chapters = [];
+      _error = e;
+    }
     if (mounted) setState(() => _loading = false);
   }
 
@@ -119,6 +132,8 @@ class _OutlineEditChapterListPageState
       bottomNavigationBar: _loading ? null : _buildBottomBar(),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
+          : _error != null
+          ? OutlineLoadErrorView(error: _error!, onRetry: _load)
           : _chapters.isEmpty
           ? const Center(
               child: Text(
