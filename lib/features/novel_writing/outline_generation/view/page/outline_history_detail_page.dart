@@ -3,186 +3,31 @@ import 'package:flutter/cupertino.dart';
 import '../../../shared/dialog_utils.dart';
 import '../../../shared/domain/outline_record.dart';
 import '../../../shared/data/outline_record_db_helper.dart';
-import '../../../shared/outline_load_error_view.dart';
 import 'outline_generation_page.dart';
 
-/// 历史生成大纲列表页面
-class OutlineHistoryPage extends StatefulWidget {
-  const OutlineHistoryPage({super.key});
-
-  @override
-  State<OutlineHistoryPage> createState() => _OutlineHistoryPageState();
-}
-
-class _OutlineHistoryPageState extends State<OutlineHistoryPage> {
-  List<OutlineRecord> _records = [];
-  bool _loading = true;
-  Object? _error;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    if (mounted) {
-      setState(() {
-        _loading = true;
-        _error = null;
-      });
-    }
-    try {
-      // 列表只取小字段：带 content / skeleton 的 SELECT * 遇到超大行会抛
-      // "Row too big to fit into CursorWindow"（Android CursorWindow 仅 2 MB）。
-      final rows = await OutlineRecordDbHelper().getAllSummaries();
-      _records = rows.map((m) => OutlineRecord.fromMap(m)).toList();
-    } catch (e, st) {
-      debugPrint('[outline_history] 加载大纲列表失败：$e\n$st');
-      _records = [];
-      _error = e;
-    }
-    if (mounted) setState(() => _loading = false);
-  }
-
-  Future<void> _delete(int id) async {
-    await OutlineRecordDbHelper().delete(id);
-    await _load();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        title: const Text(
-          '历史大纲',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-        ),
-        backgroundColor: Colors.white,
-        elevation: 0.5,
-        centerTitle: true,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Color(0xFF333333)),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-      ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _error != null
-          ? OutlineLoadErrorView(error: _error!, onRetry: _load)
-          : _records.isEmpty
-          ? const Center(
-              child: Text(
-                '暂无大纲记录',
-                style: TextStyle(fontSize: 14, color: Color(0xFF999999)),
-              ),
-            )
-          : ListView.separated(
-              padding: const EdgeInsets.all(16),
-              itemCount: _records.length,
-              separatorBuilder: (_, __) => const Divider(height: 1),
-              itemBuilder: (context, index) {
-                final r = _records[index];
-                return _RecordTile(
-                  record: r,
-                  onTap: () => _showDetail(r),
-                  onDelete: () async {
-                    final ok = await showDialog<bool>(
-                      context: context,
-                      builder: (ctx) => AlertDialog(
-                        title: const Text('确认删除'),
-                        content: Text('确定要删除「${r.title}」吗？'),
-                        actions: [
-                          TextButton(
-                            onPressed: () => closeDialogSafely(ctx, result: false),
-                            child: const Text('取消'),
-                          ),
-                          TextButton(
-                            onPressed: () => closeDialogSafely(ctx, result: true),
-                            style: TextButton.styleFrom(
-                              foregroundColor: Colors.red,
-                            ),
-                            child: const Text('删除'),
-                          ),
-                        ],
-                      ),
-                    );
-                    if (ok == true) _delete(r.id!);
-                  },
-                );
-              },
-            ),
-    );
-  }
-
-  /// 列表里只有摘要（不含正文 / 骨架），点开时按 id 取完整记录。
-  Future<void> _showDetail(OutlineRecord summary) async {
-    final id = summary.id;
-    if (id == null) return;
-    try {
-      final row = await OutlineRecordDbHelper().getById(id);
-      if (row == null) {
-        _showMessage('这条大纲已不存在，可能已被删除');
-        await _load();
-        return;
-      }
-      if (!mounted) return;
-      await Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => _OutlineEditPage(
-            record: OutlineRecord.fromMap(row),
-            onSaved: _load,
-          ),
-        ),
-      );
-    } catch (e, st) {
-      debugPrint('[outline_history] 读取大纲 id=$id 失败：$e\n$st');
-      _showMessage('读取大纲失败：$e');
-    }
-  }
-
-  void _showMessage(String message) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
-  }
-
-  Widget _infoRow(String label, String value) {
-    if (value.isEmpty) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: Row(
-        children: [
-          Text(
-            '$label：',
-            style: const TextStyle(fontSize: 13, color: Color(0xFF999999)),
-          ),
-          Expanded(
-            child: Text(
-              value,
-              style: const TextStyle(fontSize: 13, color: Color(0xFF333333)),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// 大纲编辑页面（独立 StatefulWidget，正确管理控制器生命周期）
-class _OutlineEditPage extends StatefulWidget {
+/// 历史大纲详情页（独立 StatefulWidget，正确管理控制器生命周期）。
+///
+/// 由「选择大纲」页（OutlineEditNovelListPage）点卡片进入：展示并可编辑这条
+/// 历史大纲的正文与小说设定，同时提供「重新生成大纲 / 编辑粗骨 / 编辑大事件 /
+/// 继续生成」入口；这些操作都另存为新大纲，不覆盖原记录。
+class OutlineHistoryDetailPage extends StatefulWidget {
   final OutlineRecord record;
-  final VoidCallback onSaved;
 
-  const _OutlineEditPage({required this.record, required this.onSaved});
+  /// 保存后的回调（可选）：调用方需要在列表页同步刷新时传入。
+  final VoidCallback? onSaved;
+
+  const OutlineHistoryDetailPage({
+    super.key,
+    required this.record,
+    this.onSaved,
+  });
 
   @override
-  State<_OutlineEditPage> createState() => _OutlineEditPageState();
+  State<OutlineHistoryDetailPage> createState() =>
+      _OutlineHistoryDetailPageState();
 }
 
-class _OutlineEditPageState extends State<_OutlineEditPage> {
+class _OutlineHistoryDetailPageState extends State<OutlineHistoryDetailPage> {
   // 长文本按行拆分为多个小 TextField：单 TextField 承载几万字内容时，
   // 每次按键都会全量重排整份文本，主线程卡死被系统杀死（表现为输入闪退）。
   // 按行拆分后每次输入只重排当前行（几十字），并利用 ListView 虚拟化。
@@ -384,7 +229,7 @@ class _OutlineEditPageState extends State<_OutlineEditPage> {
         ),
       ),
     );
-    widget.onSaved();
+    widget.onSaved?.call();
   }
 
   /// 局部重新生成：进入「编辑粗骨/大事件」检查点，仅重写对应下游内容，
@@ -399,7 +244,7 @@ class _OutlineEditPageState extends State<_OutlineEditPage> {
         ),
       ),
     );
-    widget.onSaved();
+    widget.onSaved?.call();
   }
 
   /// 继续生成未完成大纲：从未完成的小事件展开块继续生成，结果另存为新记录。
@@ -413,7 +258,7 @@ class _OutlineEditPageState extends State<_OutlineEditPage> {
         ),
       ),
     );
-    widget.onSaved();
+    widget.onSaved?.call();
   }
 
   /// 内容或设定是否有未保存的修改
@@ -482,7 +327,7 @@ class _OutlineEditPageState extends State<_OutlineEditPage> {
       'worldview': _worldviewCtrl.text.trim(),
     });
     // 注意：不再在保存时自动提炼伏笔清单——改为剧情账本页手动「重新提炼」触发
-    widget.onSaved();
+    widget.onSaved?.call();
     if (mounted) {
       ScaffoldMessenger.of(
         context,
@@ -785,75 +630,6 @@ class _OutlineEditPageState extends State<_OutlineEditPage> {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _RecordTile extends StatelessWidget {
-  final OutlineRecord record;
-  final VoidCallback onTap;
-  final VoidCallback onDelete;
-
-  const _RecordTile({
-    required this.record,
-    required this.onTap,
-    required this.onDelete,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    record.title.isNotEmpty ? record.title : '未命名大纲',
-                    style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF333333),
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '${record.genre} · ${record.protagonist}',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: Color(0xFF999999),
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    record.formattedDate,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: Color(0xFFBBBBBB),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            IconButton(
-              icon: const Icon(
-                Icons.delete_outline,
-                size: 20,
-                color: Color(0xFFCCCCCC),
-              ),
-              onPressed: onDelete,
-            ),
-          ],
-        ),
       ),
     );
   }

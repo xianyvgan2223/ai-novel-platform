@@ -1,16 +1,47 @@
 import 'package:flutter/material.dart';
+import '../../../shared/dialog_utils.dart';
 import '../../../shared/data/outline_chapter_db_helper.dart';
 import '../../../shared/data/outline_record_db_helper.dart';
 import '../../../shared/domain/outline_record.dart';
 import '../../../shared/outline_load_error_view.dart';
 import 'outline_edit_chapter_list_page.dart';
 
-/// 「大纲编辑」入口页：用小卡片网格列出「一键生成大纲」历史大纲里的每本小说。
+/// 通用的「选择大纲」入口页：用小卡片网格列出「一键生成大纲」历史大纲里的
+/// 每本小说。
 ///
 /// 数据源与「历史大纲」页一致（outline_records 表）；卡片上带章节进度
-/// （章节总数 / 已完成数，来自 outline_chapters 分组统计），点击卡片进入章节选择。
+/// （章节总数 / 已完成数，来自 outline_chapters 分组统计）。
+/// 「大纲编辑」「大纲转章节」「一键生成大纲」历史入口共用此页，只有点开
+/// 卡片后的去向不同（见 [onOpenNovel]）。
 class OutlineEditNovelListPage extends StatefulWidget {
-  const OutlineEditNovelListPage({super.key});
+  /// 页面标题（三个入口只在这里区分）
+  final String title;
+
+  /// 列表顶部统计条上的提示语
+  final String hint;
+
+  /// 空列表时的标题与说明
+  final String emptyTitle;
+  final String emptyHint;
+
+  /// 点卡片后的去向；为 null 时进入「大纲编辑」的章节选择页。
+  /// 回调返回后列表会自动刷新，章节标题 / 进度改动能同步到卡片。
+  final Future<void> Function(BuildContext context, OutlineRecord outline)?
+  onOpenNovel;
+
+  /// 是否允许长按卡片删除这条大纲（带确认弹窗）。
+  /// 只有「一键生成大纲」的历史入口开启，保持旧「历史大纲」列表页的删除能力。
+  final bool allowDelete;
+
+  const OutlineEditNovelListPage({
+    super.key,
+    this.title = '大纲编辑',
+    this.hint = '点卡片选择章节编辑',
+    this.emptyTitle = '还没有可编辑的小说',
+    this.emptyHint = '请先在「一键生成大纲」中创建',
+    this.onOpenNovel,
+    this.allowDelete = false,
+  });
 
   @override
   State<OutlineEditNovelListPage> createState() =>
@@ -77,13 +108,52 @@ class _OutlineEditNovelListPageState extends State<OutlineEditNovelListPage> {
       return;
     }
     if (!mounted) return;
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => OutlineEditChapterListPage(outline: record),
-      ),
-    );
+    final open = widget.onOpenNovel;
+    if (open != null) {
+      await open(context, record);
+    } else {
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => OutlineEditChapterListPage(outline: record),
+        ),
+      );
+    }
     // 返回后刷新：章节标题/概要或进度有改动时卡片信息同步
     if (mounted) await _load();
+  }
+
+  /// 长按卡片删除这条大纲记录（删除后无法恢复，仅历史入口开启）
+  Future<void> _confirmDelete(OutlineRecord summary) async {
+    final id = summary.id;
+    if (id == null) return;
+    final title = summary.title.isNotEmpty ? summary.title : '未命名大纲';
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('确认删除'),
+        content: Text('确定要删除「$title」吗？删除后无法恢复。'),
+        actions: [
+          TextButton(
+            onPressed: () => closeDialogSafely(ctx, result: false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => closeDialogSafely(ctx, result: true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await OutlineRecordDbHelper().delete(id);
+      _showMessage('已删除「$title」');
+    } catch (e, st) {
+      debugPrint('[outline_edit_list] 删除大纲 id=$id 失败：$e\n$st');
+      _showMessage('删除失败：$e');
+    }
+    await _load();
   }
 
   void _showMessage(String message) {
@@ -98,9 +168,9 @@ class _OutlineEditNovelListPageState extends State<OutlineEditNovelListPage> {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        title: const Text(
-          '大纲编辑',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+        title: Text(
+          widget.title,
+          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
         ),
         backgroundColor: Colors.white,
         elevation: 0.5,
@@ -115,24 +185,30 @@ class _OutlineEditNovelListPageState extends State<OutlineEditNovelListPage> {
           : _error != null
           ? OutlineLoadErrorView(error: _error!, onRetry: _load)
           : _records.isEmpty
-          ? const Center(
+          ? Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(
+                  const Icon(
                     Icons.auto_stories,
                     size: 64,
                     color: Color(0xFFCCCCCC),
                   ),
-                  SizedBox(height: 16),
+                  const SizedBox(height: 16),
                   Text(
-                    '还没有可编辑的小说',
-                    style: TextStyle(fontSize: 14, color: Color(0xFF999999)),
+                    widget.emptyTitle,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      color: Color(0xFF999999),
+                    ),
                   ),
-                  SizedBox(height: 8),
+                  const SizedBox(height: 8),
                   Text(
-                    '请先在「一键生成大纲」中创建',
-                    style: TextStyle(fontSize: 12, color: Color(0xFFBBBBBB)),
+                    widget.emptyHint,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Color(0xFFBBBBBB),
+                    ),
                   ),
                 ],
               ),
@@ -147,7 +223,8 @@ class _OutlineEditNovelListPageState extends State<OutlineEditNovelListPage> {
                   ),
                   color: const Color(0xFFF8F9FF),
                   child: Text(
-                    '共 ${_records.length} 部小说 · 点卡片选择章节编辑',
+                    '共 ${_records.length} 部小说 · ${widget.hint}'
+                    '${widget.allowDelete ? ' · 长按卡片删除' : ''}',
                     style: const TextStyle(
                       fontSize: 12,
                       color: Color(0xFF666666),
@@ -175,6 +252,9 @@ class _OutlineEditNovelListPageState extends State<OutlineEditNovelListPage> {
                           record: r,
                           stat: r.id == null ? null : _stats[r.id!],
                           onTap: () => _openNovel(r),
+                          onLongPress: widget.allowDelete
+                              ? () => _confirmDelete(r)
+                              : null,
                         );
                       },
                     ),
@@ -192,10 +272,14 @@ class _OutlineCard extends StatelessWidget {
   final ({int total, int completed})? stat;
   final VoidCallback onTap;
 
+  /// 长按回调（为 null 时不响应长按）
+  final VoidCallback? onLongPress;
+
   const _OutlineCard({
     required this.record,
     required this.stat,
     required this.onTap,
+    this.onLongPress,
   });
 
   @override
@@ -211,6 +295,7 @@ class _OutlineCard extends StatelessWidget {
       borderRadius: BorderRadius.circular(10),
       child: InkWell(
         onTap: onTap,
+        onLongPress: onLongPress,
         borderRadius: BorderRadius.circular(10),
         child: Container(
           padding: const EdgeInsets.all(10),

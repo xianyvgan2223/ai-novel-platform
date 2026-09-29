@@ -5,7 +5,7 @@ import '../../controller/outline_controller.dart';
 import '../../../shared/dialog_utils.dart';
 import '../../../shared/domain/outline_record.dart';
 import 'outline_setting_page.dart';
-import 'outline_history_page.dart';
+import 'outline_history_list_page.dart';
 
 /// 一键生成小说大纲页面（流式输出）
 class OutlineGenerationPage extends StatefulWidget {
@@ -265,7 +265,7 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
             icon: const Icon(Icons.history, color: Color(0xFF4D6BFE)),
             tooltip: '历史大纲',
             onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const OutlineHistoryPage()),
+              MaterialPageRoute(builder: (_) => const OutlineHistoryListPage()),
             ),
           ),
           IconButton(
