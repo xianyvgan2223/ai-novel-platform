@@ -13,9 +13,9 @@ import '../widget/outline_ai_chat_sheet.dart';
 /// 卡片右上角「AI 生成」按章节唤起 AI 对话面板，生成结果可替换 / 追加概要或替换标题，
 /// 底部一次保存全部改动。
 ///
-/// 结构也能改：顶栏「添加事件」在末尾续一个大 / 小事件，卡片右上角的「＋」
-/// 在该条之后插入一个事件，「🗑」删除该事件。增删同时落在大纲正文与章节行上，
-/// 保存时一起生效（见 OutlineEditController.addEvent / deleteEvent）。
+/// 结构也能改：卡片右上角的「＋」是**唯一**的新增入口，点它先选加在这一条的
+/// 上方还是下方，再选大事件 / 小事件；「🗑」删除该事件。增删同时落在大纲正文
+/// 与章节行上，保存时一起生效（见 OutlineEditController.addEvent / deleteEvent）。
 class OutlineEditPage extends StatefulWidget {
   final OutlineRecord outline;
   final List<OutlineChapter> chapters;
@@ -162,6 +162,84 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
     );
   }
 
+  /// 选择插入位置：加在 [draft] 的上方还是下方
+  Future<bool?> _pickPosition(OutlineEditDraft draft) {
+    final subject = draft.title.isEmpty ? '当前事件' : '「${draft.title}」';
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('添加事件'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _positionOption(
+              ctx,
+              above: true,
+              title: '在$subject上方添加',
+            ),
+            _positionOption(
+              ctx,
+              above: false,
+              title: '在$subject下方添加',
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => closeDialogSafely(ctx, result: null),
+            child: const Text('取消'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _positionOption(
+    BuildContext ctx, {
+    required bool above,
+    required String title,
+  }) {
+    return InkWell(
+      onTap: () => closeDialogSafely(ctx, result: above),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: Row(
+          children: [
+            Icon(
+              above ? Icons.vertical_align_top : Icons.vertical_align_bottom,
+              size: 18,
+              color: const Color(0xFF4D6BFE),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF333333),
+                    ),
+                  ),
+                  Text(
+                    above ? '排在它前面' : '排在它后面',
+                    style: const TextStyle(
+                      fontSize: 10,
+                      height: 1.4,
+                      color: Color(0xFF999999),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   /// 选择要插入的事件类型：大事件（结构节点）还是小事件（章节）
   Future<bool?> _pickEventType({required bool majorFirst}) {
     return showDialog<bool>(
@@ -249,26 +327,54 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
     );
   }
 
-  /// 添加事件（[at] 为插入位置，末尾追加时等于卡片数）。
+  /// 添加事件：先问加在 [draft] 的上方还是下方，再问类型是大事件还是小事件，
+  /// 选完两步才真的插入。
   ///
+  /// [draft] 为 null（页面上一条事件都没有）时不问位置，那条只可能是第一条。
+  /// 两步都选完才动结构：中途点「取消」页面上什么都不会多出来，
+  /// 不会留下一条半成品卡片要用户自己删。
   /// 默认类型跟着插入点走：接在小事件后面默认还是小事件，
   /// 接在大事件后面 / 追加到末尾默认是大事件。
-  Future<void> _addEvent(int at) async {
-    final majorFirst = at <= 0 || _controller.drafts[at - 1].isMajor;
+  Future<void> _addEvent(OutlineEditDraft? draft) async {
+    var at = _controller.drafts.length;
+    var above = false;
+    if (draft != null) {
+      final idx = _indexOfDraft(draft);
+      if (idx < 0) return; // 卡片已被撤销掉，不再往下走
+      final picked = await _pickPosition(draft);
+      if (picked == null || !mounted) return;
+      at = idx;
+      above = picked;
+    }
+    // 弹窗期间点顶栏「撤销 / 反撤销」可能把卡片加回来或撤掉，
+    // 插入点按当前列表夹一次，序号不会越界
+    final index = (above ? at : at + 1).clamp(0, _controller.drafts.length);
+
+    final majorFirst = index <= 0 || _controller.drafts[index - 1].isMajor;
     final isMajor = await _pickEventType(majorFirst: majorFirst);
     if (isMajor == null || !mounted) return;
-    final localId = _controller.addEvent(index: at, isMajor: isMajor);
+
+    final localId = _controller.addEvent(index: index, isMajor: isMajor);
     if (!mounted) return;
+    final where = draft == null ? '末尾' : (above ? '上方' : '下方');
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          '已添加${isMajor ? '大事件' : '小事件'}，可直接改标题；保存后生效',
+          '已在$where添加${isMajor ? "大事件" : "小事件"}，可直接改标题；保存后生效',
         ),
         duration: const Duration(seconds: 1),
       ),
     );
     await _scrollToDraft(localId);
   }
+
+  /// 草稿在列表里的下标；卡片已被撤销掉时返回 -1（此时不再往下走）。
+  ///
+  /// 按**局部 id** 认卡片：撤销 / 反撤销是按快照重建列表的，
+  /// 同一个事件在界面上是同一张卡片、但对象实例可能已经换了一个，
+  /// 用对象相等去找会找不到（`indexOf` 找不到就静默不插入）。
+  int _indexOfDraft(OutlineEditDraft draft) =>
+      _controller.drafts.indexWhere((d) => d.localId == draft.localId);
 
   /// 删除事件：先按控制器给出的「影响面」如实告知，确认后才删
   Future<void> _deleteEvent(OutlineEditDraft draft) async {
@@ -349,7 +455,7 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
   }
 
   /// 没有可编辑章节时的兜底：仍然允许「添加事件」，否则一卷大纲都没解析出来时
-  /// 连一条都建不了，只能回上一页
+  /// 连一条都建不了，只能回上一页。这时没有「上一条」可选，直接追加成第一条。
   Widget _buildEmptyBody() {
     return Center(
       child: Column(
@@ -361,7 +467,7 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
           ),
           const SizedBox(height: 10),
           OutlinedButton.icon(
-            onPressed: () => _addEvent(0),
+            onPressed: () => _addEvent(null),
             icon: const Icon(Icons.add, size: 16),
             label: const Text('添加一个大事件'),
             style: OutlinedButton.styleFrom(
@@ -376,44 +482,23 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
   }
 
   PreferredSizeWidget _buildAppBar() {
-    final count = _controller.drafts.length;
     return AppBar(
       backgroundColor: Colors.white,
       elevation: 0.5,
-      centerTitle: true,
-      title: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            _novelTitle,
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          Text(
-            '大纲编辑 · $count 章',
-            style: const TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w400,
-              color: Color(0xFF999999),
-            ),
-          ),
-        ],
+      // 标题**左对齐**（不用 centerTitle）：右侧有撤销 / 反撤销 / 保存
+      // 三个操作项，居中标题只剩很窄的可用宽度，连「大纲编辑」四个字都会被
+      // 截成「大纲…」，更别说原先塞在这里的小说名了。
+      // 小说名移到下方页面条整行显示。
+      titleSpacing: 0,
+      title: const Text(
+        '大纲编辑',
+        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
       ),
       leading: IconButton(
         icon: const Icon(Icons.arrow_back, color: Color(0xFF333333)),
         onPressed: _handleExit,
       ),
       actions: [
-        IconButton(
-          icon: const Icon(Icons.add, size: 20),
-          color: const Color(0xFF4D6BFE),
-          disabledColor: const Color(0xFFCCCCCC),
-          tooltip: '在末尾添加事件',
-          onPressed: _controller.saving
-              ? null
-              : () => _addEvent(_controller.drafts.length),
-        ),
         IconButton(
           icon: const Icon(Icons.undo, size: 20),
           color: const Color(0xFF4D6BFE),
@@ -453,13 +538,36 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
     final drafts = _controller.drafts;
     return Column(
       children: [
+        // 页面条：整行显示小说名 + 本章事件数（标题栏放不下长书名）。
+        // 「改哪里」的说明（只改标题与概要）已经去掉：标题栏里的输入框本身
+        // 就写着「事件标题 / 事件概要」，再挂一行提示只是白占高度。
         Container(
           width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
           color: const Color(0xFFF8F9FF),
-          child: const Text(
-            '只编辑事件标题与事件概要，不改动已写正文；卡片右上角可插入 / 删除事件，顶栏「＋」在末尾追加',
-            style: TextStyle(fontSize: 12, color: Color(0xFF666666)),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  _novelTitle,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF333333),
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '${drafts.length} 个事件',
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: Color(0xFF999999),
+                ),
+              ),
+            ],
           ),
         ),
         Expanded(
@@ -475,13 +583,20 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
     );
   }
 
-  /// 单章大纲卡片：类型 + 正文状态 + 序号 + 插入 / 删除 / AI 入口 + 标题 + 概要
+  /// 单章大纲卡片。
+  ///
+  /// 版面顺序：**标题与「＋ / 🗑 / AI 生成」同一行** → 类型标签与状态 → 概要。
+  ///
+  /// 为什么改：原先操作按钮独占卡片最上面一行，标题在它下面。概要有长有短时，
+  /// 那张「按钮条」跟它管的那条标题会被拉开很远，连着几张卡片看下来就是一排
+  /// 悬空的 ＋🗑——分不清点的是哪一条，删除这种破坏性操作尤其危险。
+  /// 现在按钮贴在标题行右侧，指哪打哪。
   Widget _buildDraftCard(int index, OutlineEditDraft draft) {
     final key = _cardKeys.putIfAbsent(draft.localId, () => GlobalKey());
     return Container(
       key: key,
       margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
+      padding: const EdgeInsets.fromLTRB(12, 8, 8, 10),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(10),
@@ -494,63 +609,39 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // 标题 + 操作：同一行，按钮紧跟标题，不再悬空
           Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              EventTypeTag(
-                isMajor: draft.isMajor,
-                majorNumber: _controller.majorNumberOfDraft(draft),
-                background: draft.isMajor
-                    ? const Color(0xFF4D6BFE)
-                    : const Color(0xFFEFF3FF),
-                foreground: draft.isMajor
-                    ? Colors.white
-                    : const Color(0xFF4D6BFE),
-              ),
-              // 大事件的序号已经在标签里（大事件57），这张卡上不再重复显示
-              // 「本批第几张」；小事件没有别的编号，保留原来的小数字
-              if (!draft.isMajor) ...[
-                const SizedBox(width: 6),
-                Text(
-                  '${index + 1}',
+              Expanded(
+                child: TextField(
+                  controller: draft.titleCtrl,
+                  decoration: const InputDecoration(
+                    hintText: '事件标题',
+                    hintStyle: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFFBBBBBB),
+                    ),
+                    isDense: true,
+                    border: InputBorder.none,
+                    contentPadding: EdgeInsets.zero,
+                  ),
                   style: const TextStyle(
-                    fontSize: 11,
+                    fontSize: 14,
                     fontWeight: FontWeight.w600,
-                    color: Color(0xFF999999),
+                    color: Color(0xFF333333),
                   ),
                 ),
-              ],
-              const SizedBox(width: 6),
-              Text(
-                draft.hasContent ? '已写正文' : '未写正文',
-                style: TextStyle(
-                  fontSize: 10,
-                  color: draft.hasContent
-                      ? const Color(0xFF4CAF50)
-                      : const Color(0xFFBBBBBB),
-                ),
               ),
-              if (draft.isNew) ...[
-                const SizedBox(width: 6),
-                const Text(
-                  '新增',
-                  style: TextStyle(fontSize: 10, color: Color(0xFF4D6BFE)),
-                ),
-              ],
-              if (draft.isDirty) ...[
-                const SizedBox(width: 6),
-                const Text(
-                  '已修改',
-                  style: TextStyle(fontSize: 10, color: Color(0xFFFF9800)),
-                ),
-              ],
-              const Spacer(),
+              const SizedBox(width: 6),
               _cardAction(
                 icon: Icons.add,
-                tooltip: '在它后面插入事件',
+                tooltip: '在它上方 / 下方添加事件',
                 color: const Color(0xFF4D6BFE),
                 onPressed: _controller.saving
                     ? null
-                    : () => _addEvent(index + 1),
+                    : () => _addEvent(draft),
               ),
               _cardAction(
                 icon: Icons.delete_outline,
@@ -577,46 +668,85 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
               ),
             ],
           ),
-          TextField(
-            controller: draft.titleCtrl,
-            decoration: const InputDecoration(
-              hintText: '事件标题',
-              hintStyle: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: Color(0xFFBBBBBB),
-              ),
-              isDense: true,
-              border: InputBorder.none,
-              contentPadding: EdgeInsets.zero,
-            ),
-            style: const TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: Color(0xFF333333),
+          const SizedBox(height: 2),
+          // 类型标签与状态：放在标题下面，作为这条大纲的属性说明
+          Padding(
+            padding: const EdgeInsets.only(right: 4),
+            child: Row(
+              children: [
+                EventTypeTag(
+                  isMajor: draft.isMajor,
+                  majorNumber: _controller.majorNumberOfDraft(draft),
+                  background: draft.isMajor
+                      ? const Color(0xFF4D6BFE)
+                      : const Color(0xFFEFF3FF),
+                  foreground: draft.isMajor
+                      ? Colors.white
+                      : const Color(0xFF4D6BFE),
+                ),
+                // 大事件的序号已经在标签里（大事件57）；小事件给个「第N节」，
+                // 光一个数字看不出那是什么编号
+                if (!draft.isMajor) ...[
+                  const SizedBox(width: 5),
+                  Text(
+                    '第 ${index + 1} 节',
+                    style: const TextStyle(
+                      fontSize: 10,
+                      color: Color(0xFF999999),
+                    ),
+                  ),
+                ],
+                const SizedBox(width: 6),
+                Text(
+                  draft.hasContent ? '已写正文' : '未写正文',
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: draft.hasContent
+                        ? const Color(0xFF4CAF50)
+                        : const Color(0xFFBBBBBB),
+                  ),
+                ),
+                if (draft.isNew) ...[
+                  const SizedBox(width: 6),
+                  const Text(
+                    '新增',
+                    style: TextStyle(fontSize: 10, color: Color(0xFF4D6BFE)),
+                  ),
+                ],
+                if (draft.isDirty) ...[
+                  const SizedBox(width: 6),
+                  const Text(
+                    '已修改',
+                    style: TextStyle(fontSize: 10, color: Color(0xFFFF9800)),
+                  ),
+                ],
+              ],
             ),
           ),
           const SizedBox(height: 4),
-          TextField(
-            controller: draft.summaryCtrl,
-            minLines: 2,
-            maxLines: null,
-            keyboardType: TextInputType.multiline,
-            decoration: const InputDecoration(
-              hintText: '事件概要（大纲内容）',
-              hintStyle: TextStyle(
-                fontSize: 12,
-                height: 1.6,
-                color: Color(0xFFBBBBBB),
+          Padding(
+            padding: const EdgeInsets.only(right: 4),
+            child: TextField(
+              controller: draft.summaryCtrl,
+              minLines: 2,
+              maxLines: null,
+              keyboardType: TextInputType.multiline,
+              decoration: const InputDecoration(
+                hintText: '事件概要（大纲内容）',
+                hintStyle: TextStyle(
+                  fontSize: 12,
+                  height: 1.6,
+                  color: Color(0xFFBBBBBB),
+                ),
+                isDense: true,
+                border: InputBorder.none,
+                contentPadding: EdgeInsets.zero,
               ),
-              isDense: true,
-              border: InputBorder.none,
-              contentPadding: EdgeInsets.zero,
-            ),
-            style: const TextStyle(
-              fontSize: 12.5,
-              height: 1.6,
-              color: Color(0xFF666666),
+              style: const TextStyle(
+                fontSize: 12.5,
+                height: 1.6,
+                color: Color(0xFF666666),
+              ),
             ),
           ),
         ],
@@ -624,7 +754,7 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
     );
   }
 
-  /// 卡片头部的小图标按钮（插入 / 删除）：图标比「AI 生成」更紧凑，
+  /// 卡片头部的小图标按钮（添加 / 删除）：图标比「AI 生成」更紧凑，
   /// 一行里塞得下类型标签、状态、三个操作入口
   Widget _cardAction({
     required IconData icon,
@@ -673,21 +803,6 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
                   fontSize: 12,
                   color: Color(0xFF666666),
                 ),
-              ),
-            ),
-            TextButton.icon(
-              onPressed: _controller.saving
-                  ? null
-                  : () => _addEvent(_controller.drafts.length),
-              icon: const Icon(Icons.add, size: 16),
-              label: const Text(
-                '添加事件',
-                style: TextStyle(fontSize: 13),
-              ),
-              style: TextButton.styleFrom(
-                foregroundColor: const Color(0xFF4D6BFE),
-                visualDensity: VisualDensity.compact,
-                padding: const EdgeInsets.symmetric(horizontal: 8),
               ),
             ),
             const SizedBox(width: 4),

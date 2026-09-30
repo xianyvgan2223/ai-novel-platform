@@ -10,7 +10,8 @@ import 'outline_edit_page.dart';
 
 /// 「大纲编辑」章节选择页。
 ///
-/// 勾选一章或多章后进入编辑页；也可以点章节右侧「编辑」直接编辑单章。
+/// 点章节卡片上的复选框可就地勾选，页面底部按勾选数量进入编辑页（单章 / 多章）；
+/// 也可以点章节右侧「编辑」直接编辑单章。
 /// 该小说若还没在「大纲转章节」里解析过章节，会先按大纲正文解析并落库，
 /// 保证「大纲编辑」可以直接使用。
 class OutlineEditChapterListPage extends StatefulWidget {
@@ -176,25 +177,12 @@ class _OutlineEditChapterListPageState
                     vertical: 10,
                   ),
                   color: const Color(0xFFF8F9FF),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '共 ${_chapters.length} 个事件 · 已完成 $_completedCount',
-                        style: const TextStyle(
-                          fontSize: 13,
-                          color: Color(0xFF666666),
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      const Text(
-                        '勾选一章或多章后可批量编辑大纲；点右侧「编辑」直接编辑单章',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: Color(0xFF999999),
-                        ),
-                      ),
-                    ],
+                  child: Text(
+                    '共 ${_chapters.length} 个事件 · 已完成 $_completedCount',
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: Color(0xFF666666),
+                    ),
                   ),
                 ),
                 Expanded(
