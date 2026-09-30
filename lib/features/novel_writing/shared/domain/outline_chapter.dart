@@ -29,6 +29,9 @@ class OutlineChapter {
   })  : createdAt = createdAt ?? DateTime.now().toIso8601String(),
         updatedAt = updatedAt ?? DateTime.now().toIso8601String();
 
+  /// 是否大事件（其余为小事件，界面上显示成「章节」）
+  bool get isMajor => eventType == 'major';
+
   Map<String, dynamic> toMap() => {
     'outline_id': outlineId,
     'event_index': eventIndex,
@@ -86,4 +89,32 @@ class OutlineChapter {
         createdAt: createdAt ?? this.createdAt,
         updatedAt: updatedAt ?? this.updatedAt,
       );
+}
+
+/// 按列表顺序给大事件编号（从 1 开始，**只数大事件**），非大事件对应位置为 null。
+///
+/// 这个序号与大纲正文里的「大事件N」一致——生成 / 规范化时大事件就是全篇从 1
+/// 连续编号（见 outline_event_syntax.dart 的 normalizeOutlineText）。
+/// 注意别拿 [OutlineChapter.eventIndex] 当大事件编号：那是**所有**事件的连续
+/// 序号，小事件也占号，直接显示会跳号（大事件1、大事件4、大事件9……）。
+List<int?> majorEventNumbers(List<OutlineChapter> chapters) {
+  final numbers = List<int?>.filled(chapters.length, null);
+  var majorSeq = 0;
+  for (var i = 0; i < chapters.length; i++) {
+    if (chapters[i].isMajor) numbers[i] = ++majorSeq;
+  }
+  return numbers;
+}
+
+/// 同 [majorEventNumbers]，但返回 chapter.id → 序号，供**只拿到部分章节**的
+/// 页面（如「大纲编辑」编辑页只拿到勾选的几章）反查序号用：
+/// 这些页面必须按全篇章节列表来查，否则序号会从 1 重新开始。
+Map<int, int?> majorEventNumbersById(List<OutlineChapter> chapters) {
+  final numbers = majorEventNumbers(chapters);
+  final byId = <int, int?>{};
+  for (var i = 0; i < chapters.length; i++) {
+    final id = chapters[i].id;
+    if (id != null) byId[id] = numbers[i];
+  }
+  return byId;
 }

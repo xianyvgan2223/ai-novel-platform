@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import '../../../shared/data/outline_chapter_db_helper.dart';
 import '../../../shared/domain/outline_chapter.dart';
 import '../../../shared/domain/outline_record.dart';
+import '../../../shared/list_scroll_offset.dart';
 import '../../../shared/outline_chapter_sync.dart';
 import '../../../shared/outline_load_error_view.dart';
+import '../widget/event_type_tag.dart';
 import 'outline_edit_page.dart';
 
 /// 「大纲编辑」章节选择页。
@@ -25,6 +27,9 @@ class _OutlineEditChapterListPageState
     extends State<OutlineEditChapterListPage> {
   List<OutlineChapter> _chapters = [];
   final Set<int> _selected = {};
+
+  /// 列表滚动控制器：进入编辑页前记下位置，返回时按它停回同一区域
+  final ScrollController _scrollCtrl = ScrollController();
   bool _loading = true;
   Object? _error;
 
@@ -34,7 +39,18 @@ class _OutlineEditChapterListPageState
     _load();
   }
 
-  Future<void> _load() async {
+  @override
+  void dispose() {
+    _scrollCtrl.dispose();
+    super.dispose();
+  }
+
+  /// 读取章节结构。
+  ///
+  /// [showLoading] 为 false 时保留当前列表、不切成整页 loading：从编辑页
+  /// 返回后的刷新走这条路径——整页 loading 会把 ListView 从树上拆掉，
+  /// 滚动位置随之丢失，返回时界面就跳回顶部了。
+  Future<void> _load({bool showLoading = true}) async {
     final id = widget.outline.id;
     if (id == null) {
       if (mounted) setState(() => _loading = false);
@@ -42,7 +58,7 @@ class _OutlineEditChapterListPageState
     }
     if (mounted) {
       setState(() {
-        _loading = true;
+        if (showLoading) _loading = true;
         _error = null;
       });
     }
@@ -94,16 +110,23 @@ class _OutlineEditChapterListPageState
     });
   }
 
-  /// 打开编辑页：[chapters] 为待编辑章节（单章或多章）
+  /// 打开编辑页：[chapters] 为待编辑章节（单章或多章）。
+  ///
+  /// 返回后按静默方式刷新（编辑页可能改了标题 / 概要），并把列表定位回
+  /// 进入编辑页时所显示的区域，而不是跳回顶部（见 shared/list_scroll_offset.dart）。
   Future<void> _openEdit(List<OutlineChapter> chapters) async {
     if (chapters.isEmpty) return;
+    final offset = captureScrollOffset(_scrollCtrl);
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) =>
             OutlineEditPage(outline: widget.outline, chapters: chapters),
       ),
     );
-    if (mounted) await _load();
+    if (!mounted) return;
+    await _load(showLoading: false);
+    if (!mounted) return;
+    restoreScrollOffset(_scrollCtrl, offset);
   }
 
   int get _completedCount =>
@@ -112,6 +135,9 @@ class _OutlineEditChapterListPageState
   @override
   Widget build(BuildContext context) {
     final outline = widget.outline;
+    // 大事件序号：与大纲正文里的「大事件N」同一套编号（只数大事件），
+    // 显示在卡片的类型标签上（大事件57），方便对上正文与生成记录
+    final majorNumbers = majorEventNumbers(_chapters);
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
@@ -173,6 +199,7 @@ class _OutlineEditChapterListPageState
                 ),
                 Expanded(
                   child: ListView.builder(
+                    controller: _scrollCtrl,
                     padding: const EdgeInsets.all(12),
                     itemCount: _chapters.length,
                     itemBuilder: (context, index) {
@@ -180,6 +207,7 @@ class _OutlineEditChapterListPageState
                       return _ChapterSelectTile(
                         chapter: ch,
                         selected: ch.id != null && _selected.contains(ch.id),
+                        majorNumber: majorNumbers[index],
                         onTap: () => _toggleSelect(ch),
                         onEdit: () => _openEdit([ch]),
                       );
@@ -248,23 +276,28 @@ class _OutlineEditChapterListPageState
   }
 }
 
-/// 单个章节选择卡片：左侧复选框，点卡片切换选中；右侧「编辑」直接编辑单章
+/// 单个章节选择卡片：左侧复选框，点卡片切换选中；右侧「编辑」直接编辑单章。
+/// 大事件的类型标签上带序号（大事件57），与大纲正文的写法一致。
 class _ChapterSelectTile extends StatelessWidget {
   final OutlineChapter chapter;
   final bool selected;
+
+  /// 大事件序号（从 1 开始，只数大事件）；非大事件为 null
+  final int? majorNumber;
   final VoidCallback onTap;
   final VoidCallback onEdit;
 
   const _ChapterSelectTile({
     required this.chapter,
     required this.selected,
+    this.majorNumber,
     required this.onTap,
     required this.onEdit,
   });
 
   @override
   Widget build(BuildContext context) {
-    final isMajor = chapter.eventType == 'major';
+    final isMajor = chapter.isMajor;
     final isCompleted = chapter.status == 'completed';
     final words = chapter.content.characters.length;
     final statusText = chapter.status == 'generating'
@@ -326,24 +359,15 @@ class _ChapterSelectTile extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 1,
-                        ),
-                        decoration: BoxDecoration(
-                          color: isMajor
-                              ? const Color(0xFFE8ECF4)
-                              : const Color(0xFFF2F4F8),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          isMajor ? '大事件' : '章节',
-                          style: const TextStyle(
-                            fontSize: 10,
-                            color: Color(0xFF666666),
-                          ),
-                        ),
+                      EventTypeTag(
+                        isMajor: isMajor,
+                        majorNumber: majorNumber,
+                        background: isMajor
+                            ? const Color(0xFFE8ECF4)
+                            : const Color(0xFFF2F4F8),
+                        foreground: const Color(0xFF666666),
+                        // 序号用主色加粗：长列表里一眼能扫到第几个大事件
+                        numberColor: const Color(0xFF4D6BFE),
                       ),
                     ],
                   ),

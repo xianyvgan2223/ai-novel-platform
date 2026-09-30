@@ -72,9 +72,23 @@ class DatabaseHelper {
     return openDatabase(
       path,
       version: _dbVersion,
+      onConfigure: _onConfigure,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
+  }
+
+  /// 每次连接建立时开启外键约束。
+  ///
+  /// SQLite 默认 `PRAGMA foreign_keys = OFF`，**建表时写的 `ON DELETE CASCADE`
+  /// 在默认状态下是一条摆设**：删掉大纲记录，`outline_chapters` 里的章节行
+  /// 会全部留下变成孤儿（正文 / AI 小结 / 剧情账本一起留在库里）。实测库里
+  /// 已有这种残留，且一条 719 章的大纲删掉就是 719 行垃圾。
+  ///
+  /// 这条 pragma 是**连接级**的（不是持久化设置），所以必须每次开库都设；
+  /// 放在 onConfigure 里可以保证它在 onCreate / onUpgrade 之前、且早于任何读写。
+  static Future<void> _onConfigure(Database db) async {
+    await db.execute('PRAGMA foreign_keys = ON');
   }
 
   /// 新用户首次安装：创建最新完整表结构（V3+ 含 battle 表）

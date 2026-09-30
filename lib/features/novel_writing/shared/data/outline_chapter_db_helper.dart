@@ -137,6 +137,63 @@ class OutlineChapterDbHelper {
     );
   }
 
+  /// 插入一个新增事件（「大纲编辑」页添加大事件 / 小事件），返回新行 id。
+  ///
+  /// 事件行由调用方决定内容：正文 / AI 小结 / 剧情账本一律留空，
+  /// 状态与 [OutlineChapter] 的默认值一致（新事件本来就是「待生成」）。
+  Future<int> insertEvent({
+    required int outlineId,
+    required int eventIndex,
+    required String eventType,
+    required String eventTitle,
+    required String eventSummary,
+  }) async {
+    final db = await database;
+    final now = DateTime.now().toIso8601String();
+    return db.insert('outline_chapters', {
+      'outline_id': outlineId,
+      'event_index': eventIndex,
+      'event_type': eventType,
+      'event_title': eventTitle,
+      'event_summary': eventSummary,
+      'content': '',
+      'status': 'pending',
+      'ai_summary': '',
+      'story_state': '',
+      'created_at': now,
+      'updated_at': now,
+    });
+  }
+
+  /// 批量改写事件序号（增删事件后按最终结构重新编号）。
+  ///
+  /// 表上没有 (outline_id, event_index) 唯一约束，逐条 update 不会撞键；
+  /// 仍统一放进一个事务：序号是「可排序」的唯一依据，写到一半失败会留下
+  /// 重复序号的半截结构。
+  Future<void> updateEventIndices(Map<int, int> indexById) async {
+    if (indexById.isEmpty) return;
+    final db = await database;
+    final now = DateTime.now().toIso8601String();
+    final batch = db.batch();
+    for (final e in indexById.entries) {
+      batch.update(
+        'outline_chapters',
+        {'event_index': e.value, 'updated_at': now},
+        where: 'id = ?',
+        whereArgs: [e.key],
+      );
+    }
+    await batch.commit(noResult: true);
+  }
+
+  /// 删除单个事件（「大纲编辑」页删除事件，已确认可丢正文时调用）。
+  ///
+  /// 与 [deleteByOutlineId] 的区别：只删一行，且调用方须已确认该行没有要保留的正文。
+  Future<void> deleteById(int id) async {
+    final db = await database;
+    await db.delete('outline_chapters', where: 'id = ?', whereArgs: [id]);
+  }
+
   /// 删除某个大纲的所有章节（**破坏性，已不再用于结构重建**）。
   ///
   /// 结构校正请改用 [reconcileOutlineChapters]：它原地更新行、保留行 id，

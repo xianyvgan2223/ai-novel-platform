@@ -43,3 +43,6 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# 真机排查时的临时工作目录（数据库副本、备份、只读分析脚本）
+.itchk/

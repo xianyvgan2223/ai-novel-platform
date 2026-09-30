@@ -3,6 +3,7 @@ import '../../../shared/dialog_utils.dart';
 import '../../../shared/data/outline_chapter_db_helper.dart';
 import '../../../shared/data/outline_record_db_helper.dart';
 import '../../../shared/domain/outline_record.dart';
+import '../../../shared/list_scroll_offset.dart';
 import '../../../shared/outline_load_error_view.dart';
 import 'outline_edit_chapter_list_page.dart';
 
@@ -51,6 +52,9 @@ class OutlineEditNovelListPage extends StatefulWidget {
 class _OutlineEditNovelListPageState extends State<OutlineEditNovelListPage> {
   List<OutlineRecord> _records = [];
   Map<int, ({int total, int completed})> _stats = {};
+
+  /// 卡片网格的滚动控制器：进入「选择章节」页前记下位置，返回时停回同一区域
+  final ScrollController _scrollCtrl = ScrollController();
   bool _loading = true;
   Object? _error;
 
@@ -60,10 +64,21 @@ class _OutlineEditNovelListPageState extends State<OutlineEditNovelListPage> {
     _load();
   }
 
-  Future<void> _load() async {
+  @override
+  void dispose() {
+    _scrollCtrl.dispose();
+    super.dispose();
+  }
+
+  /// 读取大纲列表。
+  ///
+  /// [showLoading] 为 false 时保留当前网格、不切成整页 loading：从下级页面
+  /// 返回后的刷新与下拉刷新都走这条路径——整页 loading 会把 GridView 从树上
+  /// 拆掉，滚动位置随之丢失，返回时卡片列表就跳回顶部了。
+  Future<void> _load({bool showLoading = true}) async {
     if (mounted) {
       setState(() {
-        _loading = true;
+        if (showLoading) _loading = true;
         _error = null;
       });
     }
@@ -90,15 +105,20 @@ class _OutlineEditNovelListPageState extends State<OutlineEditNovelListPage> {
   }
 
   /// 卡片上只有摘要（不含正文 / 骨架），点开时按 id 取完整记录。
+  ///
+  /// 返回后静默刷新（章节标题 / 进度可能已变），并把网格定位回点开卡片时
+  /// 所显示的区域，而不是跳回顶部。
   Future<void> _openNovel(OutlineRecord summary) async {
     final id = summary.id;
     if (id == null) return;
+    final offset = captureScrollOffset(_scrollCtrl);
     final OutlineRecord record;
     try {
       final row = await OutlineRecordDbHelper().getById(id);
       if (row == null) {
         _showMessage('这部小说已不存在，可能已被删除');
-        await _load();
+        await _load(showLoading: false);
+        if (mounted) restoreScrollOffset(_scrollCtrl, offset);
         return;
       }
       record = OutlineRecord.fromMap(row);
@@ -118,8 +138,11 @@ class _OutlineEditNovelListPageState extends State<OutlineEditNovelListPage> {
         ),
       );
     }
-    // 返回后刷新：章节标题/概要或进度有改动时卡片信息同步
-    if (mounted) await _load();
+    if (!mounted) return;
+    // 返回后刷新：章节标题/概要或进度有改动时卡片信息同步（保留滚动位置）
+    await _load(showLoading: false);
+    if (!mounted) return;
+    restoreScrollOffset(_scrollCtrl, offset);
   }
 
   /// 长按卡片删除这条大纲记录（删除后无法恢复，仅历史入口开启）
@@ -146,6 +169,8 @@ class _OutlineEditNovelListPageState extends State<OutlineEditNovelListPage> {
       ),
     );
     if (ok != true) return;
+    // 删掉一张卡片后列表不该跳回顶部：记下当前位置，刷新完再定位回去
+    final offset = captureScrollOffset(_scrollCtrl);
     try {
       await OutlineRecordDbHelper().delete(id);
       _showMessage('已删除「$title」');
@@ -153,7 +178,9 @@ class _OutlineEditNovelListPageState extends State<OutlineEditNovelListPage> {
       debugPrint('[outline_edit_list] 删除大纲 id=$id 失败：$e\n$st');
       _showMessage('删除失败：$e');
     }
-    await _load();
+    await _load(showLoading: false);
+    if (!mounted) return;
+    restoreScrollOffset(_scrollCtrl, offset);
   }
 
   void _showMessage(String message) {
@@ -233,8 +260,11 @@ class _OutlineEditNovelListPageState extends State<OutlineEditNovelListPage> {
                 ),
                 Expanded(
                   child: RefreshIndicator(
-                    onRefresh: _load,
+                    // 下拉刷新同样保留网格：切成整页 loading 会把
+                    // RefreshIndicator 一起拆掉，刷新动画与滚动位置都会丢
+                    onRefresh: () => _load(showLoading: false),
                     child: GridView.builder(
+                      controller: _scrollCtrl,
                       // 内容不足一屏时也能下拉刷新
                       physics: const AlwaysScrollableScrollPhysics(),
                       padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),

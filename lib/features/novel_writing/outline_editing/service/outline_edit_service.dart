@@ -9,6 +9,8 @@ import '../model/outline_edit_chat_message.dart';
 /// 复用「大纲转章节」的设置（模型 / 温度 / 最大长度 / 深度思考），
 /// 把小说设定 + 当前事件的标题与概要 + 所属大事件 + 前后相邻事件 +
 /// 剧情账本 + 伏笔清单 + 对话历史拼成请求消息，流式返回**大纲文本**。
+/// 面板上「注入同批所选事件」打开时，额外注入本次一起勾选的其他事件
+/// （[selectedEvents]，已在前 / 后续事件里的不重复）。
 /// 提示词明确禁止输出正文（场景描写 / 对白 / 心理刻画）。
 class OutlineEditService {
   /// 注入对话历史的最近条数（更早的轮次不再注入，避免上下文膨胀）
@@ -65,6 +67,7 @@ class OutlineEditService {
     required String userInput,
     List<OutlineEditChatMessage> history = const [],
     String parentMajor = '',
+    String selectedEvents = '',
     String prevEvents = '',
     String nextEvents = '',
     String storyState = '',
@@ -76,6 +79,7 @@ class OutlineEditService {
       eventSummary: eventSummary,
       isMajor: isMajor,
       parentMajor: parentMajor,
+      selectedEvents: selectedEvents,
       prevEvents: prevEvents,
       nextEvents: nextEvents,
       storyState: storyState,
@@ -101,6 +105,7 @@ class OutlineEditService {
     required String eventSummary,
     required bool isMajor,
     String parentMajor = '',
+    String selectedEvents = '',
     String prevEvents = '',
     String nextEvents = '',
     String storyState = '',
@@ -114,7 +119,7 @@ class OutlineEditService {
       ..writeln('- 只写大纲：禁止输出场景描写、人物对白、心理刻画等小说正文内容')
       ..writeln('- 用户要求起标题时只输出标题本身，不带「标题：」等前缀、不带书名号')
       ..writeln('- 严格按用户的要求输出结果本身，不要寒暄、解释，也不要输出 Markdown 代码块标记')
-      ..writeln('- 与小说设定、所属大事件及前后事件保持一致；除用户明确要求外，不改变既有剧情走向、人物设定与伏笔安排')
+      ..writeln('- 与小说设定、所属大事件、同批所选事件及前后事件保持一致；除用户明确要求外，不改变既有剧情走向、人物设定与伏笔安排')
       ..writeln('- 篇幅与既有条目相近（通常 1-3 句；用户另有要求时从其要求）')
       ..writeln()
       ..writeln('【小说设定】')
@@ -134,6 +139,12 @@ class OutlineEditService {
         ..writeln()
         ..writeln('【所属大事件】')
         ..writeln(parentMajor.trim());
+    }
+    if (selectedEvents.trim().isNotEmpty) {
+      buf
+        ..writeln()
+        ..writeln('【同批所选事件】（本次一起勾选编辑的其他事件，供保持衔接，勿直接复述）')
+        ..writeln(selectedEvents.trim());
     }
     if (prevEvents.trim().isNotEmpty) {
       buf

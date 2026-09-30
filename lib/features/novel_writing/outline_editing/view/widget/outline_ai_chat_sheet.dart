@@ -35,6 +35,10 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
   int _lastStreamLength = 0;
   bool _followOutput = true; // 用户上滑阅读时暂停自动跟随
 
+  /// 选项行（「注入同批所选事件」）是否展开：**默认收起**。
+  /// 收起只影响这一行显示与否，开关状态存在控制器里，收起再展开不会变。
+  bool _optionsExpanded = false;
+
   @override
   void initState() {
     super.initState();
@@ -135,6 +139,11 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
               children: [
                 _buildHeader(controller),
                 const Divider(height: 1),
+                // 默认收起：展开时才显示选项行（开关状态不受展开 / 收起影响）
+                if (_optionsExpanded) ...[
+                  _buildInjectToggle(controller),
+                  const Divider(height: 1),
+                ],
                 // 「当前大纲」作为对话里的第一条气泡展示，随对话一起滚动看全文
                 Expanded(child: _buildMessageList(controller)),
                 if (controller.chatError.isNotEmpty) _buildError(controller),
@@ -186,12 +195,88 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
             tooltip: '清空对话',
             onPressed: controller.chatting ? null : controller.clearChat,
           ),
+          // 选项行（「注入同批所选事件」）的收起 / 展开：默认收起，
+          // 收起只是把这一行藏起来，不影响开关本身的状态
+          IconButton(
+            icon: Icon(
+              _optionsExpanded ? Icons.expand_less : Icons.expand_more,
+              size: 22,
+              // 收起时如果选项是开着的，图标用主色点一下，提示里面有生效的设置
+              color: controller.injectSelectedEvents
+                  ? const Color(0xFF4D6BFE)
+                  : const Color(0xFF999999),
+            ),
+            tooltip: _optionsExpanded ? '收起选项' : '展开选项',
+            onPressed: () =>
+                setState(() => _optionsExpanded = !_optionsExpanded),
+          ),
           IconButton(
             icon: const Icon(Icons.close, size: 20, color: Color(0xFF666666)),
             tooltip: '关闭',
             onPressed: () => Navigator.of(context).pop(),
           ),
         ],
+      ),
+    );
+  }
+
+  /// 「注入同批所选事件」开关：打开后，除当前事件外，把本次在选事件页一起勾选、
+  /// 正在编辑的其他事件也交给 AI；已经作为【前一/后续事件】【所属大事件】注入过的
+  /// 不会重复注入（见 OutlineEditController.aiSelectedEventsText）。
+  /// 关闭时提示词与原来完全一致。
+  Widget _buildInjectToggle(OutlineEditController controller) {
+    final on = controller.injectSelectedEvents;
+    return Material(
+      // 底色交给 Material，InkWell 的水波才不会被自己盖住
+      color: on ? const Color(0xFFF3F6FF) : Colors.white,
+      child: InkWell(
+        onTap: () => controller.setInjectSelectedEvents(!on),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 3, 10, 3),
+          child: Row(
+            children: [
+              Icon(
+                Icons.playlist_add_check,
+                size: 15,
+                color: on ? const Color(0xFF4D6BFE) : const Color(0xFFBBBBBB),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '注入同批所选事件',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        color: on
+                            ? const Color(0xFF4D6BFE)
+                            : const Color(0xFF777777),
+                      ),
+                    ),
+                    Text(
+                      // 只编辑了一个事件时如实说明，避免开了开关却没变化让人困惑
+                      controller.drafts.length <= 1
+                          ? '本次只编辑了 1 个事件，没有其他所选事件可注入'
+                          : '把本次一起勾选的其他事件也交给 AI；已在「前一/后续事件」里的不重复注入',
+                      style: const TextStyle(
+                        fontSize: 10,
+                        height: 1.3,
+                        color: Color(0xFFAAAAAA),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              _MiniSwitch(
+                value: on,
+                onChanged: controller.setInjectSelectedEvents,
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -625,6 +710,56 @@ class _ThinkingPanelState extends State<_ThinkingPanel> {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// 面板里的小开关：Material 3 的 [Switch] 又大又深（关闭态滑块是深灰、轨道也很厚），
+/// 摆在白色面板上太抢眼——这里用 36×20 的轻量开关，关闭态是浅灰、打开态是主色。
+/// 只做展示与点击，整行的点击由外面那层 InkWell 兜底。
+class _MiniSwitch extends StatelessWidget {
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  const _MiniSwitch({required this.value, required this.onChanged});
+
+  static const double _width = 36;
+  static const double _height = 20;
+  static const double _inset = 2;
+  static const Duration _duration = Duration(milliseconds: 160);
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () => onChanged(!value),
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedContainer(
+        duration: _duration,
+        width: _width,
+        height: _height,
+        padding: const EdgeInsets.all(_inset),
+        alignment: value ? Alignment.centerRight : Alignment.centerLeft,
+        decoration: BoxDecoration(
+          color: value ? const Color(0xFF4D6BFE) : const Color(0xFFE4E9F2),
+          borderRadius: BorderRadius.circular(_height / 2),
+        ),
+        child: AnimatedContainer(
+          duration: _duration,
+          width: _height - _inset * 2,
+          height: _height - _inset * 2,
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(
+                color: Color(0x1F000000),
+                blurRadius: 3,
+                offset: Offset(0, 1),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
