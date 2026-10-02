@@ -99,12 +99,106 @@ int? _eventLineAt(List<String> lines, int n) {
   return null;
 }
 
+/// 两条事件标题是否指同一条：去掉两端空白，并剥掉标题里嵌套的
+/// 「大事件N：」/「小事件N：」前缀后比较。
+///
+/// 为什么不能直接比字符串：生成侧写进正文的是**剥过前缀**的标题
+/// （[formatMajorHeader] / [formatMinorHeader]），而界面上卡片里的标题可能是
+/// 用户手输的原样（带前缀），直接比会把同一条判成两条。
+bool _sameEventTitle(String a, String b) {
+  final x = stripNestedEventPrefix(a);
+  final y = stripNestedEventPrefix(b);
+  return x.isNotEmpty && x == y;
+}
+
+/// 标题命中 [titles] 之一、且类型符合 [requireMajor]（为 null 时不限）的事件行里，
+/// **离第 [nearIndex] 个事件最近**的一条的下标（从 0 开始）；没有时返回 null。
+///
+/// [titles] 按优先级排列：前一个候选能找到就不再试后面的——
+/// 候选顺序是「正文里现在写着的标题 → 界面上现在显示的标题」，
+/// 前者才是正文那一行的真实身份。
+/// [nearIndex] 是调用方手里的序号，用来在**同名多条**之间取最像的那一条
+/// （界面上的第 N 条，通常就是正文里的第 N 条附近）。
+int? _eventLineAtAnyTitle(
+  List<String> lines,
+  List<String> titles,
+  int nearIndex, {
+  bool? requireMajor,
+}) {
+  final wanted = titles
+      .map((t) => stripNestedEventPrefix(t))
+      .where((t) => t.isNotEmpty)
+      .toList();
+  if (wanted.isEmpty) return null;
+  for (final want in wanted) {
+    int? best;
+    var bestDistance = 0;
+    var seen = 0;
+    for (var i = 0; i < lines.length; i++) {
+      final line = classifyOutlineLine(lines[i]);
+      if (!line.isEvent) continue;
+      seen++;
+      if (requireMajor != null && line.isMajor != requireMajor) continue;
+      if (!_sameEventTitle(line.title, want)) continue;
+      final distance = (seen - nearIndex).abs();
+      if (best == null || distance < bestDistance) {
+        best = i;
+        bestDistance = distance;
+      }
+    }
+    if (best != null) return best;
+  }
+  return null;
+}
+
 /// 最后一个事件行的下标；没有事件行时返回 null
 int? _lastEventLine(List<String> lines) {
   for (var i = lines.length - 1; i >= 0; i--) {
     if (classifyOutlineLine(lines[i]).isEvent) return i;
   }
   return null;
+}
+
+/// 大纲正文里的事件总数（大事件 + 小事件）
+int countOutlineEvents(String content) {
+  var n = 0;
+  for (final raw in content.split('\n')) {
+    if (classifyOutlineLine(raw).isEvent) n++;
+  }
+  return n;
+}
+
+/// 把一串卡片标题映射成它们在大纲正文里的**事件序号**（从 1 开始，全局）。
+///
+/// 返回的列表与 [titles] 等长；找不到对应事件行的项为 null。
+///
+/// 「大纲编辑」页可以只勾选其中几章（「编辑该章」/「编辑所选（N）」），
+/// 这时草稿列表里的第 N 张卡片**不是**正文里的第 N 个事件——拿草稿下标当序号去
+/// 插 / 删 / 重编号，新事件会被插到整篇大纲的最前面、选中行会被改成 1、2……
+/// 与其余章节撞号（现象就是「我原来写的大事件被新加的那条顶掉了」）。
+/// 草稿顺序与正文顺序一致（上一页整表按正文解析入库），所以**按顺序往下找**：
+/// 每一项从上一项命中的位置之后继续，同名多条也能一一对上，不会串行。
+List<int?> locateEventOrdinals(String content, List<String> titles) {
+  final result = List<int?>.filled(titles.length, null);
+  var ordinal = 0;
+  var i = 0;
+  for (final raw in content.split('\n')) {
+    final line = classifyOutlineLine(raw);
+    if (!line.isEvent) continue;
+    ordinal++;
+    if (i >= titles.length) break;
+    final want = stripNestedEventPrefix(titles[i]);
+    if (want.isEmpty) {
+      // 标题是空的（用户把标题清掉了）：认不出是哪一条，跳过它继续找后面的，
+      // 不然后面每一张卡片都会被判成「找不到」
+      i++;
+      continue;
+    }
+    if (!_sameEventTitle(line.title, want)) continue;
+    result[i] = ordinal;
+    i++;
+  }
+  return result;
 }
 
 /// 事件块（标题行 + 概要区）的结束下标
@@ -180,14 +274,52 @@ String insertEventIntoOutlineText(
 /// 与 [mergeEventIntoOutlineText] 认定的概要区完全一致，不会多删一行。
 /// 序号不存在时原样返回 [content]。
 ///
+/// [expectTitles] / [expectMajor] 是这一条在**界面上的身份**（标题候选 + 大/小事件），
+/// 传了就先核对第 [eventIndex] 个事件行是不是它：
+/// - 是 → 按序号删（正常路径）；
+/// - 不是 → 说明库里的序号与正文已经错位（历史上「章节选择页拿旧快照校正结构」
+///   把删掉的事件插回来过），此时**只按标题**找离该序号最近的一条，
+///   一条都对不上就原样返回。
+///
+/// 为什么不能一律按序号硬删：用户点的是「删掉这一条」，序号错位时硬删会把
+/// **旁边那条**从大纲里抹掉——现象正是「删了这个小事件，它自己还在、
+/// 别的事件反而没了」，比这次不删更糟。所以只在认得出来时才动正文。
+///
 /// 收尾**按需要补 / 收空行**，不能只是把块删掉就走：
 /// - 两侧原本靠空行分段的（删掉的那块自己没有概要）→ 收掉多出来的空行
 /// - 两侧都有内容且都没空行 → 必须补一个空行，否则「上一条的概要」与
 ///   「下一条的事件行」粘在一起，下一条会被解析成上一条的概要（事件凭空消失）
-String removeEventFromOutlineText(String content, int eventIndex) {
+String removeEventFromOutlineText(
+  String content,
+  int eventIndex, {
+  List<String>? expectTitles,
+  bool? expectMajor,
+}) {
   if (eventIndex < 1) return content;
   final lines = content.split('\n');
-  final target = _eventLineAt(lines, eventIndex);
+  var target = _eventLineAt(lines, eventIndex);
+
+  final titles = (expectTitles ?? const <String>[])
+      .map((t) => t.trim())
+      .where((t) => t.isNotEmpty)
+      .toList();
+  if (titles.isNotEmpty) {
+    final here = target == null ? null : classifyOutlineLine(lines[target]);
+    final hit =
+        here != null &&
+        here.isEvent &&
+        (expectMajor == null || here.isMajor == expectMajor) &&
+        titles.any((t) => _sameEventTitle(here.title, t));
+    if (!hit) {
+      target = _eventLineAtAnyTitle(
+        lines,
+        titles,
+        eventIndex,
+        requireMajor: expectMajor,
+      );
+    }
+  }
+
   if (target == null) return content;
   final end = _eventBlockEnd(lines, target);
   lines.removeRange(target, end);

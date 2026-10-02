@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../shared/data/outline_chapter_db_helper.dart';
+import '../../../shared/data/outline_record_db_helper.dart';
 import '../../../shared/domain/outline_chapter.dart';
 import '../../../shared/domain/outline_record.dart';
 import '../../../shared/list_scroll_offset.dart';
@@ -29,6 +30,10 @@ class _OutlineEditChapterListPageState
   List<OutlineChapter> _chapters = [];
   final Set<int> _selected = {};
 
+  /// 当前这一份大纲记录：**每次读章节前都按库里的最新正文刷新一次**
+  /// （见 [_latestRecord]）。进入编辑页也传它，编辑页的初始正文才不会落后。
+  late OutlineRecord _outline = widget.outline;
+
   /// 列表滚动控制器：进入编辑页前记下位置，返回时按它停回同一区域
   final ScrollController _scrollCtrl = ScrollController();
   bool _loading = true;
@@ -44,6 +49,36 @@ class _OutlineEditChapterListPageState
   void dispose() {
     _scrollCtrl.dispose();
     super.dispose();
+  }
+
+  /// 校正章节结构用的那份记录：**以库里最新写下的正文为准**。
+  ///
+  /// 为什么不能直接用 `widget.outline.content`：它是打开这本小说时的快照，
+  /// 而「大纲编辑」页保存时把改过的正文直接写进库、并不回填内存
+  /// （`OutlineRecord.content` 是 final）。拿旧快照校正的后果是**删掉的事件
+  /// 又长回来**：正文里已经没有它、库里的行也删了，按标题一条都匹配不上，
+  /// 校正逻辑便把它当成「新增的事件」重新 INSERT——用户看到的现象正是
+  /// 「小事件怎么删都删不掉，删完返回列表它还在」；改过的标题 / 概要同样会被
+  /// 按旧快照翻回旧值。
+  ///
+  /// 正文为空是有效状态（用户可能把事件全删了），必须照它清空结构，
+  /// 所以只在**读失败 / 记录已不存在**时才退回快照。
+  Future<OutlineRecord> _latestRecord(int id) async {
+    try {
+      final content = await OutlineRecordDbHelper().getContentById(id);
+      if (content == null || content == widget.outline.content) {
+        return widget.outline;
+      }
+      // content 是 final：套一份带最新正文的记录（其余字段原样带过来）
+      return OutlineRecord.fromMap({
+        ...widget.outline.toMap(),
+        'id': id,
+        'content': content,
+      });
+    } catch (e, st) {
+      debugPrint('[outline_edit_chapters] 读取最新大纲正文失败 outline=$id：$e\n$st');
+      return widget.outline;
+    }
   }
 
   /// 读取章节结构。
@@ -64,17 +99,19 @@ class _OutlineEditChapterListPageState
       });
     }
     try {
+      final record = await _latestRecord(id);
       // 与「大纲转章节」共用同一套无损校正（shared/outline_chapter_sync.dart）：
       // 首次进入按大纲正文解析入库；之后进入则按最新正文校正结构。
       // 旧版只在章节表为空时才解析，导致解析规则修复后旧数据永远不自愈，
       // 页面一直显示错误的章节结构。
       await reconcileOutlineChapters(
         outlineId: id,
-        content: widget.outline.content,
+        content: record.content,
       );
       final rows = await OutlineChapterDbHelper().getByOutlineId(id);
       _chapters = rows.map((m) => OutlineChapter.fromMap(m)).toList();
       _selected.removeWhere((sid) => !_chapters.any((c) => c.id == sid));
+      _outline = record;
     } catch (e, st) {
       // 结构校正或读取失败：以前静默吞掉，界面会误显示「没有可编辑的章节」
       debugPrint('[outline_edit_chapters] 加载章节失败 outline=$id：$e\n$st');
@@ -113,6 +150,10 @@ class _OutlineEditChapterListPageState
 
   /// 打开编辑页：[chapters] 为待编辑章节（单章或多章）。
   ///
+  /// 传下去的是 [_outline]（带**库里最新正文**的那一份），不是 `widget.outline`：
+  /// 编辑页的 controller 拿它当初始正文，落后一份快照的话，进页面后立刻删除 /
+  /// 新增事件就会按旧序号写到正文的另一处。
+  ///
   /// 返回后按静默方式刷新（编辑页可能改了标题 / 概要），并把列表定位回
   /// 进入编辑页时所显示的区域，而不是跳回顶部（见 shared/list_scroll_offset.dart）。
   Future<void> _openEdit(List<OutlineChapter> chapters) async {
@@ -120,8 +161,7 @@ class _OutlineEditChapterListPageState
     final offset = captureScrollOffset(_scrollCtrl);
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) =>
-            OutlineEditPage(outline: widget.outline, chapters: chapters),
+        builder: (_) => OutlineEditPage(outline: _outline, chapters: chapters),
       ),
     );
     if (!mounted) return;
@@ -135,7 +175,7 @@ class _OutlineEditChapterListPageState
 
   @override
   Widget build(BuildContext context) {
-    final outline = widget.outline;
+    final outline = _outline;
     // 大事件序号：与大纲正文里的「大事件N」同一套编号（只数大事件），
     // 显示在卡片的类型标签上（大事件57），方便对上正文与生成记录
     final majorNumbers = majorEventNumbers(_chapters);

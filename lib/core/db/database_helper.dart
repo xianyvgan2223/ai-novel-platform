@@ -6,7 +6,7 @@ import 'package:path/path.dart' as p;
 
 class DatabaseHelper {
   static const _dbName = 'deepseek.db';
-  static const _dbVersion = 34;
+  static const _dbVersion = 35;
   static Database? _database;
 
   /// 单例入口，全局复用同一个数据库连接
@@ -244,6 +244,8 @@ class DatabaseHelper {
         protagonist TEXT NOT NULL DEFAULT '',
         worldview TEXT NOT NULL DEFAULT '',
         content TEXT NOT NULL DEFAULT '',
+        content_backup TEXT NOT NULL DEFAULT '',
+        content_backup_at TEXT NOT NULL DEFAULT '',
         skeleton TEXT NOT NULL DEFAULT '',
         foreshadows TEXT NOT NULL DEFAULT '',
         story_state TEXT NOT NULL DEFAULT '',
@@ -995,6 +997,22 @@ class DatabaseHelper {
       if (cols.isNotEmpty && !cols.any((c) => c['name'] == 'hash')) {
         await db.execute(
           "ALTER TABLE sync_state ADD COLUMN hash TEXT NOT NULL DEFAULT ''",
+        );
+      }
+    }
+
+    // V34 → V35：outline_records 增加正文的「上一版备份」两列。
+    // 大纲正文是整段写回的（编辑页保存 / 生成侧落库），写错一次就再也找不回来：
+    // 留一份上一版，至少能回到改动前（见 OutlineRecordDbHelper.update）。
+    // 这两列只留在本机（sync_targets.dart 的 kSensitiveColumns），不同步。
+    if (oldVersion < 35) {
+      final cols = await db.rawQuery('PRAGMA table_info(outline_records)');
+      if (cols.isNotEmpty && !cols.any((c) => c['name'] == 'content_backup')) {
+        await db.execute(
+          "ALTER TABLE outline_records ADD COLUMN content_backup TEXT NOT NULL DEFAULT ''",
+        );
+        await db.execute(
+          "ALTER TABLE outline_records ADD COLUMN content_backup_at TEXT NOT NULL DEFAULT ''",
         );
       }
     }

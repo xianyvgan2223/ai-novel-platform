@@ -182,6 +182,122 @@ void main() {
     });
   });
 
+  /// 「删掉的是点的那一条」的兜底：序号只当位置参考，标题才是身份。
+  /// 库里序号与正文一旦错位（历史上章节选择页拿旧快照校正结构，会把删掉的事件
+  /// 重新插回库里），按序号硬删就会删掉**旁边那条**——用户看到的现象是
+  /// 「小事件怎么删都删不掉，别的事件反而没了」。
+  group('removeEventFromOutlineText 按标题核对（序号错位时不误删）', () {
+    final base = [
+      '══ 大事件1：甲 ══',
+      '甲的概要',
+      '',
+      '○ 小事件1：乙',
+      '乙的概要',
+      '',
+      '○ 小事件2：丙',
+      '丙的概要',
+    ].join('\n');
+
+    test('序号正确时照旧按序号删', () {
+      final out = removeEventFromOutlineText(
+        base,
+        2,
+        expectTitles: const ['乙'],
+        expectMajor: false,
+      );
+      expect(out.contains('乙'), isFalse);
+      expect(titleAt(out, 1), '甲');
+      expect(titleAt(out, 2), '丙');
+    });
+
+    test('序号指向别的事件时：按标题删掉点的那条，旁边的不动', () {
+      // 序号说「第 2 个」，但点的那条是正文里的第 3 个（丙）
+      final out = removeEventFromOutlineText(
+        base,
+        2,
+        expectTitles: const ['丙'],
+        expectMajor: false,
+      );
+      expect(out.contains('丙'), isFalse);
+      expect(titleAt(out, 1), '甲');
+      expect(titleAt(out, 2), '乙');
+      expect(summaryAt(out, 2), '乙的概要'); // 乙没被牵连
+    });
+
+    test('正文里一条都对不上（幽灵行）时原样返回，绝不删别的事件', () {
+      final out = removeEventFromOutlineText(
+        base,
+        2,
+        expectTitles: const ['丁'],
+        expectMajor: false,
+      );
+      expect(out, base);
+    });
+
+    test('类型不符时不误删同名的大事件', () {
+      final sameName = [
+        '══ 大事件1：甲 ══',
+        '大事件甲的总述',
+        '',
+        '○ 小事件1：甲',
+        '小事件甲的概要',
+      ].join('\n');
+      // 序号 1 上是「大事件甲」，要删的是同名的小事件
+      final out = removeEventFromOutlineText(
+        sameName,
+        1,
+        expectTitles: const ['甲'],
+        expectMajor: false,
+      );
+      expect(out.contains('大事件甲的总述'), isTrue, reason: '大事件不能被删掉');
+      expect(out.contains('小事件甲的概要'), isFalse);
+      expect(typeAt(out, 1), 'major');
+    });
+
+    test('同名多条时取离序号最近的那一条', () {
+      final twins = [
+        '══ 大事件1：甲 ══',
+        '甲的概要',
+        '',
+        '○ 小事件1：乙',
+        '第一个乙',
+        '',
+        '○ 小事件2：乙',
+        '第二个乙',
+      ].join('\n');
+      final out = removeEventFromOutlineText(
+        twins,
+        3, // 界面上点的是第 3 条
+        expectTitles: const ['乙'],
+        expectMajor: false,
+      );
+      expect(out.contains('第一个乙'), isTrue);
+      expect(out.contains('第二个乙'), isFalse);
+      expect(parseOutlineEvents(out, outlineId: 1).length, 2);
+    });
+
+    test('标题里带「小事件N：」前缀也能对上（新增时正文写的是剥过前缀的标题）', () {
+      final added = insertEventIntoOutlineText(
+        base,
+        eventIndex: 2,
+        isMajor: false,
+        title: '小事件9：夹心',
+      );
+      expect(titleAt(added, 2), '夹心');
+      final out = removeEventFromOutlineText(
+        added,
+        2,
+        expectTitles: const ['小事件9：夹心'],
+        expectMajor: false,
+      );
+      expect(out.contains('夹心'), isFalse);
+      expect(parseOutlineEvents(out, outlineId: 1).length, 3);
+      expect(titleAt(out, 1), '甲');
+      expect(titleAt(out, 2), '乙');
+      expect(titleAt(out, 3), '丙');
+    });
+  });
+
   group('新增与删除互不干扰的回归点', () {
     test('连续新增两条后序号与解析结果一致', () {
       final one = insertEventIntoOutlineText(

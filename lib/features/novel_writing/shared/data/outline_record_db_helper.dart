@@ -82,10 +82,76 @@ class OutlineRecordDbHelper {
     return row;
   }
 
-  /// 更新大纲记录内容
+  /// 只取大纲正文文本（**单列**查询，避开 CursorWindow 的 2 MB 限制）。
+  ///
+  /// 给「按最新正文校正章节结构」用（`reconcileOutlineChapters`）：页面手里那条
+  /// `OutlineRecord` 是打开这本小说时的快照（`content` 是 final，编辑页保存时
+  /// 只写库、不回填内存），不能拿它当校正依据。
+  /// 记录不存在时返回 null（与「正文为空」区分开：正文为空也是有效状态，
+  /// 调用方必须照它清空结构，而不是退回旧快照）。
+  Future<String?> getContentById(int id) async {
+    final db = await database;
+    final rows = await db.query(
+      'outline_records',
+      columns: const <String>['content'],
+      where: 'id = ?',
+      whereArgs: <Object?>[id],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    return rows.first['content'] as String?;
+  }
+
+  /// 更新大纲记录内容。
+  ///
+  /// **写回正文前先把上一版正文留一份**（`content_backup` / `content_backup_at`）：
+  /// 大纲正文是整段写回的（编辑页保存、章节页改标题、生成侧落库），一旦写错
+  /// ——改错行、结构错位、把原来写好的几条大事件顶掉——用户就再也找不回来了。
+  /// 留一版就够「回到改动前」，代价只是一列文本。
+  ///
+  /// 只在「正文确实变了、且新正文不是空串」时才动备份：只更新设置列（title /
+  /// protagonist……）的空写回不该把好端端的备份冲掉。
   Future<void> update(int id, Map<String, dynamic> record) async {
     final db = await database;
+    final next = record['content'];
+    if (next is String && next.isNotEmpty) {
+      final rows = await db.query(
+        'outline_records',
+        columns: const <String>['content'],
+        where: 'id = ?',
+        whereArgs: <Object?>[id],
+        limit: 1,
+      );
+      final old = rows.isEmpty ? null : rows.first['content'] as String?;
+      if (old != null && old.isNotEmpty && old != next) {
+        record = <String, dynamic>{
+          ...record,
+          'content_backup': old,
+          'content_backup_at': DateTime.now().toIso8601String(),
+        };
+      }
+    }
     await db.update('outline_records', record, where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// 取上一版正文备份（[update] 每次覆盖正文前留下的那一份）。
+  ///
+  /// 供误覆盖后的找回使用：单列查询，避开 CursorWindow 的 2 MB 限制。
+  /// 返回 (正文, 备份时间)；没有备份时正文为空串。
+  Future<({String content, String savedAt})> getContentBackup(int id) async {
+    final db = await database;
+    final rows = await db.query(
+      'outline_records',
+      columns: const <String>['content_backup', 'content_backup_at'],
+      where: 'id = ?',
+      whereArgs: <Object?>[id],
+      limit: 1,
+    );
+    if (rows.isEmpty) return (content: '', savedAt: '');
+    return (
+      content: rows.first['content_backup'] as String? ?? '',
+      savedAt: rows.first['content_backup_at'] as String? ?? '',
+    );
   }
 
   /// 删除大纲记录

@@ -354,7 +354,13 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
     final isMajor = await _pickEventType(majorFirst: majorFirst);
     if (isMajor == null || !mounted) return;
 
-    final localId = _controller.addEvent(index: index, isMajor: isMajor);
+    final localId = _controller.addEvent(
+      index: index,
+      isMajor: isMajor,
+      // 点「下方」时锚点是上面那张卡片：位置由它算，不能按「下一张被勾选的卡片」
+      // 算——只勾选了几章时两者之间可能隔着几十条
+      below: !above && draft != null,
+    );
     if (!mounted) return;
     final where = draft == null ? '末尾' : (above ? '上方' : '下方');
     ScaffoldMessenger.of(context).showSnackBar(

@@ -242,6 +242,36 @@ void main() {
     });
   });
 
+  group('removeEventFromOutlineText 删真实大纲里的中间一条', () {
+    test('删「售票亭的约定」：前后的大事件与其他小事件逐条不变', () {
+      final out = removeEventFromOutlineText(
+        _kPenguinSnippet,
+        5, // 公园兔潮名下的第一个小事件
+        expectTitles: const ['售票亭的约定'],
+        expectMajor: false,
+      );
+      final events = parseOutlineEvents(out, outlineId: 1);
+
+      expect(events.map((e) => e.eventTitle).toList(), [
+        '企鹅变异',
+        '动物园来客',
+        '扫帚与夕照',
+        '公园兔潮',
+        '地下车库的星星',
+        '血莲教现身',
+        '逃亡者口中的血莲教',
+      ]);
+      // 大事件概述仍归它自己的大事件（没被并进上一条小事件）
+      expect(events[3].eventSummary, contains('中央公园'));
+      expect(events[2].eventSummary, isNot(contains('中央公园')));
+      expect(events[5].eventSummary, contains('安全区'));
+      expect(events[4].eventSummary, isNot(contains('安全区')));
+      // 全篇只剩 7 条，且删掉的那一条不再出现在正文里
+      expect(events.length, 7);
+      expect(out.contains('售票亭的约定'), isFalse);
+    });
+  });
+
   group('mergeEventIntoOutlineText 写回', () {
     test('按事件序号定位：同名事件不会改错行', () {
       final content = [

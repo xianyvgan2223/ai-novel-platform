@@ -6,6 +6,7 @@ import '../../shared/data/outline_chapter_db_helper.dart';
 import '../../shared/data/outline_record_db_helper.dart';
 import '../../shared/domain/outline_chapter.dart';
 import '../../shared/domain/outline_record.dart';
+import '../../shared/outline_event_parser.dart';
 import '../../shared/outline_text_sync.dart';
 import '../model/outline_edit_chat_message.dart';
 import '../model/outline_edit_draft.dart';
@@ -44,6 +45,14 @@ class OutlineEditController extends ChangeNotifier {
   /// 读回来之前 [allChapters] 为空，此时增删事件不去猜全篇结构。
   bool _contextLoaded = false;
 
+  /// 页面打开后是否已经动过结构（增删事件）。
+  ///
+  /// [_loadContext] 是**异步**的：读回来时用户可能已经删掉（或加了）一张卡片。
+  /// 那时不能再用库里的正文覆盖本地 [outlineContent]——盖上去等于把刚删掉的
+  /// 那一行「复活」：卡片没了、正文里还在，保存时行删了、正文却留着，
+  /// 下次按正文校正章节结构又会把它插回库里（现象就是「小事件怎么删都删不掉」）。
+  bool _structureEdited = false;
+
   /// 大事件序号表（chapter.id → 序号，只数大事件），与正文里的「大事件N」一致。
   /// 与 [allChapters] 一起在 [_loadContext] 里建好——编辑页只拿到勾选的几章，
   /// 单看 [drafts] 会把大事件编成 1、2……，和正文对不上。
@@ -55,28 +64,50 @@ class OutlineEditController extends ChangeNotifier {
     return id == null ? null : majorNumbersById[id];
   }
 
-  /// 某张草稿卡片的大事件序号（按行 id 兜底按局部 id 反查）。
+  /// 某张草稿卡片的大事件序号。
   ///
-  /// 只信 [majorNumbersById] 是错的：它是**按行 id** 键的，只在
-  /// [_loadContext] 读完全篇章节后才建好；而增删事件会当场改变「第几个大事件」，
-  /// 在上下文还没读完（或读失败）时查表拿到的是**旧编号**，界面上就会出现
-  /// 「新加的大事件是 2、后面的丙也还是 2」。所以先按当前草稿顺序现算，
-  /// 算得到就以它为准；只有这张卡片不在本次编辑范围内时才回退查表。
+  /// 一律按**大纲正文**现算（[outlineContent] 里第 [OutlineEditDraft.eventIndex]
+  /// 个事件之前有几个大事件）：正文里写着的大事件编号就是它，且与「只勾选了几章」
+  /// 无关——只数草稿列表里有几个大事件的话，选中范围内的大事件会被编成 1、2……
+  /// （大事件57 显示成「大事件1」，用户会以为自己的大事件被顶掉了）。
+  ///
+  /// 只信 [majorNumbersById] 也是错的：它按行 id 键、只在 [_loadContext] 读完全篇
+  /// 章节后才建好，增删事件当场改变编号时拿到的是旧编号。表只当兜底。
   int? majorNumberOfDraft(OutlineEditDraft draft) {
-    final local = _localMajorNumbers()[draft.localId];
-    if (local != null) return local;
+    if (!draft.isMajor) return null;
+    final fromText = _majorNumberAt(draft.eventIndex);
+    if (fromText != null) return fromText;
     final id = draft.chapterId;
     return id == 0 ? null : majorNumbersById[id];
   }
 
-  /// 本次会话内的大事件序号（局部 id → 序号），新增行还没入库时用它显示序号
-  Map<int, int> _localMajorNumbers() {
-    final map = <int, int>{};
+  /// 正文统计缓存：扫一遍正文，记下「第 i 个事件（含）之前有几个大事件」。
+  /// 卡片每次重建都会问一遍编号，正文又可能很大，所以按正文引用缓存一份。
+  String? _majorCountSource;
+  List<int> _majorCounts = const [];
+
+  void _ensureMajorCounts() {
+    if (identical(_majorCountSource, outlineContent)) return;
+    final counts = <int>[];
     var seq = 0;
-    for (final d in drafts) {
-      if (d.isMajor) map[d.localId] = ++seq;
+    for (final e in parseOutlineEvents(
+      outlineContent,
+      outlineId: outline.id ?? 0,
+    )) {
+      if (e.isMajor) seq++;
+      counts.add(seq);
     }
-    return map;
+    _majorCountSource = outlineContent;
+    _majorCounts = counts;
+  }
+
+  /// 第 [eventIndex] 个事件是大事件时的序号（只数大事件）；不是大事件 /
+  /// 序号越界时返回 null
+  int? _majorNumberAt(int eventIndex) {
+    _ensureMajorCounts();
+    if (eventIndex < 1 || eventIndex > _majorCounts.length) return null;
+    final n = _majorCounts[eventIndex - 1];
+    return n == 0 ? null : n;
   }
 
   /// AI 生成的目标章节（点某张卡片的「AI 生成」时切换）
@@ -202,7 +233,8 @@ class OutlineEditController extends ChangeNotifier {
         foreshadows = row['foreshadows'] as String? ?? '';
         storyState = row['story_state'] as String? ?? '';
         final content = row['content'] as String? ?? '';
-        if (content.isNotEmpty) outlineContent = content;
+        // 已经动过结构就不覆盖本地正文（理由见 [_structureEdited]）
+        if (content.isNotEmpty && !_structureEdited) outlineContent = content;
       }
       _safeNotify();
     } catch (e, st) {
@@ -251,17 +283,28 @@ class OutlineEditController extends ChangeNotifier {
 
   /// 在 [index] 之前插入一个新事件（[index] 等于现有事件数时追加到末尾）。
   ///
+  /// [below] 为 true 表示**紧接在 `drafts[index - 1]` 这张卡片的下方**插入
+  /// （页面上点「在它下方添加」走这条）。为什么要单独给一个开关：编辑页可以只
+  /// 勾选其中几章，「下方」指的是**正文里紧跟这张卡片之后**的那个位置，而不是
+  /// 「下一张被勾选的卡片之前」——两者之间常常隔着几十条（比如只勾了第 3 章和
+  /// 第 60 章，按后者算就会把新事件扔到第 60 条前面去）。
+  ///
   /// 返回新卡片的局部 id（页面据此把新卡片滚到可见位置）。
   /// 改动同时落在大纲正文（[insertEventIntoOutlineText] 写出标题占位行）与
   /// 草稿列表上，两者的第 N 个事件始终指同一条——否则保存时按序号写回会改错行。
+  ///
+  /// [index] 是**草稿列表里**的插入位置（0 = 第一张卡片之前）。真正写进正文的
+  /// 序号按 [_insertionOrdinal] 换成全局序号：只勾选了几章时，草稿下标不能直接
+  /// 当正文序号用。
   int addEvent({
     required int index,
     required bool isMajor,
     String title = '',
+    bool below = false,
   }) {
     final before = _flushPendingHistory();
     final at = index.clamp(0, drafts.length);
-    final eventIndex = at + 1;
+    final eventIndex = _insertionOrdinal(at, below: below);
     final cleanTitle = title.trim();
     final useTitle = cleanTitle.isEmpty ? kNewEventTitle : cleanTitle;
 
@@ -284,18 +327,66 @@ class OutlineEditController extends ChangeNotifier {
       isNew: true,
     )..onChanged = _onDraftChanged;
     drafts.insert(at, draft);
+    _structureEdited = true;
     _renumberDrafts();
-    _adoptChapterIntoContext(chapter, at);
     _syncAllChaptersOrder();
     _syncHistoryAfterStructureChange(before);
     _safeNotify();
     return draft.localId;
   }
 
+  /// 草稿列表第 [at] 处插入时，写进正文的**全局事件序号**（从 1 开始）。
+  ///
+  /// 编辑页可以只勾选其中几章，「在该条上方 / 下方添加」说的都是**那一张卡片**
+  /// 的位置，所以插入点必须由锚点卡片在正文里的真实序号算出来：
+  /// - 点「上方」（[below] = false）→ 锚点卡片**前面**
+  /// - 点「下方」（[below] = true，锚点是 `drafts[at - 1]`）→ 锚点卡片**后面**
+  /// - 页面上一条卡片都没有 → 追加到正文末尾
+  /// - 锚点在正文里**定位不到**（标题对不上）→ 也追加到末尾：宁可放到最后，
+  ///   绝不按草稿下标蒙一个位置（那正是「在第三个大事件加，结果加进第一个大事件」
+  ///   的成因）
+  int _insertionOrdinal(int at, {bool below = false}) {
+    if (drafts.isEmpty) return countOutlineEvents(outlineContent) + 1;
+    final anchorAt = below ? at - 1 : at;
+    if (anchorAt >= 0 && anchorAt < drafts.length) {
+      final ordinal = _globalOrdinalOf(drafts[anchorAt]);
+      if (ordinal != null) return below ? ordinal + 1 : ordinal;
+    }
+    return (_globalOrdinalOf(drafts.last) ?? countOutlineEvents(outlineContent)) + 1;
+  }
+
+  /// 某张卡片在正文里的全局事件序号；找不到返回 null。
+  ///
+  /// 定位是**从上一张卡片命中处继续往后找**的（[locateEventOrdinals] 的顺序语义），
+  /// 所以同名多条不会都指到最前面那一条；而且**只有这张卡片自己命中才算数**，
+  /// 前面几张命中、它没命中时返回 null（不能拿前一张的序号顶上，否则新事件会被
+  /// 插到前一张旁边去）。
+  int? _globalOrdinalOf(OutlineEditDraft draft) {
+    final list = <OutlineEditDraft>[];
+    for (final d in drafts) {
+      list.add(d);
+      if (identical(d, draft)) break;
+    }
+    if (list.isEmpty || !identical(list.last, draft)) return null;
+    final located = locateEventOrdinals(outlineContent, [
+      for (final d in list) d.savedTitle,
+    ]);
+    return located.isEmpty ? null : located.last;
+  }
+
   /// 删除一个事件（含它在大纲正文里的标题行与概要区）。
   ///
   /// 只有界面确认过「可以丢正文」（[deleteImpact] 已经告知用户）之后才该调用。
   /// 已写正文的行在保存时才会真的从库里 DELETE。
+  ///
+  /// 正文里删哪一行**按标题核对**，序号只当位置参考（见
+  /// [removeEventFromOutlineText] 的 `expectTitles`）：库里的序号与正文一旦错位，
+  /// 按序号硬删就会删掉旁边那一条——现象是「点了删除，这个小事件还在、
+  /// 别的事件反而没了」。标题候选取「[OutlineEditDraft.savedTitle]（正文里现在
+  /// 写着的标题）→ [OutlineEditDraft.title]（界面上现在显示的标题）」：
+  /// 改过标题还没保存时正文里是前者，正常保存过的两者一致。
+  /// 两个候选都对不上（这一行是正文里根本没有的幽灵行）时正文不动，
+  /// 只把卡片与库里的行删掉——那正是用户要的结果。
   void deleteEvent(OutlineEditDraft draft) {
     final at = drafts.indexOf(draft);
     if (at < 0) return;
@@ -303,6 +394,8 @@ class OutlineEditController extends ChangeNotifier {
     outlineContent = removeEventFromOutlineText(
       outlineContent,
       draft.eventIndex,
+      expectTitles: [draft.savedTitle, draft.title],
+      expectMajor: draft.isMajor,
     );
     drafts.removeAt(at);
     if (draft.chapterId != 0 && !draft.isNew) {
@@ -311,42 +404,31 @@ class OutlineEditController extends ChangeNotifier {
     }
     if (chatting) stopChat(); // 删掉的正是 AI 正在生成的那一条时别让它继续写
     draft.dispose();
+    _structureEdited = true;
     _renumberDrafts();
     _syncAllChaptersOrder();
     _syncHistoryAfterStructureChange(before);
     _safeNotify();
   }
 
-  /// 按当前顺序重编所有草稿的事件序号
+  /// 按当前顺序重编所有草稿的事件序号。
+  ///
+  /// 序号是**全局**的（正文里的第几个事件），不是草稿列表里的第几张卡片：
+  /// 页面只勾选了几章时，从 1 开始重编会把选中行改成 1、2…… 与其余章节撞号，
+  /// 章节列表的顺序、大事件编号、保存时按序号写回全部跟着错位。
+  /// 草稿顺序与正文顺序一致，所以在正文里按标题依次定位即可（见
+  /// [locateEventOrdinals]）；正文里找不到的那张卡片（幽灵行 / 标题被改坏）
+  /// 按上一张的序号 +1 兜底，至少不会把后面的卡片全挤到最前面。
   void _renumberDrafts() {
+    final located = locateEventOrdinals(outlineContent, [
+      for (final d in drafts) d.savedTitle,
+    ]);
+    var last = 0;
     for (var i = 0; i < drafts.length; i++) {
-      final d = drafts[i];
-      if (d.eventIndex == i + 1) continue;
-      d.reindex(i + 1);
+      final ordinal = located[i] ?? (last + 1);
+      last = ordinal;
+      if (drafts[i].eventIndex != ordinal) drafts[i].reindex(ordinal);
     }
-  }
-
-  /// 把新增行挂进章节上下文（AI 生成要拿它算「所属大事件 / 前后事件」）
-  void _adoptChapterIntoContext(OutlineChapter chapter, int at) {
-    if (!_contextLoaded || allChapters.isEmpty) return;
-    // 全篇章节按序号插：插在编辑页顺序的对应位置，上下文顺序才是对的
-    final beforeId = at > 0 ? drafts[at - 1].chapterId : 0;
-    if (beforeId != 0) {
-      final hit = allChapters.indexWhere((c) => c.id == beforeId);
-      if (hit >= 0) {
-        allChapters.insert(hit + 1, chapter);
-        return;
-      }
-    }
-    final afterId = at + 1 < drafts.length ? drafts[at + 1].chapterId : 0;
-    if (afterId != 0) {
-      final hit = allChapters.indexWhere((c) => c.id == afterId);
-      if (hit >= 0) {
-        allChapters.insert(hit, chapter);
-        return;
-      }
-    }
-    allChapters.add(chapter);
   }
 
   /// 任意一张卡片文本变化：刷新页面并（合并后）记录一步历史
@@ -425,20 +507,25 @@ class OutlineEditController extends ChangeNotifier {
   /// AI 目标是否已经不在页面上（被撤销 / 反撤销换掉了）
   bool _chatTargetGone() => aiTargetIndex >= drafts.length || aiTargetIndex < 0;
 
-  /// 当前所有草稿的**完整**快照：卡片本身 + 标题 + 概要 + 未保存判定基线。
-  /// 带上卡片是为了撤销 / 反撤销能连同「刚新增的卡片」「刚删掉的卡片」一起还原。
-  _OutlineSnapshot _takeSnapshot() => _OutlineSnapshot([
-    for (final d in drafts)
-      _OutlineDraftState(
-        localId: d.localId,
-        chapter: d.chapter,
-        title: d.titleCtrl.text,
-        summary: d.summaryCtrl.text,
-        savedTitle: d.savedTitle,
-        savedSummary: d.savedSummary,
-        isNew: d.isNew,
-      ),
-  ]);
+  /// 当前所有草稿的**完整**快照：卡片本身 + 标题 + 概要 + 未保存判定基线 +
+  /// 大纲正文。带上卡片是为了撤销 / 反撤销能连同「刚新增的卡片」「刚删掉的卡片」
+  /// 一起还原；带上正文同理——增删事件改的就是正文，只还原卡片的话，
+  /// 撤销之后卡片回来了、正文里那一行仍然缺着（见 [_applySnapshot]）。
+  _OutlineSnapshot _takeSnapshot() => _OutlineSnapshot(
+    [
+      for (final d in drafts)
+        _OutlineDraftState(
+          localId: d.localId,
+          chapter: d.chapter,
+          title: d.titleCtrl.text,
+          summary: d.summaryCtrl.text,
+          savedTitle: d.savedTitle,
+          savedSummary: d.savedSummary,
+          isNew: d.isNew,
+        ),
+    ],
+    outlineContent,
+  );
 
   /// [localId] 这张卡片在**上一次改动前**的状态。
   ///
@@ -466,33 +553,43 @@ class OutlineEditController extends ChangeNotifier {
       }
       if (oldTitle != null) break;
     }
-    return _OutlineSnapshot([
-      for (final d in drafts)
-        _OutlineDraftState(
-          localId: d.localId,
-          chapter: d.chapter,
-          title: d.localId == localId && oldTitle != null
-              ? oldTitle
-              : d.titleCtrl.text,
-          summary: d.localId == localId && oldSummary != null
-              ? oldSummary
-              : d.summaryCtrl.text,
-          savedTitle: d.localId == localId ? oldSavedTitle : d.savedTitle,
-          savedSummary: d.localId == localId
-              ? oldSavedSummary
-              : d.savedSummary,
-          isNew: d.localId == localId ? oldIsNew : d.isNew,
-        ),
-    ]);
+    return _OutlineSnapshot(
+      [
+        for (final d in drafts)
+          _OutlineDraftState(
+            localId: d.localId,
+            chapter: d.chapter,
+            title: d.localId == localId && oldTitle != null
+                ? oldTitle
+                : d.titleCtrl.text,
+            summary: d.localId == localId && oldSummary != null
+                ? oldSummary
+                : d.summaryCtrl.text,
+            savedTitle: d.localId == localId ? oldSavedTitle : d.savedTitle,
+            savedSummary: d.localId == localId
+                ? oldSavedSummary
+                : d.savedSummary,
+            isNew: d.localId == localId ? oldIsNew : d.isNew,
+          ),
+      ],
+      // 文本改动不动正文，正文取当前值即可
+      outlineContent,
+    );
   }
 
-  /// 按快照重建草稿列表：文本回写，快照里有、现在没有的卡片重新建出来
+  /// 按快照重建草稿列表与大纲正文：文本回写，快照里有、现在没有的卡片重新建出来
   /// （反撤销「删除事件」），快照里没有的卡片释放掉（撤销「新增事件」）。
+  ///
+  /// **正文必须一起还原**：增删事件改的就是正文，只重建卡片列表的话，
+  /// 撤销「删除」之后卡片回来了、正文里那一行仍然缺着——保存时按序号写回会改错行，
+  /// 下次进页面按正文校正结构时这一条还会消失（等于撤销没生效、白丢一条）；
+  /// 撤销「新增」同理，正文里会永远留着那条占位行，而库里没有对应的行。
   ///
   /// 重建过程中的监听不记录历史（[_applyingHistory]）。
   void _applySnapshot(_OutlineSnapshot snap) {
     _applyingHistory = true;
     try {
+      outlineContent = snap.content;
       final current = <int, OutlineEditDraft>{
         for (final d in drafts) d.localId: d,
       };
@@ -672,11 +769,13 @@ class OutlineEditController extends ChangeNotifier {
     }
 
     // 按最终顺序重编序号：增删之后 event_index 必须与正文里的第几个事件一致，
-    // 否则下次进页面按序号写回会改错行
+    // 否则下次进页面按序号写回会改错行。
+    // 取草稿自己的**全局**序号（不是下标 i+1）：页面只勾选了几章时，下标会与
+    // 未参与编辑的章节撞号，整本小说的章节顺序就乱了。
     final indexById = <int, int>{};
-    for (var i = 0; i < drafts.length; i++) {
-      final id = drafts[i].chapterId;
-      if (id != 0) indexById[id] = i + 1;
+    for (final d in drafts) {
+      final id = d.chapterId;
+      if (id != 0) indexById[id] = d.eventIndex;
     }
     await helper.updateEventIndices(indexById);
     return inserted;
@@ -709,35 +808,22 @@ class OutlineEditController extends ChangeNotifier {
   /// 让 [allChapters] 的序号与本次编辑后的结构一致。
   ///
   /// 增删事件后库里记的 `event_index` 会短暂与最终结构错位，
-  /// 按住它排序再取「所属大事件」就会取错一条，所以这里按草稿顺序重编——
-  /// 选中部分章节时编辑页与全篇的相对顺序是一致的（上一页整表按大纲正文
-  /// 解析入库），因此重编后未参与编辑的章节也不会排错。
+  /// 按住它排序再取「所属大事件」就会取错一条，所以这里按草稿的**全局序号**重编。
+  /// 未参与编辑的章节原地保留、按序号一起排序——**不能**把选中的几章排到最前面：
+  /// 那样整本小说的顺序就乱了（大事件编号、AI 上下文里的前后文都会跟着错）。
+  /// 草稿自己的章节（含刚新增、还没入库的那条）优先，未参与编辑的按行 id 补在后面。
   /// [allChapters] 还没读回来时不猜结构（等读完自然是对的）。
   void _syncAllChaptersOrder() {
     if (!_contextLoaded) return;
-    // 全篇章节还没读回来（或这本小说还没解析过章节）时退回草稿自己的章节：
-    // 至少要保证「序号」与页面一致，否则大事件序号会按旧编号显示
-    if (allChapters.isEmpty) {
-      allChapters = [
-        for (var i = 0; i < drafts.length; i++)
-          drafts[i].chapter.copyWith(eventIndex: i + 1),
-      ];
-      majorNumbersById = majorEventNumbersById(allChapters);
-      return;
-    }
-    final byId = <int, OutlineChapter>{};
-    for (final c in allChapters) {
-      final id = c.id;
-      if (id != null) byId[id] = c;
-    }
-    final ordered = <OutlineChapter>[];
-    for (var i = 0; i < drafts.length; i++) {
-      final c = byId.remove(drafts[i].chapterId);
-      if (c == null) continue;
-      ordered.add(c.copyWith(eventIndex: i + 1));
-      drafts[i].adoptChapter(ordered.last); // 草稿与上下文留着同一份序号
-    }
-    ordered.addAll(byId.values); // 未参与编辑的章节（勾选了部分章节时）
+    final draftIds = <int>{
+      for (final d in drafts)
+        if (d.chapterId != 0) d.chapterId,
+    };
+    final ordered = <OutlineChapter>[
+      for (final d in drafts) d.chapter,
+      for (final c in allChapters)
+        if (c.id == null || !draftIds.contains(c.id)) c,
+    ]..sort((a, b) => a.eventIndex.compareTo(b.eventIndex));
     allChapters = ordered;
     majorNumbersById = majorEventNumbersById(allChapters);
   }
@@ -1039,16 +1125,20 @@ class OutlineEditController extends ChangeNotifier {
 }
 
 /// 撤销 / 反撤销用的大纲快照：按**本次会话的卡片**（[OutlineEditDraft.localId]）
-/// 记录整页草稿状态。用局部 id 而不是行 id：新增的卡片还没入库、没有行 id，
-/// 撤销「新增事件」时必须认得出它。
+/// 记录整页草稿状态 + 当时的大纲正文。用局部 id 而不是行 id：新增的卡片还没入库、
+/// 没有行 id，撤销「新增事件」时必须认得出它。
 class _OutlineSnapshot {
   /// 快照时的卡片顺序（与页面上的顺序一致）
   final List<_OutlineDraftState> states;
 
-  const _OutlineSnapshot(this.states);
+  /// 快照时的大纲正文（增删事件改的就是它，撤销必须一起还原）
+  final String content;
 
-  /// 文本是否完全一致（决定要不要压一步撤销栈）
+  const _OutlineSnapshot(this.states, this.content);
+
+  /// 状态是否完全一致（卡片文本 + 正文；决定要不要压一步撤销栈）
   bool sameAs(_OutlineSnapshot other) {
+    if (content != other.content) return false;
     if (states.length != other.states.length) return false;
     for (var i = 0; i < states.length; i++) {
       if (!states[i].sameAs(other.states[i])) return false;

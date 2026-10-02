@@ -154,6 +154,269 @@ void main() {
     });
   });
 
+  group('删除事件：序号错位 / 幽灵行也不误删', () {
+    // 正文里的顺序固定是 甲(1) / 乙(2) / 丙(3) / 丁(4)
+    final text = [
+      '══ 大事件1：甲 ══',
+      '甲的概要',
+      '',
+      '○ 小事件1：乙',
+      '乙的概要',
+      '',
+      '○ 小事件2：丙',
+      '丙的概要',
+      '',
+      '══ 大事件2：丁 ══',
+      '丁的概要',
+    ].join('\n');
+
+    test('库里序号与正文错位：删掉的仍是点的那条小事件，旁边的不动', () {
+      // 库里的 event_index 与正文顺序对不上（历史上「章节选择页拿旧快照校正
+      // 结构」留下的错位）：界面上第 3 张卡片是「乙」，正文里第 3 个事件却是「丙」。
+      // 旧实现按序号硬删，会把「丙」从大纲正文里抹掉——用户看到的就是
+      // 「删了乙，乙还在、丙反而没了」。
+      final ctrl = OutlineEditController(
+        OutlineRecord(title: 'T', content: text),
+      );
+      ctrl.init([
+        OutlineChapter(
+          id: 4,
+          outlineId: 7,
+          eventIndex: 1,
+          eventType: 'major',
+          eventTitle: '丁',
+          eventSummary: '丁的概要',
+        ),
+        OutlineChapter(
+          id: 1,
+          outlineId: 7,
+          eventIndex: 2,
+          eventType: 'major',
+          eventTitle: '甲',
+          eventSummary: '甲的概要',
+        ),
+        OutlineChapter(
+          id: 2,
+          outlineId: 7,
+          eventIndex: 3,
+          eventType: 'minor',
+          eventTitle: '乙',
+          eventSummary: '乙的概要',
+        ),
+        OutlineChapter(
+          id: 3,
+          outlineId: 7,
+          eventIndex: 4,
+          eventType: 'minor',
+          eventTitle: '丙',
+          eventSummary: '丙的概要',
+        ),
+      ]);
+
+      ctrl.deleteEvent(ctrl.drafts[2]); // 界面上的「乙」
+
+      expect(ctrl.outlineContent.contains('乙'), isFalse, reason: '点的那条要删掉');
+      expect(
+        parseOutlineEvents(ctrl.outlineContent, outlineId: 7)
+            .map((e) => e.eventTitle)
+            .toList(),
+        ['甲', '丙', '丁'],
+        reason: '只该少掉「乙」，别的事件一条都不能少',
+      );
+      expect(ctrl.drafts.map((d) => d.title).toList(), ['丁', '甲', '丙']);
+      ctrl.dispose();
+    });
+
+    test('正文里没有这条（幽灵行）：卡片照删，正文不被动', () {
+      // 正文里只有 甲 / 乙，库里却多出一条「幽灵」——旧实现按序号删会把
+      // 正文里的某一条连带删掉，而且幽灵行本身删不掉（下次校正又回来）
+      final ctrl = OutlineEditController(
+        OutlineRecord(
+          title: 'T',
+          content: [
+            '══ 大事件1：甲 ══',
+            '甲的概要',
+            '',
+            '○ 小事件1：乙',
+            '乙的概要',
+          ].join('\n'),
+        ),
+      );
+      ctrl.init([
+        OutlineChapter(
+          id: 1,
+          outlineId: 7,
+          eventIndex: 1,
+          eventType: 'major',
+          eventTitle: '甲',
+          eventSummary: '甲的概要',
+        ),
+        OutlineChapter(
+          id: 2,
+          outlineId: 7,
+          eventIndex: 2,
+          eventType: 'minor',
+          eventTitle: '乙',
+          eventSummary: '乙的概要',
+        ),
+        OutlineChapter(
+          id: 3,
+          outlineId: 7,
+          eventIndex: 3,
+          eventType: 'minor',
+          eventTitle: '幽灵',
+          eventSummary: '库里多出来的',
+        ),
+      ]);
+
+      final before = ctrl.outlineContent;
+      ctrl.deleteEvent(ctrl.drafts[2]);
+
+      expect(ctrl.outlineContent, before, reason: '正文里没有它，一行都不该动');
+      expect(ctrl.drafts.map((d) => d.title).toList(), ['甲', '乙']);
+      expect(parseOutlineEvents(ctrl.outlineContent, outlineId: 7).length, 2);
+      expect(ctrl.hasStructureChanges, isTrue, reason: '库里那行要在保存时删掉');
+      ctrl.dispose();
+    });
+  });
+
+  group('只勾选其中几章时：增删事件必须按正文里的真实位置', () {
+    // 全篇 5 个事件：甲 / 乙 / 丙 / 丁 / 戊；本次只编辑其中的「丁」
+    final whole = [
+      '══ 大事件1：甲 ══',
+      '甲的概要',
+      '',
+      '○ 小事件1：乙',
+      '乙的概要',
+      '',
+      '══ 大事件2：丙 ══',
+      '丙的概要',
+      '',
+      '○ 小事件2：丁',
+      '丁的概要',
+      '',
+      '══ 大事件3：戊 ══',
+      '戊的概要',
+    ].join('\n');
+
+    OutlineChapter ch(int id, int index, String type, String title) =>
+        OutlineChapter(
+          id: id,
+          outlineId: 7,
+          eventIndex: index,
+          eventType: type,
+          eventTitle: title,
+          eventSummary: '$title的概要',
+        );
+
+    /// 只把「丁」交给编辑页（章节列表页的「编辑」按钮就是只传一章）
+    OutlineEditController buildSubset() {
+      final ctrl = OutlineEditController(
+        OutlineRecord(title: 'T', content: whole),
+      );
+      ctrl.init([ch(4, 4, 'minor', '丁')]);
+      return ctrl;
+    }
+
+    List<String> titles(OutlineEditController c) => parseOutlineEvents(
+      c.outlineContent,
+      outlineId: 7,
+    ).map((e) => e.eventTitle).toList();
+
+    test('在「丁」上方新增大事件：插在丁前面，而不是整篇大纲的开头', () {
+      final c = buildSubset();
+      c.addEvent(index: 0, isMajor: true, title: '小鹿'); // 页面上点的是「上方」
+
+      expect(
+        titles(c),
+        ['甲', '乙', '丙', '小鹿', '丁', '戊'],
+        reason: '新事件必须紧挨着它上面那张卡片，前面的甲/乙/丙一条都不能被顶掉',
+      );
+      // 序号是**全局**的：新事件是第 4 个，丁顺延成第 5 个
+      expect(c.drafts[0].eventIndex, 4);
+      expect(c.drafts[1].eventIndex, 5);
+      c.dispose();
+    });
+
+    test('在「丁」下方新增大事件：插在丁后面，戊不受影响', () {
+      final c = buildSubset();
+      c.addEvent(index: 1, isMajor: true, title: '小鹿'); // 页面上点的是「下方」
+
+      expect(titles(c), ['甲', '乙', '丙', '丁', '小鹿', '戊']);
+      expect(c.drafts[0].eventIndex, 4);
+      expect(c.drafts[1].eventIndex, 5);
+      c.dispose();
+    });
+
+    test('只编辑一章时新增的小事件同样落在正确位置', () {
+      final c = buildSubset();
+      c.addEvent(index: 0, isMajor: false, title: '小鹿');
+
+      expect(titles(c), ['甲', '乙', '丙', '小鹿', '丁', '戊']);
+      expect(c.drafts[0].isMajor, isFalse);
+      c.dispose();
+    });
+
+    test('只编辑一章时删除这张卡片：删的是它自己，前后条目都在', () {
+      final c = buildSubset();
+      c.deleteEvent(c.drafts[0]); // 「丁」
+
+      expect(titles(c), ['甲', '乙', '丙', '戊']);
+      expect(c.outlineContent.contains('丁'), isFalse);
+      c.dispose();
+    });
+
+    test('只勾选两章（隔很远）时点「下方」：紧接在锚点后面，不是下一张卡片前面', () {
+      // 只勾选「丙」（全篇第 3 个）和「戊」（全篇第 5 个），在「丙」下方新增：
+      // 位置必须是紧跟丙之后，而不是戊之前（旧实现会算成戊的位置）
+      final ctrl = OutlineEditController(
+        OutlineRecord(title: 'T', content: whole),
+      );
+      ctrl.init([ch(3, 3, 'major', '丙'), ch(5, 5, 'major', '戊')]);
+      ctrl.addEvent(index: 1, isMajor: false, title: '小鹿', below: true);
+
+      expect(titles(ctrl), ['甲', '乙', '丙', '小鹿', '丁', '戊']);
+      expect(ctrl.drafts.map((d) => d.title).toList(), ['丙', '小鹿', '戊']);
+      ctrl.dispose();
+    });
+
+    test('在第三个大事件上「下方」加小事件：落在大事件3名下，不跑到大事件1', () {
+      // 只勾选「戊」（大事件3）：在它下方加一条小事件，
+      // 位置必须在它后面（大事件3 名下），而不是整篇大纲的最前面
+      final ctrl = OutlineEditController(
+        OutlineRecord(title: 'T', content: whole),
+      );
+      ctrl.init([ch(5, 5, 'major', '戊')]);
+      ctrl.addEvent(index: 1, isMajor: false, title: '小鹿', below: true);
+
+      expect(titles(ctrl), ['甲', '乙', '丙', '丁', '戊', '小鹿']);
+      expect(ctrl.drafts[1].eventIndex, 6);
+      ctrl.dispose();
+    });
+
+    test('大事件序号按全篇算，不是按「勾选的这几章」算', () {
+      // 只编辑「戊」（全篇第 3 个大事件）：它必须显示「大事件3」，
+      // 而不是因为页面上只勾了一章就显示「大事件1」
+      final ctrl = OutlineEditController(
+        OutlineRecord(title: 'T', content: whole),
+      );
+      ctrl.init([ch(5, 5, 'major', '戊')]);
+      expect(ctrl.majorNumberOfDraft(ctrl.drafts[0]), 3);
+      ctrl.dispose();
+    });
+
+    test('只编辑一章时新增一个大事件：新卡片的大事件序号也是全局的', () {
+      final c = buildSubset();
+      c.addEvent(index: 0, isMajor: true, title: '小鹿'); // 插在「丁」上方
+
+      // 全篇：甲(大1) 乙 丙(大2) 小鹿(大3) 丁 戊(大4)
+      expect(c.majorNumberOfDraft(c.drafts[0]), 3);
+      expect(c.drafts[1].title, '丁');
+      expect(c.drafts[1].isMajor, isFalse);
+      c.dispose();
+    });
+  });
+
   group('增删事件的撤销 / 反撤销', () {
     test('撤销「添加」会把新增的卡片去掉，反撤销再放回来', () {
       final c = build();
@@ -190,6 +453,46 @@ void main() {
       expect(c.drafts[1].title, '乙');
       expect(c.drafts[1].summary, '乙的概要');
       expect(c.drafts[1].isDirty, isFalse);
+      c.dispose();
+    });
+
+    // ---- 正文也要跟着撤销：否则「撤销找回」只是把卡片放回来，
+    // 正文里那一行仍然缺着，保存时按序号写回会改错行，
+    // 下次按正文校正结构时这一条又消失（等于撤销没生效） ----
+    test('撤销「删除」：正文里的那一行也放回来，且不影响别的条目', () {
+      final c = build();
+      c.deleteEvent(c.drafts[1]); // 小事件「乙」
+      expect(parseOutlineEvents(c.outlineContent, outlineId: 7).length, 2);
+
+      c.undo();
+      expect(c.drafts.map((d) => d.title).toList(), ['甲', '乙', '丙']);
+      expect(parseOutlineEvents(c.outlineContent, outlineId: 7).length, 3);
+      expect(textTitle(c, 2), '乙');
+      expect(
+        parseOutlineEvents(
+          c.outlineContent,
+          outlineId: 7,
+        )[1].eventSummary,
+        '乙的概要',
+      );
+      expect(c.hasStructureChanges, isFalse);
+      c.dispose();
+    });
+
+    test('撤销「添加」：正文里新增的那一行也去掉', () {
+      final c = build();
+      c.addEvent(index: 1, isMajor: false, title: '夹心');
+      expect(parseOutlineEvents(c.outlineContent, outlineId: 7).length, 4);
+
+      c.undo();
+      expect(parseOutlineEvents(c.outlineContent, outlineId: 7).length, 3);
+      expect(c.outlineContent.contains('夹心'), isFalse);
+      expect(textTitle(c, 2), '乙');
+
+      c.redo(); // 反撤销把它放回来
+      expect(c.drafts.map((d) => d.title).toList(), ['甲', '夹心', '乙', '丙']);
+      expect(parseOutlineEvents(c.outlineContent, outlineId: 7).length, 4);
+      expect(textTitle(c, 2), '夹心');
       c.dispose();
     });
   });

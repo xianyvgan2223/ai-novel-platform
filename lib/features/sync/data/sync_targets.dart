@@ -55,6 +55,9 @@ const List<SyncTarget> kSyncTargets = <SyncTarget>[
 /// （API Key 没必要同步到网页，也避免导出时泄露）
 const Map<String, List<String>> kSensitiveColumns = <String, List<String>>{
   'user_settings': <String>['apiKey', 'baidu_api_key'],
+  // 大纲正文的上一版备份（见 OutlineRecordDbHelper.update）：纯本机保险，
+  // 体积与正文同量级，不跟着同步跑；也不会被服务端的旧数据覆盖
+  'outline_records': <String>['content_backup', 'content_backup_at'],
 };
 
 /// 取某表需要跳过的列
