@@ -66,6 +66,82 @@ class _MessageBubbleState extends State<MessageBubble> {
   Widget build(BuildContext context) {
     final isUser = widget.message.isUser;
 
+    // 气泡的两个槽位：复选框（仅编辑模式）+ 内容
+    final rowChildren = <Widget>[
+      if (widget.isEditMode && !isUser) _buildCheckbox(),
+      Flexible(
+        child: GestureDetector(
+          onTap: widget.isEditMode ? widget.onToggleSelection : null,
+          child: Column(
+            crossAxisAlignment: isUser
+                ? CrossAxisAlignment.end
+                : CrossAxisAlignment.start,
+            children: [
+              if (!isUser && widget.message.thinkingText != null) ...[
+                _buildThinkingSection(),
+                const SizedBox(height: 6),
+              ],
+              _buildBubble(),
+              if (!isUser && widget.message.searchResults != null) ...[
+                const SizedBox(height: 8),
+                _buildSearchResultsSection(),
+              ],
+              if (!widget.isEditMode)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: InkWell(
+                      onTap: widget.onEditRequested,
+                      borderRadius: BorderRadius.circular(12),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF0F0F0),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Text(
+                          '···',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Color(0xFF999999),
+                            height: 1.2,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+      if (widget.isEditMode && isUser) _buildCheckbox(),
+    ];
+
+    // IntrinsicHeight 的唯一用途是把复选框撑到气泡高度，代价是每次布局都要为
+    // 整棵子树多跑一遍 intrinsic 预测量。键盘弹出动画期间，Scaffold 会因
+    // viewInsets 变化逐帧调整 body 高度，每个可见气泡因此每帧重新布局一次；
+    // 60Hz 的 16.6ms 预算勉强够用，120Hz 只有 8.3ms，于是掉帧。
+    // 非编辑模式下 Row 只剩 Flexible 一个子节点，此时 start 与 stretch 的
+    // 布局结果完全一致（Row 高度即该子节点高度），可以直接跳过 IntrinsicHeight。
+    final bubbleRow = widget.isEditMode
+        ? IntrinsicHeight(
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: rowChildren,
+            ),
+          )
+        : Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: rowChildren,
+          );
+
     return RepaintBoundary(
       child: Padding(
         padding: const EdgeInsets.only(bottom: 12),
@@ -75,66 +151,7 @@ class _MessageBubbleState extends State<MessageBubble> {
             constraints: BoxConstraints(
               maxWidth: MediaQuery.of(context).size.width * 0.8,
             ),
-            child: IntrinsicHeight(
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (widget.isEditMode && !isUser) _buildCheckbox(),
-                  Flexible(
-                    child: GestureDetector(
-                      onTap: widget.isEditMode ? widget.onToggleSelection : null,
-                      child: Column(
-                        crossAxisAlignment: isUser
-                            ? CrossAxisAlignment.end
-                            : CrossAxisAlignment.start,
-                        children: [
-                          if (!isUser && widget.message.thinkingText != null) ...[
-                            _buildThinkingSection(),
-                            const SizedBox(height: 6),
-                          ],
-                          _buildBubble(),
-                          if (!isUser &&
-                              widget.message.searchResults != null) ...[
-                            const SizedBox(height: 8),
-                            _buildSearchResultsSection(),
-                          ],
-                          if (!widget.isEditMode)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 6),
-                              child: Align(
-                                alignment: Alignment.centerRight,
-                                child: InkWell(
-                                  onTap: widget.onEditRequested,
-                                  borderRadius: BorderRadius.circular(12),
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 8, vertical: 2,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFFF0F0F0),
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    child: const Text(
-                                      '···',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: Color(0xFF999999),
-                                        height: 1.2,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  if (widget.isEditMode && isUser) _buildCheckbox(),
-                ],
-              ),
-            ),
+            child: bubbleRow,
           ),
         ),
       ),
