@@ -26,67 +26,85 @@ class NovelWritingPage extends StatelessWidget {
           onPressed: () => Navigator.of(context).pop(),
         ),
       ),
-      body: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.auto_stories, size: 64, color: Color(0xFFCCCCCC)),
-            const SizedBox(height: 16),
-            const Text(
-              '选择功能',
-              style: TextStyle(fontSize: 16, color: Color(0xFF999999)),
-            ),
-            const SizedBox(height: 32),
+      // 用 LayoutBuilder + IntrinsicHeight 而不是裸 Center：
+      // 聊天页弹着输入法时点进来，正文可用高度只剩 400 出头（键盘动画期间还会更矮），
+      // 而这个 Column 的内容本就接近 430 —— 裸 Center 下会直接 RenderFlex overflow。
+      // IntrinsicHeight 给出「高度不小于内容」的紧约束，于是内容装得下时照旧居中，
+      // 装不下时降级成可滚动，不会再溢出。
+      body: LayoutBuilder(
+        builder: (context, constraints) => SingleChildScrollView(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: constraints.maxHeight),
+            child: IntrinsicHeight(
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.auto_stories,
+                      size: 64,
+                      color: Color(0xFFCCCCCC),
+                    ),
+                    const SizedBox(height: 16),
+                    const Text(
+                      '选择功能',
+                      style: TextStyle(fontSize: 16, color: Color(0xFF999999)),
+                    ),
+                    const SizedBox(height: 32),
 
-            // 一键生成大纲
-            _buildNavButton(
-              context,
-              icon: Icons.list_alt,
-              label: '一键生成大纲',
-              color: const Color(0xFF4D6BFE),
-              page: const OutlineGenerationPage(),
-            ),
-            const SizedBox(height: 16),
+                    // 一键生成大纲
+                    _buildNavButton(
+                      context,
+                      icon: Icons.list_alt,
+                      label: '一键生成大纲',
+                      color: const Color(0xFF4D6BFE),
+                      page: const OutlineGenerationPage(),
+                    ),
+                    const SizedBox(height: 16),
 
-            // 大纲编辑（选小说 → 选章节 → 编辑 + AI 生成）
-            _buildNavButton(
-              context,
-              icon: Icons.edit_note,
-              label: '大纲编辑',
-              color: const Color(0xFF2196F3),
-              page: const OutlineEditNovelListPage(),
-            ),
-            const SizedBox(height: 16),
+                    // 大纲编辑（选小说 → 选章节 → 编辑 + AI 生成）
+                    _buildNavButton(
+                      context,
+                      icon: Icons.edit_note,
+                      label: '大纲编辑',
+                      color: const Color(0xFF2196F3),
+                      page: const OutlineEditNovelListPage(),
+                    ),
+                    const SizedBox(height: 16),
 
-            // AI 写战斗
-            _buildNavButton(
-              context,
-              icon: Icons.local_fire_department,
-              label: 'AI 写战斗',
-              color: const Color(0xFFFF5722),
-              page: const AiBattlePage(),
-            ),
-            const SizedBox(height: 16),
+                    // AI 写战斗
+                    _buildNavButton(
+                      context,
+                      icon: Icons.local_fire_department,
+                      label: 'AI 写战斗',
+                      color: const Color(0xFFFF5722),
+                      page: const AiBattlePage(),
+                    ),
+                    const SizedBox(height: 16),
 
-            // 大纲转章节
-            _buildNavButton(
-              context,
-              icon: Icons.auto_stories,
-              label: '大纲转章节',
-              color: const Color(0xFF7C4DFF),
-              page: const ChapterListPage(),
-            ),
-            const SizedBox(height: 16),
+                    // 大纲转章节
+                    _buildNavButton(
+                      context,
+                      icon: Icons.auto_stories,
+                      label: '大纲转章节',
+                      color: const Color(0xFF7C4DFF),
+                      page: const ChapterListPage(),
+                    ),
+                    const SizedBox(height: 16),
 
-            // 匹配大纲格式
-            _buildNavButton(
-              context,
-              icon: Icons.format_align_left,
-              label: '匹配大纲格式',
-              color: const Color(0xFF00BFA5),
-              page: const OutlineFormatPage(),
+                    // 匹配大纲格式
+                    _buildNavButton(
+                      context,
+                      icon: Icons.format_align_left,
+                      label: '匹配大纲格式',
+                      color: const Color(0xFF00BFA5),
+                      page: const OutlineFormatPage(),
+                    ),
+                  ],
+                ),
+              ),
             ),
-          ],
+          ),
         ),
       ),
     );

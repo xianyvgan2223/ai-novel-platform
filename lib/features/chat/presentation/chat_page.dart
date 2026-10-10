@@ -7,7 +7,6 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../application/chat_controller.dart';
 import '../domain/chat_message.dart';
-import '../domain/chat_session.dart';
 import 'history_page.dart';
 import 'settings_page.dart';
 import 'session_setting_page.dart';
@@ -28,6 +27,9 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   final TextEditingController _inputCtrl = TextEditingController();
   final ScrollController _scrollCtrl = ScrollController();
 
+  /// 用于打开/关闭历史会话抽屉
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+
   // 编辑模式状态
   bool _isEditMode = false;
   final Set<int> _selectedIndices = {};
@@ -35,17 +37,33 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   /// 用户是否在聊天底部附近（防自动滚动干扰手动翻阅）
   bool _isNearBottom = true;
 
+  /// 已滚到底部的会话 id（抽屉切换会话/新建会话后需要重新定位到底部）
+  int? _scrolledSessionId;
+
   ChatController get _chat => ref.read(chatProvider);
 
   @override
   void initState() {
     super.initState();
     _scrollCtrl.addListener(_onScrollChanged);
+    // 监听会话切换：抽屉里选中历史会话后自动定位到最新消息
+    ref.read(chatProvider).addListener(_onChatChanged);
     // 进入页面时定位到底部（如从悬浮面板“展开”进入时展示最新消息）
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollCtrl.hasClients) {
         _scrollCtrl.jumpTo(_scrollCtrl.position.maxScrollExtent);
       }
+    });
+  }
+
+  /// 会话被切换（抽屉里选会话 / 新建对话）时，等消息渲染完成后滚到底部
+  void _onChatChanged() {
+    final sessionId = _chat.currentSession?.id;
+    if (sessionId == _scrolledSessionId) return;
+    _scrolledSessionId = sessionId;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scrollCtrl.hasClients) return;
+      _scrollCtrl.jumpTo(_scrollCtrl.position.maxScrollExtent);
     });
   }
 
@@ -58,6 +76,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
 
   @override
   void dispose() {
+    ref.read(chatProvider).removeListener(_onChatChanged);
     _scrollCtrl.removeListener(_onScrollChanged);
     _inputCtrl.dispose();
     _scrollCtrl.dispose();
@@ -164,6 +183,24 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     }
   }
 
+  // ── 页面跳转 ──
+
+  /// 切换页面：收输入法 + 立即 push，不做任何等待。
+  ///
+  /// 曾经的坑：输入框有焦点时点「写小说」，输入法还没收回，新页面正文只剩
+  /// 400 出头的高度，内容高度固定的页面就 RenderFlex overflow。当时的修法是
+  /// 先 unfocus 再等窗口 inset 归零 —— 结果切页要多等一帧到几帧，手感发涩。
+  ///
+  /// 现在等待去掉了：目标页自身改成可滚动布局（见 novel_writing_page.dart），
+  /// 输入法收起动画与新页面入场动画同时进行也不会有布局溢出，于是切页回到
+  /// 「立即响应」。unfocus 仍然保留，否则键盘会挂在新页面上不收。
+  Future<void> _pushPage(Widget page) {
+    FocusManager.instance.primaryFocus?.unfocus();
+    return Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => page));
+  }
+
   // ── 发送消息 ──
 
   void _onSend() {
@@ -241,7 +278,9 @@ class _ChatPageState extends ConsumerState<ChatPage> {
         }
       },
       child: Scaffold(
+        key: _scaffoldKey,
         backgroundColor: Colors.white,
+        drawer: const HistoryDrawer(),
         appBar: _isEditMode
             ? _buildEditAppBar()
             : _buildAppBar(sessionTitle, hasSession),
@@ -272,21 +311,8 @@ class _ChatPageState extends ConsumerState<ChatPage> {
           ? IconButton(
               icon: const Icon(Icons.menu, color: Color(0xFF333333), size: 20),
               constraints: BoxConstraints(minWidth: 36, minHeight: 36),
-              onPressed: () async {
-                // 打开历史会话页，回传可能选中会话
-                final result = await Navigator.of(context).push<ChatSession>(
-                  MaterialPageRoute(builder: (_) => const HistoryPage()),
-                );
-                if (result != null && mounted) {
-                  await ref.read(chatProvider).loadSession(result);
-                  // 会话加载后滚动到底部
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    if (_scrollCtrl.hasClients) {
-                      _scrollCtrl.jumpTo(_scrollCtrl.position.maxScrollExtent);
-                    }
-                  });
-                }
-              },
+              tooltip: '历史会话',
+              onPressed: () => _scaffoldKey.currentState?.openDrawer(),
             )
           : BackButton(
               color: const Color(0xFF333333),
@@ -296,9 +322,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
         onTap: () {
           // 点击标题打开当前会话的设置页
           if (hasSession) {
-            Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const SessionSettingsPage()),
-            );
+            _pushPage(const SessionSettingsPage());
           }
         },
         child: Row(
@@ -333,11 +357,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
           ),
           constraints: BoxConstraints(minWidth: 36, minHeight: 36),
           tooltip: '写小说',
-          onPressed: () {
-            Navigator.of(
-              context,
-            ).push(MaterialPageRoute(builder: (_) => const NovelWritingPage()));
-          },
+          onPressed: () => _pushPage(const NovelWritingPage()),
         ),
         PopupMenuButton<String>(
           icon: const Icon(
@@ -351,13 +371,9 @@ class _ChatPageState extends ConsumerState<ChatPage> {
           onSelected: (value) {
             switch (value) {
               case 'settings':
-                Navigator.of(
-                  context,
-                ).push(MaterialPageRoute(builder: (_) => const SettingsPage()));
+                _pushPage(const SettingsPage());
               case 'game':
-                Navigator.of(
-                  context,
-                ).push(MaterialPageRoute(builder: (_) => const GameHubPage()));
+                _pushPage(const GameHubPage());
             }
           },
           itemBuilder: (context) => [
