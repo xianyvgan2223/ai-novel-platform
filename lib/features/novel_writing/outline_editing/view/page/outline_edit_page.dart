@@ -20,10 +20,19 @@ class OutlineEditPage extends StatefulWidget {
   final OutlineRecord outline;
   final List<OutlineChapter> chapters;
 
+  /// 注入控制器（**仅供测试**）：为 null 时页面自建。
+  ///
+  /// 控制器是页面的内部状态，测试要断言「改完立即写回内存的伏笔清单」这类行为，
+  /// 就必须拿到页面正在用的那一个——自己在外面 new 一个摆好状态传进来，
+  /// 页面不认（它只用 outline 与 chapters 重建一份自己的）。
+  @visibleForTesting
+  final OutlineEditController? controller;
+
   const OutlineEditPage({
     super.key,
     required this.outline,
     required this.chapters,
+    this.controller,
   });
 
   @override
@@ -41,8 +50,9 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
   @override
   void initState() {
     super.initState();
-    _controller = OutlineEditController(widget.outline);
-    _controller.init(widget.chapters);
+    // 注入的控制器（测试用）已经在外面 init 过了，这里不再重复灌一遍草稿
+    _controller = widget.controller ?? OutlineEditController(widget.outline);
+    if (widget.controller == null) _controller.init(widget.chapters);
   }
 
   @override
@@ -573,6 +583,10 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
                   color: Color(0xFF999999),
                 ),
               ),
+              const SizedBox(width: 8),
+              // 伏笔清单入口：页面条右侧是空的，顺手把「伏笔 N」排在事件数后面
+              // （标题栏左侧标题 + 右侧撤销/反撤销/保存已经排满，塞不下）
+              _buildForeshadowsButton(),
             ],
           ),
         ),
@@ -586,6 +600,59 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
           ),
         ),
       ],
+    );
+  }
+
+  /// 页面条上的「伏笔」入口：查看（并可直接编辑）这条大纲的伏笔清单。
+  ///
+  /// 为什么要有这个入口：伏笔清单是**只读注入**给 AI 的（提示词里的【伏笔清单】），
+  /// 用户看大纲时最常问的一句就是「这里到底埋没埋那条伏笔」。此前只能退出去到
+  /// 剧情账本页翻，断了「边看大纲边核对伏笔」这个动作。
+  Widget _buildForeshadowsButton() {
+    // 条数按非空行现算：清单是「每条一行」的文本，空行不算一条
+    final count = _foreshadowLines(_controller.foreshadows).length;
+    return InkWell(
+      onTap: _openForeshadowsSheet,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: const Color(0xFFEFF3FF),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFFDCE4FF)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.bookmark_border,
+              size: 13,
+              color: Color(0xFF4D6BFE),
+            ),
+            const SizedBox(width: 4),
+            Text(
+              // 上下文还没读回来时不显示条数：开页一瞬间的「0」会让人误以为清单是空的
+              _controller.contextLoaded ? '伏笔 $count' : '伏笔',
+              style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF4D6BFE),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 打开伏笔清单面板（查看 / 编辑）
+  Future<void> _openForeshadowsSheet() {
+    return showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _ForeshadowsSheet(controller: _controller),
     );
   }
 
@@ -850,5 +917,258 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
     }
     if (structure) return '有事件增删未保存';
     return '$dirty 章大纲有未保存的修改';
+  }
+}
+
+/// 伏笔清单的非空行（清单是「每条一行」的纯文本，空行不算一条）。
+/// 页面条上的条数与面板里的列表共用这一处，免得两处算出不同的条数。
+List<String> _foreshadowLines(String text) => text
+    .split('\n')
+    .map((line) => line.trim())
+    .where((line) => line.isNotEmpty)
+    .toList();
+
+/// 大纲编辑页的「伏笔清单」面板：查看 + 就地编辑。
+///
+/// **改完立即落库**（[OutlineEditController.saveForeshadows]），不等底部「保存」：
+/// 写回前会清掉空行与逐行空白，所以保存后列表按落库后的文本重画——
+/// 用户看到的条数就是提示词里【伏笔清单】真正注入的那几条。
+class _ForeshadowsSheet extends StatefulWidget {
+  final OutlineEditController controller;
+
+  const _ForeshadowsSheet({required this.controller});
+
+  @override
+  State<_ForeshadowsSheet> createState() => _ForeshadowsSheetState();
+}
+
+class _ForeshadowsSheetState extends State<_ForeshadowsSheet> {
+  /// 本地副本：编辑后用它重画列表。直接读 controller 的字段也行（保存时会被
+  /// 重新赋值），但副本更直白——面板里显示的永远是「本次编辑后的清单」。
+  late String _text = widget.controller.foreshadows;
+
+  Future<void> _edit() async {
+    final editCtrl = TextEditingController(text: _text);
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        titlePadding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+        contentPadding: const EdgeInsets.fromLTRB(4, 6, 4, 0),
+        actionsPadding: const EdgeInsets.fromLTRB(4, 0, 4, 4),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+        title: const Text(
+          '伏笔清单',
+          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+        ),
+        content: ConstrainedBox(
+          // 编辑器占屏幕大半高度，长清单也能一眼看全
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.6,
+            maxWidth: MediaQuery.of(context).size.width * 0.92,
+          ),
+          child: TextField(
+            controller: editCtrl,
+            maxLines: null,
+            expands: true,
+            textAlignVertical: TextAlignVertical.top,
+            autofocus: true,
+            decoration: const InputDecoration(
+              hintText: '每条伏笔一行，形如：伏笔内容（埋设位置 / 计划回收时机）',
+              border: InputBorder.none,
+              contentPadding: EdgeInsets.fromLTRB(4, 2, 4, 2),
+              filled: true,
+              fillColor: Color(0xFFFAFAFA),
+            ),
+            style: const TextStyle(fontSize: 12, height: 1.6),
+          ),
+        ),
+        actions: [
+          TextButton(
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            // 取消：什么都不写回（连内存也不动）
+            onPressed: () {
+              if (!closeDialogSafely(ctx, result: false)) return;
+              scheduleControllerDispose(editCtrl);
+            },
+            child: const Text('取消', style: TextStyle(fontSize: 12)),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            onPressed: () {
+              if (!closeDialogSafely(ctx, result: true)) return;
+              scheduleControllerDispose(editCtrl);
+            },
+            child: const Text(
+              '保存',
+              style: TextStyle(fontSize: 12, color: Color(0xFF4D6BFE)),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (saved != true || !mounted) return;
+    // 先把文本取出来再用：弹窗关闭时已经用 scheduleControllerDispose 排队释放
+    // 这个控制器（退场动画结束后 dispose），await 之后再读它属于「用后释放」——
+    // 拿到的是空串，真机上还会偶发抛异常。
+    final next = editCtrl.text;
+    final error = await widget.controller.saveForeshadows(next);
+    if (!mounted) return;
+    setState(() => _text = widget.controller.foreshadows);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(error.isEmpty ? '伏笔清单已保存' : '伏笔清单保存失败：$error'),
+        duration: const Duration(seconds: 1),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final lines = _foreshadowLines(_text);
+    return Container(
+      // 不用满屏高度：上方编辑页仍可见，方便对着大纲看伏笔
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.78,
+      ),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(14)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 标题行：条数 + 编辑 + 关闭
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 6, 0),
+            child: Row(
+              children: [
+                const SizedBox(width: 2),
+                const Icon(
+                  Icons.bookmark_border,
+                  size: 16,
+                  color: Color(0xFF4D6BFE),
+                ),
+                const SizedBox(width: 6),
+                const Text(
+                  '伏笔清单',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(width: 6),
+                if (lines.isNotEmpty)
+                  Text(
+                    '${lines.length} 条',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: Color(0xFF999999),
+                    ),
+                  ),
+                const Spacer(),
+                TextButton.icon(
+                  onPressed: _edit,
+                  icon: const Icon(Icons.edit_outlined, size: 14),
+                  label: const Text('编辑', style: TextStyle(fontSize: 12)),
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFF4D6BFE),
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close, size: 18),
+                  color: const Color(0xFF999999),
+                  tooltip: '关闭',
+                  visualDensity: VisualDensity.compact,
+                  onPressed: () => closeDialogSafely(context),
+                ),
+              ],
+            ),
+          ),
+          // 说明这份清单是干什么用的：改完直接生效，不用再点底部「保存」
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 2, 16, 0),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'AI 生成大纲时会注入这份清单；改完立即保存，无需再点底部「保存」',
+                style: TextStyle(
+                  fontSize: 10,
+                  height: 1.5,
+                  color: Color(0xFFBBBBBB),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Divider(height: 1, color: Colors.grey.shade200),
+          Flexible(
+            child: lines.isEmpty
+                ? _empty()
+                : ListView.builder(
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+                    itemCount: lines.length,
+                    itemBuilder: (context, index) => Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // 与剧情账本的伏笔清单同一个样式（小圆点 + 正文）
+                          const Padding(
+                            padding: EdgeInsets.only(top: 5),
+                            child: Icon(
+                              Icons.circle,
+                              size: 6,
+                              color: Color(0xFF4D6BFE),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: SelectableText(
+                              lines[index],
+                              style: const TextStyle(
+                                fontSize: 12.5,
+                                height: 1.6,
+                                color: Color(0xFF333333),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 空态：说清「为什么空」与「去哪儿生成」，而不是只给一片白
+  Widget _empty() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 24, 20, 32),
+      child: Column(
+        children: [
+          Text(
+            '（暂无伏笔清单）',
+            style: TextStyle(fontSize: 13, color: Colors.grey[400]),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '可在「剧情账本」页点「重新提炼」由 AI 从大纲生成，或点上方「编辑」手动填写',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 11, height: 1.6, color: Colors.grey[400]),
+          ),
+        ],
+      ),
+    );
   }
 }

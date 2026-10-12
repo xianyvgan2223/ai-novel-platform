@@ -67,9 +67,11 @@ class OutlineEditService {
     required String userInput,
     List<OutlineEditChatMessage> history = const [],
     String parentMajor = '',
+    String priorMajors = '',
     String selectedEvents = '',
     String prevEvents = '',
     String nextEvents = '',
+    String nextMajor = '',
     String storyState = '',
     String foreshadows = '',
   }) {
@@ -79,9 +81,11 @@ class OutlineEditService {
       eventSummary: eventSummary,
       isMajor: isMajor,
       parentMajor: parentMajor,
+      priorMajors: priorMajors,
       selectedEvents: selectedEvents,
       prevEvents: prevEvents,
       nextEvents: nextEvents,
+      nextMajor: nextMajor,
       storyState: storyState,
       foreshadows: foreshadows,
     );
@@ -105,9 +109,11 @@ class OutlineEditService {
     required String eventSummary,
     required bool isMajor,
     String parentMajor = '',
+    String priorMajors = '',
     String selectedEvents = '',
     String prevEvents = '',
     String nextEvents = '',
+    String nextMajor = '',
     String storyState = '',
     String foreshadows = '',
   }) {
@@ -140,6 +146,12 @@ class OutlineEditService {
         ..writeln('【所属大事件】')
         ..writeln(parentMajor.trim());
     }
+    if (priorMajors.trim().isNotEmpty) {
+      buf
+        ..writeln()
+        ..writeln('【之前所有大事件】（当前事件之前的大事件，按时间先后排列，供保持剧情连续，勿直接复述）')
+        ..writeln(priorMajors.trim());
+    }
     if (selectedEvents.trim().isNotEmpty) {
       buf
         ..writeln()
@@ -157,6 +169,12 @@ class OutlineEditService {
         ..writeln()
         ..writeln('【后续事件】')
         ..writeln(nextEvents.trim());
+    }
+    if (nextMajor.trim().isNotEmpty) {
+      buf
+        ..writeln()
+        ..writeln('【下一个大事件】（紧接着的大事件，供本事件收尾时向它衔接，勿直接复述其情节）')
+        ..writeln(nextMajor.trim());
     }
     if (storyState.trim().isNotEmpty) {
       buf

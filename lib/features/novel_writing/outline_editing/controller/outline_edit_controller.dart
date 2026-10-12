@@ -28,11 +28,14 @@ const String kNewEventTitle = '新事件';
 ///   剧情账本与伏笔清单交给模型流式生成**大纲文本**（不生成正文）
 class OutlineEditController extends ChangeNotifier {
   final OutlineRecord outline;
-  final OutlineEditService _service;
 
   OutlineEditController(this.outline, {OutlineEditService? service})
     : outlineContent = outline.content,
-      _service = service ?? OutlineEditService();
+      service = service ?? OutlineEditService();
+
+  /// 提示词组装服务（AI 面板发消息前用它拼系统提示词与历史）。
+  /// 公开是为了测试能直接检查「这次到底注入了什么」，生产代码不关心它。
+  final OutlineEditService service;
 
   /// 参与编辑的章节草稿（顺序与事件序号一致）
   final List<OutlineEditDraft> drafts = [];
@@ -44,6 +47,11 @@ class OutlineEditController extends ChangeNotifier {
   /// 全部章节是否已读到（[_loadContext] 完成）。
   /// 读回来之前 [allChapters] 为空，此时增删事件不去猜全篇结构。
   bool _contextLoaded = false;
+
+  /// 上下文（伏笔清单 / 剧情账本）是否已读完。
+  /// 界面据此区分「还没有伏笔」与「还没读出来」：读回来之前不显示条数，
+  /// 否则开页一瞬间的「0 条」会让人以为清单是空的。
+  bool get contextLoaded => _contextLoaded;
 
   /// 页面打开后是否已经动过结构（增删事件）。
   ///
@@ -131,6 +139,19 @@ class OutlineEditController extends ChangeNotifier {
   /// AI 生成时额外注入「同批勾选的其他事件」：AI 面板上的开关，默认关闭
   /// （关闭时提示词与历史版本完全一致）
   bool injectSelectedEvents = false;
+
+  /// AI 生成时额外注入「当前事件之前的所有大事件」（只到当前事件为止，
+  /// 之后的绝不注入）：AI 面板上的开关，默认关闭（关闭时提示词与历史版本完全一致）。
+  /// 见 [aiPriorMajorsText]。
+  bool injectPriorMajors = false;
+
+  /// AI 生成时额外注入「下一个大事件」（当前事件之后的第一个大事件，标题 + 概要）：
+  /// AI 面板上的开关，默认关闭（关闭时提示词与历史版本完全一致）。
+  ///
+  /// 这是唯一会**主动**把后面剧情交给模型的开关：《后续事件》只给紧接着的两条，
+  /// 当前事件之后隔着好几个小事件时才轮不到那个大事件，AI 就不知道这一阶段该
+  /// 往哪收尾。打开它就一定拿得到，且已在《后续事件》里出现时不重复注入。
+  bool injectNextMajor = false;
 
   CancelToken? _cancelToken;
   bool _cancelled = false;
@@ -255,6 +276,20 @@ class OutlineEditController extends ChangeNotifier {
   void setInjectSelectedEvents(bool value) {
     if (injectSelectedEvents == value) return;
     injectSelectedEvents = value;
+    _safeNotify();
+  }
+
+  /// 开关「注入之前所有大事件」（只影响之后的对话，已经发出去的请求不变）
+  void setInjectPriorMajors(bool value) {
+    if (injectPriorMajors == value) return;
+    injectPriorMajors = value;
+    _safeNotify();
+  }
+
+  /// 开关「注入下一个大事件」（只影响之后的对话，已经发出去的请求不变）
+  void setInjectNextMajor(bool value) {
+    if (injectNextMajor == value) return;
+    injectNextMajor = value;
     _safeNotify();
   }
 
@@ -828,7 +863,9 @@ class OutlineEditController extends ChangeNotifier {
     majorNumbersById = majorEventNumbersById(allChapters);
   }
 
-  /// 把合并后的大纲正文写回记录（其余设定字段原样回写，避免列被清空）
+  /// 把合并后的大纲正文写回记录（其余设定字段原样回写，避免列被清空）。
+  /// 伏笔清单一并带上：编辑页也能改它（见 [saveForeshadows]），漏写会把
+  /// 刚改好的清单冲回读页面时的旧值。
   Future<void> _persistOutlineContent() async {
     if (outline.id == null) return;
     await OutlineRecordDbHelper().update(outline.id!, {
@@ -838,7 +875,44 @@ class OutlineEditController extends ChangeNotifier {
       'theme': outline.theme,
       'protagonist': outline.protagonist,
       'worldview': outline.worldview,
+      'foreshadows': foreshadows,
     });
+  }
+
+  /// 保存伏笔清单（编辑页页面条上的「伏笔」入口改的就是它）。
+  ///
+  /// **立即落库、不等底部「保存」**：清单与大纲正文是两列，正文走「改完一起
+  /// 保存」是为了撤销 / 反撤销与结构一致性；伏笔清单没有编辑历史，攒着不写
+  /// 只会在用户直接退出（点「不保存」）时白改一场。
+  /// 顺带更新内存里的 [foreshadows]：AI 对话马上要注入的那份提示词读的就是它。
+  ///
+  /// 落库前**按非空行规范化**（去掉空行、逐行 trim）：清单是「每条一行」的文本，
+  /// 面板逐行展示、提示词原样注入、账本页按行统计都用这个口径；把编辑器里的
+  /// 空行原样存下去，会出现「面板显示 2 条、库里 3 行」这种对不上的情况。
+  /// 返回错误文案，成功返回空串。
+  Future<String> saveForeshadows(String text) async {
+    final next = text
+        .split('\n')
+        .map((line) => line.trim())
+        .where((line) => line.isNotEmpty)
+        .join('\n');
+    foreshadows = next;
+    final id = outline.id;
+    if (id == null) {
+      // 记录还没落库（理论上进不到这一页）：只更新内存，别抛异常打断交互
+      _safeNotify();
+      return '';
+    }
+    try {
+      await OutlineRecordDbHelper().update(id, <String, dynamic>{
+        'foreshadows': next,
+      });
+    } catch (e) {
+      _safeNotify();
+      return e.toString().replaceFirst('Exception: ', '');
+    }
+    _safeNotify();
+    return '';
   }
 
   /// 发送一条对话：把「AI 生成」目标章节的大纲上下文交给模型，流式返回大纲文本
@@ -851,7 +925,7 @@ class OutlineEditController extends ChangeNotifier {
       _safeNotify();
       return;
     }
-    final settings = await _service.loadSettings();
+    final settings = await service.loadSettings();
     if (_disposed) return;
     if (settings.apiKey.isEmpty) {
       chatError = '请先在设置中填写 API Key';
@@ -870,7 +944,7 @@ class OutlineEditController extends ChangeNotifier {
     _cancelToken = CancelToken();
     _safeNotify();
 
-    final requestMessages = _service.buildChatMessages(
+    final requestMessages = service.buildChatMessages(
       outline: outline,
       eventTitle: draft.title,
       eventSummary: draft.summary,
@@ -879,6 +953,9 @@ class OutlineEditController extends ChangeNotifier {
       // 历史不含刚插入的占位助手消息
       history: messages.sublist(0, messages.length - 1),
       parentMajor: _parentMajorText(draft),
+      priorMajors: aiPriorMajorsText,
+      // 开关打开时把后面那个大事件整段交给 AI（它若已在前两条里就不重复）
+      nextMajor: aiNextMajorText,
       // 开关打开时把「同批勾选的其他事件」也交给 AI（已注入的前后事件不重复）
       selectedEvents: aiSelectedEventsText,
       prevEvents: _adjacentText(draft, forward: false),
@@ -896,7 +973,7 @@ class OutlineEditController extends ChangeNotifier {
     };
 
     try {
-      await _service.streamChat(
+      await service.streamChat(
         apiKey: settings.apiKey,
         apiParams: apiParams,
         messages: requestMessages,
@@ -931,7 +1008,7 @@ class OutlineEditController extends ChangeNotifier {
     // 流式不可用或没有输出时回退一次非流式请求（与章节链路一致的兜底）
     if (seq == _chatSeq && !_cancelled && assistant.content.trim().isEmpty) {
       try {
-        final fallback = await _service.chatOnce(
+        final fallback = await service.chatOnce(
           apiKey: settings.apiKey,
           apiParams: apiParams,
           messages: requestMessages,
@@ -1015,11 +1092,24 @@ class OutlineEditController extends ChangeNotifier {
     return _eventLine(parent).replaceFirst(RegExp(r'^【(大事件|章节)】'), '');
   }
 
-  /// 相邻事件文本：[forward] 为后续事件，否则为前置事件；各取最近 [_adjacentCount] 条
+  /// 本次对话将注入的【所属大事件】文本（当前事件之前最近的那个大事件）。
+  String get aiParentMajorText {
+    final draft = aiTargetDraft;
+    if (draft == null) return '';
+    return _parentMajorText(draft);
+  }
+
+  /// 相邻事件文本：[forward] 为后续事件，否则为前置事件；各取最近 [_adjacentCount] 条。
+  ///
+  /// 「注入之前所有大事件」开着时，**已在【之前所有大事件】里写过的大事件不再
+  /// 重复列一遍**；「注入下一个大事件」开着时，已在【下一个大事件】里单独给出的
+  /// 那个也不重复列（同理：同一段剧情在提示词里出现两次，白占上下文还容易让模型
+  /// 以为发生了两回）。因此两段都可能不足 [_adjacentCount] 条，甚至为空。
   String _adjacentText(OutlineEditDraft draft, {required bool forward}) {
     final ordered = _orderedContext();
     final idx = ordered.indexWhere((c) => c.id == draft.chapterId);
     if (idx < 0) return '';
+    final skip = forward ? _nextMajorId(draft) : _priorMajorIds(draft);
     final picked = <OutlineChapter>[];
     if (forward) {
       for (
@@ -1027,19 +1117,27 @@ class OutlineEditController extends ChangeNotifier {
         i < ordered.length && picked.length < _adjacentCount;
         i++
       ) {
-        picked.add(ordered[i]);
+        final c = ordered[i];
+        // 已经由【下一个大事件】单独给出，跳过不重复（只跳它一个，不跳别的）
+        if (skip.isNotEmpty && c.isMajor && skip.contains(c.id)) continue;
+        picked.add(c);
       }
     } else {
       // 从最近的往前取，插入头部保持时间顺序
       for (int i = idx - 1; i >= 0 && picked.length < _adjacentCount; i--) {
-        picked.insert(0, ordered[i]);
+        final c = ordered[i];
+        // 大事件在白名单里说明它已经由【之前所有大事件】整段给出了，跳过不重复
+        if (skip.isNotEmpty && c.isMajor && skip.contains(c.id)) continue;
+        picked.insert(0, c);
       }
     }
     return picked.map(_eventLine).join('\n');
   }
 
   /// 提示词里**已经注入过**的章节 id：当前事件 + 所属大事件 + 前后各
-  /// [_adjacentCount] 条。「注入同批所选事件」按它去重，
+  /// [_adjacentCount] 条。开着「注入之前所有大事件」时，之前的大事件也都算
+  /// 注入过（见 [_priorMajors]）；开着「注入下一个大事件」时，下一个大事件也算
+  /// （见 [_nextMajor]）。「注入同批所选事件」按它去重，
   /// 同一个事件不在提示词里出现两次。
   Set<int> _injectedContextIds(OutlineEditDraft draft) {
     final ids = <int>{draft.chapterId};
@@ -1061,6 +1159,9 @@ class OutlineEditController extends ChangeNotifier {
     }
     final parent = _parentMajor(draft);
     if (parent?.id != null) ids.add(parent!.id!);
+    ids.addAll(_priorMajorIds(draft));
+    // 放在相邻事件之后：由它决定「下一个大事件」这一条是否要从【后续事件】里让位
+    ids.addAll(_nextMajorId(draft));
     return ids;
   }
 
@@ -1091,6 +1192,111 @@ class OutlineEditController extends ChangeNotifier {
     final draft = aiTargetDraft;
     if (!injectSelectedEvents || draft == null) return '';
     return _selectedEventsText(draft);
+  }
+
+  // ---- 注入「之前所有大事件」（AI 面板上的开关） ----
+
+  /// 当前事件**之前**的所有大事件，按时间正序（最早 → 最近）。
+  ///
+  /// 只取之前：之后的（含当前事件后面的大事件）一律不注入——还没发生的剧情
+  /// 提前给模型，等于让它照着结局写伏笔。
+  List<OutlineChapter> _priorMajors(OutlineEditDraft draft) {
+    final majors = <OutlineChapter>[];
+    for (final c in _orderedContext()) {
+      if (c.eventIndex >= draft.eventIndex) break;
+      if (c.isMajor) majors.add(c);
+    }
+    return majors;
+  }
+
+  /// [_priorMajors] 的行 id 集合（「已注入过」的去重口径用）
+  Set<int> _priorMajorIds(OutlineEditDraft draft) => <int>{
+    for (final c in _priorMajors(draft))
+      if (c.id != null) c.id!,
+  };
+
+  /// 本次对话额外注入的「之前所有大事件」文本：
+  /// 开关关闭、或前面本来就没有大事件时为空串（提示词里就不出现该栏目）。
+  /// 格式与【所属大事件】一致（去掉 `【大事件】` 前缀的「标题：概要」）。
+  String get aiPriorMajorsText {
+    final draft = aiTargetDraft;
+    if (!injectPriorMajors || draft == null) return '';
+    return _priorMajors(draft).map(_eventLine).map(_withoutTypeTag).join('\n');
+  }
+
+  /// 去掉事件行开头的 `【大事件】` / `【章节】` 标记（栏目名已经说明类型了）
+  String _withoutTypeTag(String line) =>
+      line.replaceFirst(RegExp(r'^【(大事件|章节)】'), '');
+
+  /// 本次对话将注入的【后续事件】文本（紧接着的 [_adjacentCount] 条）。
+  /// 与 [aiPriorMajorsText] 一样公开出来，便于核对某次请求到底注入了什么。
+  String get aiNextEventsText {
+    final draft = aiTargetDraft;
+    if (draft == null) return '';
+    return _adjacentText(draft, forward: true);
+  }
+
+  /// 本次对话将注入的【前一事件】文本（已排除与【之前所有大事件】重复的那些）。
+  String get aiPrevEventsText {
+    final draft = aiTargetDraft;
+    if (draft == null) return '';
+    return _adjacentText(draft, forward: false);
+  }
+
+  // ---- 注入「下一个大事件」（AI 面板上的开关） ----
+
+  /// 当前事件**之后**的第一个大事件（跳过中间的小事件）；已经是最后一个大事件
+  /// 之后（或没有下一个）时返回 null。
+  ///
+  /// 与 [_priorMajors] 相反，这是提示词里**唯一**允许出现的"后面的剧情"，
+  /// 而且是全貌（标题 + 概要）：只给标题不足以让 AI 为它做铺垫。
+  OutlineChapter? _nextMajor(OutlineEditDraft draft) {
+    for (final c in _orderedContext()) {
+      if (c.eventIndex <= draft.eventIndex) continue;
+      if (c.isMajor) return c;
+    }
+    return null;
+  }
+
+  /// 开关打开时要单独注入的下一个大事件；没有下一个大事件时返回 null。
+  ///
+  /// **恒定单独注入**：不管它离得近还是远，都由【下一个大事件】这一节给出，
+  /// 并在【后续事件】里让位（[_nextMajorId] → [_adjacentText]）。近的时候留在
+  /// 【后续事件】、远的时候另开一节，同一个开关会有两种表现，用户看不懂；
+  /// 恒定一种表现才好解释：开了就一定有这一节。
+  OutlineChapter? _nextMajorToInject(OutlineEditDraft draft) => _nextMajor(draft);
+
+  /// 「下一个大事件」要从【后续事件】里让位的那个 id（开关关闭 / 没有下一个时为 null）
+  Set<int> _nextMajorId(OutlineEditDraft draft) {
+    if (!injectNextMajor) return const <int>{};
+    final next = _nextMajorToInject(draft);
+    return next?.id == null ? const <int>{} : <int>{next!.id!};
+  }
+
+  /// 本次对话额外注入的「下一个大事件」文本：
+  /// 开关关闭、或后面没有大事件时为空串（提示词里就不出现该栏目）。
+  /// 不重复注入的口径见 [_nextMajorToInject]。
+  String get aiNextMajorText {
+    final draft = aiTargetDraft;
+    if (!injectNextMajor || draft == null) return '';
+    final next = _nextMajorToInject(draft);
+    if (next == null) return '';
+    return _withoutTypeTag(_eventLine(next));
+  }
+
+  /// 开关打开时是否有可单独注入的下一个大事件（界面据此如实说明）
+  bool get aiHasNextMajorToInject {
+    final draft = aiTargetDraft;
+    if (!injectNextMajor || draft == null) return false;
+    return _nextMajorToInject(draft) != null;
+  }
+
+  /// 开关打开时当前事件之前有几个大事件（界面据此如实说明，不夸大也不吞掉）。
+  /// 开关关闭、或没有可注入项时为 0。
+  int get aiPriorMajorsCount {
+    final draft = aiTargetDraft;
+    if (!injectPriorMajors || draft == null) return 0;
+    return _priorMajors(draft).length;
   }
 
   /// 剧情状态：优先当前事件之前最近一章保存的账本，其次记录中的账本

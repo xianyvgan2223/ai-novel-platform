@@ -142,6 +142,8 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
                 // 默认收起：展开时才显示选项行（开关状态不受展开 / 收起影响）
                 if (_optionsExpanded) ...[
                   _buildInjectToggle(controller),
+                  _buildInjectPriorMajorsToggle(controller),
+                  _buildInjectNextMajorToggle(controller),
                   const Divider(height: 1),
                 ],
                 // 「当前大纲」作为对话里的第一条气泡展示，随对话一起滚动看全文
@@ -201,8 +203,11 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
             icon: Icon(
               _optionsExpanded ? Icons.expand_less : Icons.expand_more,
               size: 22,
-              // 收起时如果选项是开着的，图标用主色点一下，提示里面有生效的设置
-              color: controller.injectSelectedEvents
+              // 收起时如果选项里有开着的，图标用主色点一下，提示里面有生效的设置
+              color:
+                  controller.injectSelectedEvents ||
+                      controller.injectPriorMajors ||
+                      controller.injectNextMajor
                   ? const Color(0xFF4D6BFE)
                   : const Color(0xFF999999),
             ),
@@ -221,24 +226,97 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
   }
 
   /// 「注入同批所选事件」开关：打开后，除当前事件外，把本次在选事件页一起勾选、
-  /// 正在编辑的其他事件也交给 AI；已经作为【前一/后续事件】【所属大事件】注入过的
-  /// 不会重复注入（见 OutlineEditController.aiSelectedEventsText）。
+  /// 正在编辑的其他事件也交给 AI；已经作为【前一/后续事件】【所属大事件】
+  /// 【之前所有大事件】注入过的不会重复注入
+  /// （见 OutlineEditController.aiSelectedEventsText）。
   /// 关闭时提示词与原来完全一致。
   Widget _buildInjectToggle(OutlineEditController controller) {
     final on = controller.injectSelectedEvents;
+    return _optionRow(
+      icon: Icons.playlist_add_check,
+      title: '注入同批所选事件',
+      // 只编辑了一个事件时如实说明，避免开了开关却没变化让人困惑
+      subtitle: controller.drafts.length <= 1
+          ? '本次只编辑了 1 个事件，没有其他所选事件可注入'
+          : '把本次一起勾选的其他事件也交给 AI；已在前文里的不重复注入',
+      value: on,
+      onChanged: controller.setInjectSelectedEvents,
+    );
+  }
+
+  /// 「注入之前所有大事件」开关：打开后把**当前事件之前**的每个大事件（标题 + 概要）
+  /// 按时间先后交给 AI，让它接着前文写而不是凭空编。
+  ///
+  /// 只往前取：当前事件之后的大事件一律不注入（还没发生的剧情提前给模型，
+  /// 等于让它照着后面的走向写伏笔）。与【所属大事件】【前一事件】【同批所选事件】
+  /// 的重叠由控制器统一去重，同一个大事件在提示词里只出现一次。
+  Widget _buildInjectPriorMajorsToggle(OutlineEditController controller) {
+    final on = controller.injectPriorMajors;
+    final injectable = controller.aiPriorMajorsCount;
+    final String subtitle;
+    if (on && injectable > 0) {
+      subtitle = '已注入当前事件之前的 $injectable 个大事件；之后的大事件不注入，重复的不再列一遍';
+    } else if (on) {
+      // 开了却没东西可注入时如实说明（前文本来就没有大事件）
+      subtitle = '当前事件之前还没有大事件，本次没有可注入的内容';
+    } else {
+      subtitle = '把当前事件之前的所有大事件大纲交给 AI；之后的大事件不注入';
+    }
+    return _optionRow(
+      icon: Icons.account_tree_outlined,
+      title: '注入之前所有大事件',
+      subtitle: subtitle,
+      value: on,
+      onChanged: controller.setInjectPriorMajors,
+    );
+  }
+
+  /// 「注入下一个大事件」开关：打开后把当前事件**之后**第一个大事件（跳过中间
+  /// 的小事件）整段交给 AI，让它知道这一阶段该往哪收尾、该埋什么钩子。
+  ///
+  /// 这是唯一会主动把后面剧情交给模型的开关，所以只在用户点名要的时候才注入。
+  /// 开着时它恒定由【下一个大事件】这一节给出，不在【后续事件】里重复出现。
+  Widget _buildInjectNextMajorToggle(OutlineEditController controller) {
+    final on = controller.injectNextMajor;
+    final String subtitle;
+    if (!on) {
+      subtitle = '把当前事件之后最近的大事件也交给 AI，便于收尾衔接';
+    } else if (controller.aiHasNextMajorToInject) {
+      subtitle = '已注入下一个大事件；它不再在「后续事件」里重复出现';
+    } else {
+      subtitle = '当前事件之后还没有大事件，本次没有可注入的内容';
+    }
+    return _optionRow(
+      icon: Icons.flag_outlined,
+      title: '注入下一个大事件',
+      subtitle: subtitle,
+      value: on,
+      onChanged: controller.setInjectNextMajor,
+    );
+  }
+
+  /// 选项行：整行可点（点文字也能开关），右侧是迷你开关。
+  /// 两个选项行共用这一处，保证样式与交互一致。
+  Widget _optionRow({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required bool value,
+    required ValueChanged<bool> onChanged,
+  }) {
     return Material(
       // 底色交给 Material，InkWell 的水波才不会被自己盖住
-      color: on ? const Color(0xFFF3F6FF) : Colors.white,
+      color: value ? const Color(0xFFF3F6FF) : Colors.white,
       child: InkWell(
-        onTap: () => controller.setInjectSelectedEvents(!on),
+        onTap: () => onChanged(!value),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(14, 3, 10, 3),
           child: Row(
             children: [
               Icon(
-                Icons.playlist_add_check,
+                icon,
                 size: 15,
-                color: on ? const Color(0xFF4D6BFE) : const Color(0xFFBBBBBB),
+                color: value ? const Color(0xFF4D6BFE) : const Color(0xFFBBBBBB),
               ),
               const SizedBox(width: 6),
               Expanded(
@@ -246,20 +324,17 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '注入同批所选事件',
+                      title,
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w500,
-                        color: on
+                        color: value
                             ? const Color(0xFF4D6BFE)
                             : const Color(0xFF777777),
                       ),
                     ),
                     Text(
-                      // 只编辑了一个事件时如实说明，避免开了开关却没变化让人困惑
-                      controller.drafts.length <= 1
-                          ? '本次只编辑了 1 个事件，没有其他所选事件可注入'
-                          : '把本次一起勾选的其他事件也交给 AI；已在「前一/后续事件」里的不重复注入',
+                      subtitle,
                       style: const TextStyle(
                         fontSize: 10,
                         height: 1.3,
@@ -270,10 +345,7 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
                 ),
               ),
               const SizedBox(width: 8),
-              _MiniSwitch(
-                value: on,
-                onChanged: controller.setInjectSelectedEvents,
-              ),
+              _MiniSwitch(value: value, onChanged: onChanged),
             ],
           ),
         ),

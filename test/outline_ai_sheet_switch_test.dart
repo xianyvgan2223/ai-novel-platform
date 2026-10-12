@@ -74,7 +74,7 @@ void main() {
       ch(3, 'minor', 'a2'),
     ]);
     await expandOptions(tester);
-    expect(find.textContaining('已在「前一/后续事件」里的不重复注入'), findsOneWidget);
+    expect(find.textContaining('已在前文里的不重复注入'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
     multi.dispose();
   });
