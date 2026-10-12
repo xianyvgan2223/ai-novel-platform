@@ -468,7 +468,7 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
         mainAxisSize: MainAxisSize.min,
         children: [
           const Text(
-            '没有可编辑的章节',
+            '没有可编辑的事件',
             style: TextStyle(fontSize: 14, color: Color(0xFF999999)),
           ),
           const SizedBox(height: 10),

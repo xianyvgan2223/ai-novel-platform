@@ -22,10 +22,15 @@ class OutlineEditChapterListPage extends StatefulWidget {
 
   @override
   State<OutlineEditChapterListPage> createState() =>
-      _OutlineEditChapterListPageState();
+      OutlineEditChapterListPageState();
 }
 
-class _OutlineEditChapterListPageState
+/// State 类公开（原本是私有的 `_OutlineEditChapterListPageState`）：
+/// 多选的底部操作栏只在「勾了章节」时才有内容，而勾选要经过卡片点击、
+/// 卡片又要先读库——测试环境没有 sqflite，读库必失败，卡片压根渲染不出来。
+/// 因此这里公开两个测试钩子（`debugSetSelectedForTest` / `debugSelectedForTest`），
+/// 让 `test/outline_edit_multi_select_test.dart` 能直接摆出勾选状态验底部栏。
+class OutlineEditChapterListPageState
     extends State<OutlineEditChapterListPage> {
   List<OutlineChapter> _chapters = [];
   final Set<int> _selected = {};
@@ -124,6 +129,7 @@ class _OutlineEditChapterListPageState
   List<OutlineChapter> get _selectedChapters =>
       _chapters.where((c) => c.id != null && _selected.contains(c.id)).toList();
 
+  /// 是否已经全选（用来把「全选」按钮置灰，不再兼作「取消全选」的开关）
   bool get _allSelected =>
       _chapters.isNotEmpty &&
       _chapters.every((c) => c.id != null && _selected.contains(c.id));
@@ -136,17 +142,42 @@ class _OutlineEditChapterListPageState
     });
   }
 
-  void _toggleSelectAll() {
+  /// 全选：一次勾上全部事件。**只做全选，不再兼任「取消全选」**。
+  ///
+  /// 原先这个按钮是双向开关（全选 ☑ 后变成「取消全选」），而它要取消的东西
+  /// 与「取消选择」完全重复——两个按钮做同一件事，还容易点错（想全选却点了取消）。
+  /// 现在清空只剩「取消选择」一个出口：按钮 label 恒为「全选」，已经全选时置灰。
+  void _selectAll() {
     setState(() {
-      if (_allSelected) {
-        _selected.clear();
-      } else {
-        _selected
-          ..clear()
-          ..addAll(_chapters.map((c) => c.id).whereType<int>());
-      }
+      _selected
+        ..clear()
+        ..addAll(_chapters.map((c) => c.id).whereType<int>());
     });
   }
+
+  /// 取消多选：清空已勾选的事件。
+  ///
+  /// 「编辑所选（N）」是进编辑页，这个方法是**唯一的清空出口**：底部计数旁的
+  /// 「取消选择」，以及返回键 / 返回手势都走它。
+  void _clearSelection() {
+    if (_selected.isEmpty) return;
+    setState(() => _selected.clear());
+  }
+
+  /// 测试钩子：直接摆出章节列表与勾选状态（见类注释）。生产代码不调用。
+  @visibleForTesting
+  void debugSetSelectedForTest(Set<int> ids, {List<OutlineChapter>? chapters}) {
+    setState(() {
+      if (chapters != null) _chapters = chapters;
+      _selected
+        ..clear()
+        ..addAll(ids);
+    });
+  }
+
+  /// 测试钩子：读当前勾选（见类注释）。
+  @visibleForTesting
+  Set<int> get debugSelectedForTest => Set<int>.unmodifiable(_selected);
 
   /// 打开编辑页：[chapters] 为待编辑章节（单章或多章）。
   ///
@@ -156,6 +187,8 @@ class _OutlineEditChapterListPageState
   ///
   /// 返回后按静默方式刷新（编辑页可能改了标题 / 概要），并把列表定位回
   /// 进入编辑页时所显示的区域，而不是跳回顶部（见 shared/list_scroll_offset.dart）。
+  /// 顺手清掉勾选：批量编辑已经完成，留着勾选会让下一眼误以为还要再点一次
+  /// 「编辑所选（N）」。（刷新时本来也会剔掉已不存在的章节，这里一并清空更干脆。）
   Future<void> _openEdit(List<OutlineChapter> chapters) async {
     if (chapters.isEmpty) return;
     final offset = captureScrollOffset(_scrollCtrl);
@@ -165,6 +198,7 @@ class _OutlineEditChapterListPageState
       ),
     );
     if (!mounted) return;
+    setState(() => _selected.clear());
     await _load(showLoading: false);
     if (!mounted) return;
     restoreScrollOffset(_scrollCtrl, offset);
@@ -173,127 +207,178 @@ class _OutlineEditChapterListPageState
   int get _completedCount =>
       _chapters.where((c) => c.status == 'completed').length;
 
+  /// 返回键 / 返回手势：勾了章节时先取消多选，第二次才真正退出页面。
+  /// （勾选是页面内的临时状态，返回键顺手把它清掉，免得退出去再进来还留着）
+  void _onBackPressed() {
+    if (_selected.isNotEmpty) {
+      _clearSelection();
+      return;
+    }
+    Navigator.of(context).pop();
+  }
+
   @override
   Widget build(BuildContext context) {
     final outline = _outline;
     // 大事件序号：与大纲正文里的「大事件N」同一套编号（只数大事件），
     // 显示在卡片的类型标签上（大事件57），方便对上正文与生成记录
     final majorNumbers = majorEventNumbers(_chapters);
-    return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        title: Text(
-          outline.title.isNotEmpty ? outline.title : '选择章节',
-          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
+    return PopScope(
+      // 系统返回手势与顶栏返回键保持同一套行为：先取消多选，再退出页面。
+      // 否则手势一划就把页面退掉，勾选白选了（顶栏按钮却是先清勾选）。
+      canPop: _selected.isEmpty,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        _clearSelection();
+      },
+      child: Scaffold(
         backgroundColor: Colors.white,
-        elevation: 0.5,
-        centerTitle: true,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Color(0xFF333333)),
-          onPressed: () => Navigator.of(context).pop(),
+        appBar: AppBar(
+          title: Text(
+            outline.title.isNotEmpty ? outline.title : '选择事件',
+            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          backgroundColor: Colors.white,
+          elevation: 0.5,
+          centerTitle: true,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: Color(0xFF333333)),
+            onPressed: _onBackPressed,
+          ),
         ),
-      ),
-      bottomNavigationBar: _loading ? null : _buildBottomBar(),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _error != null
-          ? OutlineLoadErrorView(error: _error!, onRetry: _load)
-          : _chapters.isEmpty
-          ? const Center(
-              child: Text(
-                '该小说没有可编辑的章节',
-                style: TextStyle(fontSize: 14, color: Color(0xFF999999)),
-              ),
-            )
-          : Column(
-              children: [
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 10,
-                  ),
-                  color: const Color(0xFFF8F9FF),
-                  child: Text(
-                    '共 ${_chapters.length} 个事件 · 已完成 $_completedCount',
-                    style: const TextStyle(
-                      fontSize: 13,
-                      color: Color(0xFF666666),
+        bottomNavigationBar: _loading ? null : _buildBottomBar(),
+        body: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : _error != null
+            ? OutlineLoadErrorView(error: _error!, onRetry: _load)
+            : _chapters.isEmpty
+            ? const Center(
+                child: Text(
+                  '该小说没有可编辑的事件',
+                  style: TextStyle(fontSize: 13, color: Color(0xFF999999)),
+                ),
+              )
+            : Column(
+                children: [
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
+                    color: const Color(0xFFF8F9FF),
+                    child: Text(
+                      '共 ${_chapters.length} 个事件 · 已完成 $_completedCount',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF666666),
+                      ),
                     ),
                   ),
-                ),
-                Expanded(
-                  child: ListView.builder(
-                    controller: _scrollCtrl,
-                    padding: const EdgeInsets.all(12),
-                    itemCount: _chapters.length,
-                    itemBuilder: (context, index) {
-                      final ch = _chapters[index];
-                      return _ChapterSelectTile(
-                        chapter: ch,
-                        selected: ch.id != null && _selected.contains(ch.id),
-                        majorNumber: majorNumbers[index],
-                        onTap: () => _toggleSelect(ch),
-                        onEdit: () => _openEdit([ch]),
-                      );
-                    },
+                  Expanded(
+                    child: ListView.builder(
+                      controller: _scrollCtrl,
+                      padding: const EdgeInsets.all(10),
+                      itemCount: _chapters.length,
+                      itemBuilder: (context, index) {
+                        final ch = _chapters[index];
+                        return _ChapterSelectTile(
+                          chapter: ch,
+                          selected: ch.id != null && _selected.contains(ch.id),
+                          majorNumber: majorNumbers[index],
+                          onTap: () => _toggleSelect(ch),
+                          onEdit: () => _openEdit([ch]),
+                        );
+                      },
+                    ),
                   ),
-                ),
-              ],
-            ),
+                ],
+              ),
+      ),
     );
   }
 
+  /// 底部操作栏：已选数量 + 取消选择 + 全选 + 编辑所选。
+  ///
+  /// 尺寸刻意压小：这一行在 360dp 宽的手机上本来只剩 336dp（减去左右各 12 的
+  /// 内边距），而「已选 N 个事件 + 取消选择 + 全选 + 带图标的大按钮」按原尺寸
+  /// （计数 13 / 按钮 13 + 左右各 10 / 主按钮 14 + 图标 18 + 左右各 16）实测
+  /// **溢出 17px**（真机上就是按钮右边那条黄黑警示条）。现在：字号 13 → 12、
+  /// 主按钮去掉图标（标签本身已经说清是编辑）、内边距 16 → 12，宽度降到 296dp。
+  ///
+  /// 另外给两处文字都加了省略兜底：极窄屏或系统大字体下宁可截断，也不再溢出。
   Widget _buildBottomBar() {
     final count = _selected.length;
     return SafeArea(
       child: Container(
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+        padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
         decoration: const BoxDecoration(
           color: Colors.white,
           border: Border(top: BorderSide(color: Color(0xFFEEEEEE))),
         ),
         child: Row(
           children: [
-            Text(
-              '已选 $count 章',
-              style: const TextStyle(fontSize: 13, color: Color(0xFF666666)),
+            Flexible(
+              child: Text(
+                '已选 $count 个事件',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 12, color: Color(0xFF666666)),
+              ),
             ),
+            // 取消多选：勾了事件才出现，一键把勾选清零
+            if (count > 0)
+              TextButton(
+                onPressed: _clearSelection,
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  minimumSize: Size.zero,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                ),
+                child: const Text(
+                  '取消选择',
+                  style: TextStyle(fontSize: 12, color: Color(0xFF999999)),
+                ),
+              ),
+            // 全选：只做全选。清空勾选交给「取消选择」，两个按钮不再重复
             TextButton(
-              onPressed: _chapters.isEmpty ? null : _toggleSelectAll,
+              onPressed: (_chapters.isEmpty || _allSelected) ? null : _selectAll,
               style: TextButton.styleFrom(
                 visualDensity: VisualDensity.compact,
                 minimumSize: Size.zero,
-                padding: const EdgeInsets.symmetric(horizontal: 10),
+                padding: const EdgeInsets.symmetric(horizontal: 8),
               ),
-              child: Text(
-                _allSelected ? '取消全选' : '全选',
-                style: const TextStyle(fontSize: 13),
-              ),
+              child: const Text('全选', style: TextStyle(fontSize: 12)),
             ),
-            const Spacer(),
-            ElevatedButton.icon(
-              onPressed: count == 0 ? null : () => _openEdit(_selectedChapters),
-              icon: const Icon(Icons.edit_note, size: 18),
-              label: Text(count <= 1 ? '编辑该章' : '编辑所选（$count）'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF4D6BFE),
-                foregroundColor: Colors.white,
-                disabledBackgroundColor: const Color(0xFFE8ECF4),
-                disabledForegroundColor: const Color(0xFF999999),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 10,
+            const SizedBox(width: 4),
+            Flexible(
+              child: ElevatedButton(
+                onPressed: count == 0
+                    ? null
+                    : () => _openEdit(_selectedChapters),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF4D6BFE),
+                  foregroundColor: Colors.white,
+                  disabledBackgroundColor: const Color(0xFFE8ECF4),
+                  disabledForegroundColor: const Color(0xFF999999),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  textStyle: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                textStyle: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
+                child: Text(
+                  count <= 1 ? '编辑该事件' : '编辑所选（$count）',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ),
@@ -335,8 +420,8 @@ class _ChapterSelectTile extends StatelessWidget {
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
       child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.fromLTRB(8, 10, 8, 10),
+        margin: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.fromLTRB(6, 8, 6, 8),
         decoration: BoxDecoration(
           color: isMajor ? const Color(0xFFF8F9FF) : Colors.white,
           borderRadius: BorderRadius.circular(8),
@@ -351,14 +436,19 @@ class _ChapterSelectTile extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Checkbox(
-              value: selected,
-              onChanged: (_) => onTap(),
-              activeColor: const Color(0xFF4D6BFE),
-              visualDensity: VisualDensity.compact,
-              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            // 复选框：默认 48dp 的点击区在长列表里太占地方，收成 32dp
+            SizedBox(
+              width: 32,
+              height: 32,
+              child: Checkbox(
+                value: selected,
+                onChanged: (_) => onTap(),
+                activeColor: const Color(0xFF4D6BFE),
+                visualDensity: VisualDensity.compact,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
             ),
-            const SizedBox(width: 4),
+            const SizedBox(width: 2),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -367,17 +457,17 @@ class _ChapterSelectTile extends StatelessWidget {
                     children: [
                       Icon(
                         isMajor ? Icons.flag : Icons.article_outlined,
-                        size: 16,
+                        size: 14,
                         color: isMajor
                             ? const Color(0xFF4D6BFE)
                             : const Color(0xFF999999),
                       ),
-                      const SizedBox(width: 6),
+                      const SizedBox(width: 4),
                       Expanded(
                         child: Text(
                           chapter.eventTitle,
                           style: TextStyle(
-                            fontSize: isMajor ? 14 : 13,
+                            fontSize: isMajor ? 13 : 12,
                             fontWeight: isMajor
                                 ? FontWeight.w600
                                 : FontWeight.w500,
@@ -387,6 +477,7 @@ class _ChapterSelectTile extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
+                      const SizedBox(width: 4),
                       EventTypeTag(
                         isMajor: isMajor,
                         majorNumber: majorNumber,
@@ -399,24 +490,24 @@ class _ChapterSelectTile extends StatelessWidget {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 4),
                   Text(
                     chapter.eventSummary.trim().isEmpty
                         ? '暂无概要'
                         : chapter.eventSummary.trim(),
                     style: const TextStyle(
-                      fontSize: 11,
-                      height: 1.4,
+                      fontSize: 10,
+                      height: 1.35,
                       color: Color(0xFF999999),
                     ),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 4),
                   Text(
                     isMajor ? statusText : '$statusText · $words 字',
                     style: TextStyle(
-                      fontSize: 10,
+                      fontSize: 9,
                       color: isCompleted
                           ? const Color(0xFF4CAF50)
                           : const Color(0xFFBBBBBB),
@@ -435,7 +526,7 @@ class _ChapterSelectTile extends StatelessWidget {
               ),
               child: const Text(
                 '编辑',
-                style: TextStyle(fontSize: 12, color: Color(0xFF4D6BFE)),
+                style: TextStyle(fontSize: 11, color: Color(0xFF4D6BFE)),
               ),
             ),
           ],
