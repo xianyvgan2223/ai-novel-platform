@@ -4,6 +4,17 @@
 class UserSetting {
   static const int maxTokensMax = 384000;
 
+  // ── 联网搜索来源 ──
+
+  /// 百度千帆 AI 搜索（当前唯一可用来源）
+  static const String searchEngineBaidu = 'baidu';
+
+  /// 关闭联网搜索
+  static const String searchEngineOff = 'off';
+
+  /// DeepSeek 官方 API「自带搜索」（预留位，见 db V35→V36 迁移注释）
+  static const String searchEngineDeepseek = 'deepseek';
+
   final int? id;
   final String model;
   final String apiKey;
@@ -28,9 +39,16 @@ class UserSetting {
   final String baiduApiKey;
   final int searchCount;
   final String searchFreshness;
+
+  /// 联网搜索来源：仅 [searchEngineBaidu] 真正可用。
+  ///
+  /// 保留此字段是为了让设置项能表达「想用哪个来源」，并给将来官方开放
+  /// 自带搜索留出通路 —— 实测结论见 db V35→V36 迁移处的注释。
+  final String searchEngine;
+
   const UserSetting({
     this.id,
-    this.model = 'deepseek-v4-flash',
+    this.model = 'deepseek-flash',
     this.apiKey = '',
     this.temperature = 1.0,
     this.topP = 1.0,
@@ -53,6 +71,7 @@ class UserSetting {
     this.baiduApiKey = '',
     this.searchCount = 5,
     this.searchFreshness = '',
+    this.searchEngine = searchEngineBaidu,
   });
 
   /// 实体 → 数据库 Map
@@ -82,6 +101,7 @@ class UserSetting {
       'baidu_api_key': baiduApiKey,
       'search_count': searchCount,
       'search_freshness': searchFreshness,
+      'search_engine': searchEngine,
     };
   }
 
@@ -89,7 +109,7 @@ class UserSetting {
   factory UserSetting.fromMap(Map<String, dynamic> map) {
     return UserSetting(
       id: map['id'] as int?,
-      model: map['model'] as String? ?? 'deepseek-v4-flash',
+      model: map['model'] as String? ?? 'deepseek-flash',
       apiKey: map['apiKey'] as String? ?? '',
       temperature: (map['temperature'] as num?)?.toDouble() ?? 1.0,
       topP: (map['top_p'] as num?)?.toDouble() ?? 1.0,
@@ -112,6 +132,7 @@ class UserSetting {
       baiduApiKey: map['baidu_api_key'] as String? ?? '',
       searchCount: map['search_count'] as int? ?? 5,
       searchFreshness: map['search_freshness'] as String? ?? '',
+      searchEngine: map['search_engine'] as String? ?? searchEngineBaidu,
     );
   }
 
@@ -141,6 +162,7 @@ class UserSetting {
     String? baiduApiKey,
     int? searchCount,
     String? searchFreshness,
+    String? searchEngine,
   }) {
     return UserSetting(
       id: id ?? this.id,
@@ -167,6 +189,7 @@ class UserSetting {
       baiduApiKey: baiduApiKey ?? this.baiduApiKey,
       searchCount: searchCount ?? this.searchCount,
       searchFreshness: searchFreshness ?? this.searchFreshness,
+      searchEngine: searchEngine ?? this.searchEngine,
     );
   }
 

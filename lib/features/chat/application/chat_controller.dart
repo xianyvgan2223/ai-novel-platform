@@ -62,6 +62,37 @@ class ChatController extends ChangeNotifier {
   bool get _hasSettingCache => _settingCache != null;
 
   // ============================================================
+  //  ── 联网搜索来源裁决 ──
+  // ============================================================
+
+  /// 归一化搜索来源：兼容历史数据（旧库只有 web_search 布尔量，无 search_engine）。
+  /// 只认三个已知值，其余（含列缺失导致的空串）一律按百度处理。
+  static String _normalizeEngine(UserSetting s) {
+    const valid = <String>[
+      UserSetting.searchEngineBaidu,
+      UserSetting.searchEngineDeepseek,
+      UserSetting.searchEngineOff,
+    ];
+    if (valid.contains(s.searchEngine)) return s.searchEngine;
+    return UserSetting.searchEngineBaidu;
+  }
+
+  /// 实际使用的搜索来源（对外可见，便于 UI / 测试断言）。
+  ///
+  /// 目前 [UserSetting.searchEngineDeepseek] 会**自动回退到百度**：实测 DeepSeek
+  /// 官方 API 没有可用的自带搜索（/chat/completions 直接 422 拒绝 web_search 工具；
+  /// /responses 接受该工具但不执行检索，实测产出率 0/6，模型自述“系统没有列出工具”）。
+  /// 曾观察到模型吐出搜索结果形状的 JSON，但那是凭训练记忆编造的，采信会展示伪造来源。
+  /// 等官方开放后，只需在此处放行 deepseek，无需改动上层流程。
+  static String effectiveSearchEngine(UserSetting s) {
+    final engine = _normalizeEngine(s);
+    if (engine == UserSetting.searchEngineDeepseek) {
+      return UserSetting.searchEngineBaidu;
+    }
+    return engine;
+  }
+
+  // ============================================================
   //  ── 中断输出 ──
   // ============================================================
 
@@ -150,7 +181,10 @@ class ChatController extends ChangeNotifier {
     final tools = <Map<String, dynamic>>[];
 
     // 联网搜索工具
-    if (setting.webSearch) {
+    // 用 effectiveSearchEngine 而非 setting.searchEngine：用户若选了「DeepSeek 自带搜索」，
+    // 会自动回退到百度（原因见下），保证搜索始终可用。
+    final searchEngine = effectiveSearchEngine(setting);
+    if (searchEngine != UserSetting.searchEngineOff) {
       if (setting.baiduApiKey.isEmpty) {
         final errMsg = ChatMessage(
           role: MessageRole.assistant,
@@ -394,6 +428,9 @@ class ChatController extends ChangeNotifier {
     }
 
     // ② 执行百度搜索
+    // 说明：走到这里说明搜索确实开启（effectiveSearchEngine != off）。
+    // 由于 DeepSeek 自带搜索在官方 API 上不可用，effectiveSearchEngine 会把
+    // 'deepseek' 回退成 'baidu'，所以此处恒为百度千帆搜索。
     final setting = _settingCache!;
     // 保存 Phase 1 文本（搜索前的预回答）
     _phase1Text = _streamingText;

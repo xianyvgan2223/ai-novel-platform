@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { ArrowLeft, Cpu, Link as LinkIcon, Refresh, User } from '@element-plus/icons-vue';
 import { api, formatTime } from '@/api';
 import type { Row } from '@/api';
+import { deviceEpoch } from '@/stores/device';
 import PageHeader from '@/components/PageHeader.vue';
 import RichText from '@/components/RichText.vue';
 
@@ -51,6 +52,8 @@ function parseSearchResults(raw: unknown): { title?: string; url?: string }[] {
   }
 }
 
+// 切换设备后可能根本不存在这个会话（各设备主键独立），重新取一次
+watch(deviceEpoch, () => void load());
 onMounted(load);
 </script>
 

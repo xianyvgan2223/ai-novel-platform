@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../../../core/config/deepseek_models.dart';
 import '../../../shared/dialog_utils.dart';
 import '../../model/battle_model.dart';
 import '../../model/db/battle_db_helper.dart';
@@ -13,11 +14,12 @@ class BattleSettingPage extends StatefulWidget {
 }
 
 class _BattleSettingPageState extends State<BattleSettingPage> {
-  static const _models = ['deepseek-v4-flash', 'deepseek-v4-pro'];
+  // 真实 API 标识由共享常量提供：flash 是 deepseek-flash，pro 是 deepseek-v4-pro
+  static const _models = DeepSeekModels.selectableIds;
 
   double _temperature = 0.8;
   int _maxTokens = 4096;
-  String _model = 'deepseek-v4-flash';
+  String _model = 'deepseek-flash';
   final TextEditingController _systemCtrl = TextEditingController();
   bool _loading = true;
 
@@ -64,8 +66,8 @@ class _BattleSettingPageState extends State<BattleSettingPage> {
   /// 弹出大编辑框方便编辑系统提示
   void _showEnlargeDialog() {
     final editCtrl = TextEditingController(text: _systemCtrl.text);
-    final screenHeight = MediaQuery.of(context).size.height;
-    final screenWidth = MediaQuery.of(context).size.width;
+    final screenHeight = MediaQuery.heightOf(context);
+    final screenWidth = MediaQuery.widthOf(context);
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -244,7 +246,10 @@ class _BattleSettingPageState extends State<BattleSettingPage> {
                                   },
                                 ),
                                 const SizedBox(width: 4),
-                                Text(m, style: const TextStyle(fontSize: 14)),
+                                Text(
+                                  DeepSeekModels.toDisplayName(m) ?? m,
+                                  style: const TextStyle(fontSize: 14),
+                                ),
                               ],
                             ),
                           ),

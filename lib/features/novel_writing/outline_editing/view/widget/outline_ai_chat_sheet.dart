@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import '../../controller/outline_edit_controller.dart';
 import '../../model/outline_edit_chat_message.dart';
@@ -115,46 +116,36 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final media = MediaQuery.of(context);
-    final insets = media.viewInsets.bottom;
-    // 键盘弹出时压缩面板高度，保证标题栏与输入框始终可见；
-    // 不用满屏高度，留出上方页面可见（配合面板内的「当前大纲」预览）
-    final height = (media.size.height * 0.8 - insets)
-        .clamp(260.0, media.size.height)
-        .toDouble();
-    return Padding(
-      padding: EdgeInsets.only(bottom: insets),
-      child: Container(
-        height: height,
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-        ),
-        child: ListenableBuilder(
-          listenable: widget.controller,
-          builder: (context, _) {
-            _trackStream();
-            final controller = widget.controller;
-            return Column(
-              children: [
-                _buildHeader(controller),
+    // 本 build 刻意不读 MediaQuery：面板高度依赖键盘 inset，每帧都要重算，
+    // 但重算只应该发生在 _InsetSizedSheet 那一层。若在这个 build 里读，
+    // 键盘弹出的整段动画期间每帧都会重跑这里，下面这棵面板内容跟着每帧重建。
+    // 内容在这里只构造一次、作为 child 传下去，_InsetSizedSheet 每帧重建时
+    // 拿到的是同一个实例，Flutter 会跳过它的 rebuild。
+    return _InsetSizedSheet(
+      child: ListenableBuilder(
+        listenable: widget.controller,
+        builder: (context, _) {
+          _trackStream();
+          final controller = widget.controller;
+          return Column(
+            children: [
+              _buildHeader(controller),
+              const Divider(height: 1),
+              // 默认收起：展开时才显示选项行（开关状态不受展开 / 收起影响）
+              if (_optionsExpanded) ...[
+                _buildInjectToggle(controller),
+                _buildInjectPriorMajorsToggle(controller),
+                _buildInjectNextMajorToggle(controller),
                 const Divider(height: 1),
-                // 默认收起：展开时才显示选项行（开关状态不受展开 / 收起影响）
-                if (_optionsExpanded) ...[
-                  _buildInjectToggle(controller),
-                  _buildInjectPriorMajorsToggle(controller),
-                  _buildInjectNextMajorToggle(controller),
-                  const Divider(height: 1),
-                ],
-                // 「当前大纲」作为对话里的第一条气泡展示，随对话一起滚动看全文
-                Expanded(child: _buildMessageList(controller)),
-                if (controller.chatError.isNotEmpty) _buildError(controller),
-                _buildQuickPrompts(controller),
-                _buildInput(controller),
               ],
-            );
-          },
-        ),
+              // 「当前大纲」作为对话里的第一条气泡展示，随对话一起滚动看全文
+              Expanded(child: _buildMessageList(controller)),
+              if (controller.chatError.isNotEmpty) _buildError(controller),
+              _buildQuickPrompts(controller),
+              _buildInput(controller),
+            ],
+          );
+        },
       ),
     );
   }
@@ -460,6 +451,11 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
     final hintCount = messages.isEmpty ? 1 : 0;
     return ListView.builder(
       controller: _scrollCtrl,
+      // 理由同 outline_edit_page：本面板高度随键盘 inset 收缩 / 还原，
+      // 视口变矮时气泡被卸载、还原时又要重新 build（长文本气泡重建更贵），
+      // 于是「收起键盘」这一步掉帧。取值依据见 outline_edit_page 的注释
+      //（缓存区 ≳ 键盘高度即可），平板 / 横屏键盘更高，故取 1000 而非压线值。
+      scrollCacheExtent: const ScrollCacheExtent.pixels(1000),
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       itemCount: outlineCount + messages.length + hintCount,
       itemBuilder: (context, index) {
@@ -529,7 +525,12 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
                 ],
               )
             else
-              SelectableText(
+              // 用 Text 而非 SelectableText：AI 输出往往很长，而 SelectableText
+              // 内部是一个完整的 EditableText（自带 FocusNode、TextEditingController
+              // 与 RenderEditable），长文本重新排版的代价明显更高——这块又恰好是
+              // 流式输出时每来一个分片都要重建的地方。需要整段复制时用气泡下方的
+              //「复制」按钮（_actionButton('复制', ...)）。
+              Text(
                 msg.streaming ? '${msg.content}▍' : msg.content,
                 style: const TextStyle(
                   fontSize: 13,
@@ -715,6 +716,39 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
                   ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// 面板外壳：高度随键盘 inset 压缩，但不会因此重建 [child]。
+///
+/// 单独抽出来的原因见 `_OutlineAiChatSheetState.build` 的注释：读 MediaQuery
+/// 的那一层在键盘动画期间每帧都会重建，只有把内容作为 child 传进来，
+/// 重建才会停在「外壳」这一层，面板内部不会被牵连。
+class _InsetSizedSheet extends StatelessWidget {
+  const _InsetSizedSheet({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final screenHeight = MediaQuery.heightOf(context);
+    final insets = MediaQuery.viewInsetsOf(context).bottom;
+    // 键盘弹出时压缩面板高度，保证标题栏与输入框始终可见；
+    // 不用满屏高度，留出上方页面可见（配合面板内的「当前大纲」预览）
+    final height = (screenHeight * 0.8 - insets)
+        .clamp(260.0, screenHeight)
+        .toDouble();
+    return Padding(
+      padding: EdgeInsets.only(bottom: insets),
+      child: Container(
+        height: height,
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        ),
+        child: child,
       ),
     );
   }

@@ -7,6 +7,8 @@ library;
 
 import 'package:dio/dio.dart';
 
+import 'address_resolver.dart';
+
 /// 同步过程中的可读异常，界面上直接展示 message
 class SyncException implements Exception {
   final String message;
@@ -173,7 +175,8 @@ class SyncClient {
     Dio? dio,
   }) : _dio = dio ??
             Dio(BaseOptions(
-              baseUrl: _normalize(baseUrl),
+              // 容错：用户可能只填了 IP、多打了斜杠，或没写端口
+              baseUrl: AddressResolver.normalizeBaseUrl(baseUrl),
               connectTimeout: const Duration(seconds: 6),
               receiveTimeout: const Duration(seconds: 60),
               sendTimeout: const Duration(seconds: 60),
@@ -187,19 +190,6 @@ class SyncClient {
     return <String, dynamic>{'x-api-token': trimmed};
   }
 
-  /// 容错：用户可能只填了 IP，或者多打了斜杠
-  static String _normalize(String raw) {
-    var url = raw.trim();
-    if (url.isEmpty) return url;
-    if (!url.startsWith('http://') && !url.startsWith('https://')) {
-      url = 'http://$url';
-    }
-    while (url.endsWith('/')) {
-      url = url.substring(0, url.length - 1);
-    }
-    return url;
-  }
-
   /// 把 dio 的异常翻译成人话
   Never _fail(Object error) {
     if (error is DioException) {
@@ -208,9 +198,9 @@ class SyncClient {
         case DioExceptionType.connectionError:
           throw SyncException(
             '连不上同步服务：${_dio.options.baseUrl}\n'
-            '请确认：① 电脑上的服务已启动（npm start）'
-            '② 手机与电脑连同一个 Wi-Fi / 热点 '
-            '③ Windows 防火墙已放行 ${Uri.parse(_dio.options.baseUrl).port} 端口',
+            'USB 方式：电脑上执行 npm run usb，手机地址填 http://127.0.0.1:3210\n'
+            'Wi-Fi 方式：确认手机与电脑在同一 Wi-Fi（或电脑连手机热点）、'
+            '电脑服务已启动、Windows 防火墙已放行端口',
           );
         case DioExceptionType.receiveTimeout:
         case DioExceptionType.sendTimeout:

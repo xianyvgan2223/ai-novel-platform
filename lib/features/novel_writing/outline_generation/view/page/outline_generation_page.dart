@@ -1155,9 +1155,11 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
   Future<String?> _showCustomGenreDialog(BuildContext context) async {
     return showDialog<String>(
       context: context,
-      // 键盘弹出时把整个弹窗上移，避免输入框被键盘遮挡、看不到自己输入的内容
+      // 键盘弹出时把整个弹窗上移，避免输入框被键盘遮挡、看不到自己输入的内容。
+      // 弹窗是 const，实例稳定，所以每帧只会重建这层 Padding；用 viewInsetsOf
+      // 收窄依赖，其它 MediaQuery 字段变化不再牵连这里。
       builder: (ctx) => Padding(
-        padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+        padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(ctx).bottom),
         child: const _CustomGenreDialog(),
       ),
     );

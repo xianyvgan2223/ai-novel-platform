@@ -1,7 +1,7 @@
 /** api/index.ts —— 所有后端接口的集中入口（组件里只调用这里） */
 import { del, download, get, getWithMeta, post, put, uploadBinary } from './client';
 import type {
-  Catalog, ConflictInfo, DbKey, DeleteResult, DeviceInfo, HealthInfo, ImportReport,
+  Catalog, ConflictInfo, DbKey, DeleteResult, DeviceList, HealthInfo, ImportReport,
   PagedMeta, Row, Stats, SyncOverview, SyncRequestInfo, WriteResult,
 } from './types';
 
@@ -9,6 +9,7 @@ export const api = {
   // ── 服务与元数据 ──
   health: () => get<HealthInfo>('/api/health'),
   catalog: () => get<Catalog>('/api/catalog'),
+  /** 当前设备的数据概览（设备由 x-device-id 决定） */
   stats: () => get<Stats>('/api/stats'),
 
   // ── 通用数据 ──
@@ -20,20 +21,22 @@ export const api = {
     put<WriteResult>('/api/data/' + db + '/' + table + '/' + pk, row),
   deleteRow: (db: DbKey, table: string, pk: number) => del<DeleteResult>('/api/data/' + db + '/' + table + '/' + pk),
 
-  // ── 文件导入导出 ──
-  importDb: (db: DbKey, file: File | Blob, mode: 'merge' | 'replace', deviceId: string) =>
-    uploadBinary<ImportReport>(
-      '/api/transfer/import?db=' + db + '&mode=' + mode + '&deviceId=' + encodeURIComponent(deviceId),
-      file,
-    ),
+  // ── 文件导入导出（作用于当前设备的槽位）──
+  importDb: (db: DbKey, file: File | Blob, mode: 'merge' | 'replace') =>
+    uploadBinary<ImportReport>('/api/transfer/import?db=' + db + '&mode=' + mode, file),
   exportDb: (db: DbKey, sanitize: boolean) =>
     download('/api/transfer/export/' + db + '?sanitize=' + (sanitize ? '1' : '0'), db + '.db'),
 
+  // ── 设备（每台设备一个独立数据槽位）──
+  devices: () => get<DeviceList>('/api/sync/devices'),
+  removeDevice: (deviceId: string) => del<{ deviceId: string; existed: boolean; purgedFiles: boolean }>(
+    '/api/sync/devices/' + encodeURIComponent(deviceId),
+  ),
+
   // ── 同步 ──
   overview: () => get<SyncOverview>('/api/sync/overview'),
-  devices: () => get<DeviceInfo[]>('/api/sync/devices'),
-  conflicts: () => get<ConflictInfo[]>('/api/sync/conflicts'),
-  prune: () => post<{ pruned: number; upTo: number }>('/api/sync/prune'),
+  conflicts: (params: Record<string, unknown> = {}) => get<ConflictInfo[]>('/api/sync/conflicts', params),
+  prune: () => post<{ deviceId: string; pruned: number; upTo: number }>('/api/sync/prune'),
   pull: (params: Record<string, unknown>) => get<Record<string, unknown>>('/api/sync/pull', params),
   push: (payload: Record<string, unknown>) => post<Record<string, unknown>>('/api/sync/push', payload),
 

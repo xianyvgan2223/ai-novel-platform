@@ -16,6 +16,7 @@ import 'package:sqflite/sqflite.dart';
 
 import '../../../core/db/database_helper.dart';
 import '../../game/novel_game/model/db/novel_db_helper.dart';
+import '../data/address_resolver.dart';
 import '../data/server_discovery.dart';
 import '../data/sync_client.dart';
 import '../data/sync_store.dart';
@@ -86,6 +87,16 @@ class SyncService {
   static const String kLastPullSeqKey = 'last_pull_seq';
   static const String kLastSyncAtKey = 'last_sync_at';
   static const String kLastSyncSummaryKey = 'last_sync_summary';
+  /// 历史可用地址（换网络后仍能秒连），一行一个
+  static const String kKnownUrlsKey = 'known_base_urls';
+  /// 当前通道种类（usb / lan / hotspot / manual），给界面显示用
+  static const String kChannelKindKey = 'channel_kind';
+
+  /// 刚解析出的地址在这么久内直接复用，避免每轮轮询都重走一遍解析链
+  static const Duration _resolveCacheTtl = Duration(seconds: 45);
+  static String _cachedUrl = '';
+  static DateTime? _cachedAt;
+  static ChannelKind _cachedKind = ChannelKind.manual;
 
   /// 取（必要时生成并持久化）本机设备号
   static Future<String> ensureDeviceId() async {
@@ -105,8 +116,128 @@ class SyncService {
   static Future<String> getBaseUrl() async =>
       (await SyncStore.getValue(kBaseUrlKey)) ?? '';
 
-  static Future<void> setBaseUrl(String url) =>
-      SyncStore.setValue(kBaseUrlKey, url.trim());
+  /// 记下地址：既当「上次用的地址」，也进历史列表
+  static Future<void> setBaseUrl(String url) async {
+    final normalized = AddressResolver.normalizeBaseUrl(url);
+    if (normalized.isEmpty) return;
+    await SyncStore.setValue(kBaseUrlKey, normalized);
+    await rememberUrl(normalized);
+  }
+
+  /// 记下当前通道的种类（界面据此显示「USB 隧道」/「局域网」）
+  static Future<void> setChannelKind(ChannelKind kind) =>
+      SyncStore.setValue(kChannelKindKey, kind.name);
+
+  static Future<String> getChannelKindRaw() async =>
+      (await SyncStore.getValue(kChannelKindKey)) ?? '';
+
+  /// 历史上成功用过的地址（最多留 6 个，最近用的排前面）
+  static Future<List<String>> knownUrls() async {
+    final raw = await SyncStore.getValue(kKnownUrlsKey);
+    if (raw == null || raw.isEmpty) return <String>[];
+    return raw
+        .split('\n')
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
+  }
+
+  static Future<void> rememberUrl(String url) async {
+    final normalized = AddressResolver.normalizeBaseUrl(url);
+    if (normalized.isEmpty) return;
+    final list = await knownUrls();
+    list.removeWhere((u) => u == normalized);
+    list.insert(0, normalized);
+    await SyncStore.setValue(kKnownUrlsKey, list.take(6).join('\n'));
+  }
+
+  /// 最近一次解析出来的地址（界面显示用）
+  static String get cachedUrl => _cachedUrl;
+
+  /// 最近一次解析出的通道种类
+  static ChannelKind get cachedKind => _cachedKind;
+
+  /// 主动忘掉缓存（用户手动改地址、或点了「重新找电脑」时调）
+  static void clearResolveCache() {
+    _cachedUrl = '';
+    _cachedAt = null;
+    _cachedKind = ChannelKind.manual;
+  }
+
+  /// 让后续请求走这个地址（界面手动选通道时用），并把它记成「上次用的地址」
+  static Future<ResolvedAddress> useUrl(String url, {ChannelKind? kind}) async {
+    final normalized = AddressResolver.normalizeBaseUrl(url);
+    final service = await probeSyncService(normalized, token: await getToken()) ?? '';
+    final resolved = ResolvedAddress(
+      baseUrl: normalized,
+      kind: kind ?? AddressResolver.guessKind(normalized),
+      service: service,
+      step: 0,
+    );
+    _cachedUrl = normalized;
+    _cachedAt = DateTime.now();
+    _cachedKind = resolved.kind;
+    await setBaseUrl(normalized);
+    await setChannelKind(resolved.kind);
+    return resolved;
+  }
+
+  /// 逐级找出一个能用的地址（USB 隧道 → 历史地址 → 网关 → 广播 → 扫描）
+  ///
+  /// [force] 为 true 时忽略缓存，重新走一遍解析链（用户点「重新找电脑」）。
+  static Future<ResolvedAddress?> resolveAddress({
+    bool force = false,
+    void Function(String message, {int? current, int? total})? onProgress,
+    bool allowScan = true,
+  }) async {
+    if (!force &&
+        _cachedUrl.isNotEmpty &&
+        _cachedAt != null &&
+        DateTime.now().difference(_cachedAt!) < _resolveCacheTtl) {
+      return ResolvedAddress(
+        baseUrl: _cachedUrl,
+        kind: _cachedKind,
+        service: '',
+        step: 0,
+      );
+    }
+
+    final saved = await getBaseUrl();
+    final known = await knownUrls();
+    final token = await getToken();
+
+    final resolved = await AddressResolver.resolve(
+      savedUrl: saved,
+      knownUrls: known.where((u) => u != saved).toList(),
+      token: token,
+      onProgress: (m) => onProgress?.call(m),
+      allowScan: allowScan,
+    );
+
+    if (resolved == null) {
+      clearResolveCache();
+      return null;
+    }
+
+    _cachedUrl = resolved.baseUrl;
+    _cachedAt = DateTime.now();
+    _cachedKind = resolved.kind;
+    await setBaseUrl(resolved.baseUrl);
+    await setChannelKind(resolved.kind);
+    return resolved;
+  }
+
+  /// 通道状态（同步设置页显示）：USB 隧道是否已就绪 + 当前通道
+  static Future<({bool usbReady, String currentUrl, ChannelKind kind})> channelStatus() async {
+    final token = await getToken();
+    final usbReady = await AddressResolver.usbTunnelReady(token: token);
+    final raw = await getChannelKindRaw();
+    var kind = _cachedKind;
+    for (final candidate in ChannelKind.values) {
+      if (candidate.name == raw) kind = candidate;
+    }
+    return (usbReady: usbReady, currentUrl: await getBaseUrl(), kind: kind);
+  }
 
   static Future<String> getToken() async =>
       (await SyncStore.getValue(kTokenKey)) ?? '';
@@ -122,6 +253,10 @@ class SyncService {
     final deviceId = await ensureDeviceId();
     final client = SyncClient(baseUrl: baseUrl, deviceId: deviceId, token: token);
     final health = await client.health();
+    // 能把地址测通就记住它（顺便标出这是哪种通道）
+    _cachedUrl = AddressResolver.normalizeBaseUrl(baseUrl);
+    _cachedAt = DateTime.now();
+    _cachedKind = AddressResolver.guessKind(baseUrl);
     return '连接成功 · ${health.service} · Node ${health.node}'
         '${health.authRequired ? ' · 已开启鉴权' : ''}';
   }
@@ -134,14 +269,14 @@ class SyncService {
     return raw.length <= 140 ? raw : '${raw.substring(0, 140)}…';
   }
 
-  /// 在局域网里自动找一台同步服务；找到会记下地址并返回
+  /// 在局域网 / USB 隧道里找一台同步服务；找到会记下地址并返回
   static Future<String?> autoDiscover({
     void Function(String message, {int? current, int? total})? onProgress,
+    bool force = true,
   }) async {
-    final found = await ServerDiscovery.discover(onProgress: onProgress);
-    if (found == null) return null;
-    await setBaseUrl(found.baseUrl);
-    return found.baseUrl;
+    clearResolveCache();
+    final resolved = await resolveAddress(force: force, onProgress: onProgress);
+    return resolved?.baseUrl;
   }
 
   /// 检查电脑（网页）有没有发起「请同步」待办；有就执行并回报。
@@ -152,23 +287,33 @@ class SyncService {
     void Function(String message, {int? current, int? total})? onProgress,
   }) async {
     final url = await getBaseUrl();
-    if (url.isEmpty) return PendingSyncOutcome.idle();
+    // 之前完全没连过：先按通道链找一次（含 USB 隧道），找不到就安静地跳过
+    if (url.isEmpty) {
+      final resolved = await resolveAddress(onProgress: onProgress);
+      if (resolved == null) return PendingSyncOutcome.idle();
+    }
+
+    // 用缓存/解析出的地址；最近连过就不再重复解析
+    final resolved = await resolveAddress(onProgress: onProgress);
+    if (resolved == null) return PendingSyncOutcome.idle();
 
     final deviceId = await ensureDeviceId();
     final token = await getToken();
-    final client = SyncClient(baseUrl: url, deviceId: deviceId, token: token);
+    final client = SyncClient(baseUrl: resolved.baseUrl, deviceId: deviceId, token: token);
 
     SyncRequestInfo? claimed;
     try {
       claimed = await client.claimPendingRequest();
     } catch (_) {
-      // 连接问题：静默跳过，下一轮再试
+      // 连接问题：让下一次轮询重新解析地址（可能换了网络或拔了数据线）
+      clearResolveCache();
       return PendingSyncOutcome.idle();
     }
     if (claimed == null) return PendingSyncOutcome.idle();
 
     final request = claimed; // 提升为非空局部变量，闭包里才能安全引用
     onProgress?.call('收到电脑的同步请求…');
+    final runUrl = resolved.baseUrl;
 
     // 进度一边给本机界面，一边回传服务端（网页那边就能显示实时进度）。
     // 节流到约 0.7 秒一次，免得把接口刷爆。
@@ -186,7 +331,7 @@ class SyncService {
     try {
       report('开始同步…');
       final report0 = await run(
-        baseUrl: url,
+        baseUrl: runUrl,
         token: token,
         deviceName: '我的手机',
         onProgress: report,
@@ -205,35 +350,41 @@ class SyncService {
   }
 
   /// 一键同步（主界面按钮用）：
-  ///   1. 优先用已保存的地址；没配过就自动扫描局域网
+  ///   1. 按通道顺序找电脑：上次的地址 → USB 隧道 → 历史地址 → 网关 → 广播 → 扫描
   ///   2. 找不到时给出可操作的提示，而不是丢一句「网络异常」
-  ///   3. 地址失效（手机热点每次分配不同 IP 很常见）时自动重找一次再同步
+  ///   3. 地址失效（换了 Wi-Fi、拔了数据线）时自动重新解析一次再同步
   static Future<SyncReport> quickSync({
     String? preferredUrl,
     String deviceName = '',
     void Function(String message, {int? current, int? total})? onProgress,
   }) async {
-    var url = (preferredUrl ?? await getBaseUrl()).trim();
+    ResolvedAddress? resolved;
+    final preferred = (preferredUrl ?? '').trim();
 
-    if (url.isEmpty) {
-      onProgress?.call('还没配置过地址，正在局域网里查找…');
-      final found = await autoDiscover(onProgress: onProgress);
-      if (found == null) {
-        throw SyncException(
-          '没有找到电脑上的同步服务。\n'
-          '请确认：① 电脑已启动服务（web/server 目录执行 npm start）'
-          '② 手机与电脑连同一个 Wi-Fi 或热点 '
-          '③ Windows 防火墙已放行 3210 端口',
-        );
-      }
-      url = found;
-      onProgress?.call('已找到 $url');
+    if (preferred.isNotEmpty) {
+      resolved = await useUrl(preferred);
+    } else {
+      onProgress?.call('正在找电脑…');
+      resolved = await resolveAddress(force: true, onProgress: onProgress);
     }
 
+    if (resolved == null) {
+      throw SyncException(
+        '没有找到电脑上的同步服务。\n'
+        '最省事的方式（USB 数据线）：\n'
+        '  ① 电脑上另开一个窗口执行  npm run usb\n'
+        '  ② 手机 App「设置 → 数据同步」里服务地址填 http://127.0.0.1:3210\n'
+        '走 Wi-Fi 时请确认：手机与电脑连同一个 Wi-Fi（或电脑连手机热点）、'
+        '电脑上服务已启动、Windows 防火墙已放行 3210 端口。',
+      );
+    }
+
+    onProgress?.call('已连上（${resolved.kind.label}）${resolved.baseUrl}');
     final token = await getToken();
+
     try {
       return await run(
-        baseUrl: url,
+        baseUrl: resolved.baseUrl,
         token: token,
         deviceName: deviceName,
         onProgress: onProgress,
@@ -243,14 +394,15 @@ class SyncService {
           (e.message.contains('连不上') || e.message.contains('超时'));
       if (!retriable) rethrow;
 
-      onProgress?.call('原地址连不上，正在重新查找…');
-      final found = await ServerDiscovery.discover(onProgress: onProgress);
-      if (found == null || found.baseUrl == url) rethrow;
+      // 地址可能在同步过程中失效（拔线 / 换网），清缓存重新解析一次
+      onProgress?.call('原地址连不上，正在重新找电脑…');
+      clearResolveCache();
+      final again = await resolveAddress(force: true, onProgress: onProgress);
+      if (again == null || again.baseUrl == resolved.baseUrl) rethrow;
 
-      await setBaseUrl(found.baseUrl);
-      onProgress?.call('改用 ${found.baseUrl}');
+      onProgress?.call('改用 ${again.kind.label} ${again.baseUrl}');
       return run(
-        baseUrl: found.baseUrl,
+        baseUrl: again.baseUrl,
         token: token,
         deviceName: deviceName,
         onProgress: onProgress,

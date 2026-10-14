@@ -6,6 +6,7 @@ import { Delete, Refresh, Search, View } from '@element-plus/icons-vue';
 import { api, formatTime } from '@/api';
 import type { Row } from '@/api';
 import { useServerStore } from '@/stores/server';
+import { deviceEpoch } from '@/stores/device';
 import PageHeader from '@/components/PageHeader.vue';
 
 const router = useRouter();
@@ -78,6 +79,11 @@ async function remove(row: Row) {
 const isEmpty = computed(() => !loading.value && rows.value.length === 0);
 
 watch([page, pageSize], () => void load());
+// 切换设备（数据隔离）后，列表要换成那台设备的会话
+watch(deviceEpoch, () => {
+  page.value = 1;
+  void load();
+});
 onMounted(load);
 </script>
 

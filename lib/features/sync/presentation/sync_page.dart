@@ -1,6 +1,10 @@
 /// lib/features/sync/presentation/sync_page.dart
 ///
-/// 数据同步页：填写电脑上的服务地址 → 点一下就和手机数据双向同步。
+/// 数据同步页：找电脑（USB 隧道 / 局域网自动识别）→ 点一下双向同步。
+///
+/// 连接通道按可靠性自动挑：
+///   USB 隧道（电脑上跑着 npm run usb）→ 上次的地址 → 历史地址 → 热点网关 →
+///   广播自报 → 扫描局域网。
 library;
 
 import 'dart:async';
@@ -10,12 +14,16 @@ import 'package:flutter/services.dart';
 
 import '../../../core/db/database_helper.dart';
 import '../application/sync_service.dart';
+import '../data/address_resolver.dart';
+import '../data/server_discovery.dart';
 import '../data/sync_store.dart';
 
 const Color _kPrimary = Color(0xFF4D6BFE);
 const Color _kInk = Color(0xFF333333);
 const Color _kMuted = Color(0xFF888888);
 const Color _kLine = Color(0xFFEEEEEE);
+/// USB 隧道地址：adb reverse 建好后，手机上的这个地址就是电脑
+const String _kUsbUrl = 'http://127.0.0.1:3210';
 
 class SyncPage extends StatefulWidget {
   const SyncPage({super.key});
@@ -42,10 +50,21 @@ class _SyncPageState extends State<SyncPage> {
   String? _error;
   bool _showAdvanced = false;
 
+  // ── 连接通道 ──
+  /// USB 隧道是否已就绪（电脑上执行了 npm run usb 且手机插着数据线）
+  bool _usbReady = false;
+  /// 当前通道种类
+  ChannelKind? _channelKind;
+  /// 正在「找电脑」
+  bool _finding = false;
+  String _findMessage = '';
+
   @override
   void initState() {
     super.initState();
     unawaited(_loadSaved());
+    // 进页面就顺手探一次通道状态，用户不用点任何按钮
+    unawaited(_refreshChannelStatus());
   }
 
   @override
@@ -84,6 +103,106 @@ class _SyncPageState extends State<SyncPage> {
     });
   }
 
+  /// 探一下当前通道：USB 隧道通不通、当前用的是哪种
+  Future<void> _refreshChannelStatus() async {
+    try {
+      final status = await SyncService.channelStatus();
+      if (!mounted) return;
+      setState(() {
+        _usbReady = status.usbReady;
+        _channelKind = status.kind;
+      });
+    } catch (_) {
+      // 探测失败不影响使用
+    }
+  }
+
+  /// 「自动找电脑」：走完整的通道链（USB 隧道 → 历史 → 网关 → 广播 → 扫描）
+  Future<void> _autoFind() async {
+    if (_busy || _finding) return;
+    setState(() {
+      _finding = true;
+      _findMessage = '正在找电脑…';
+      _error = null;
+    });
+    try {
+      final resolved = await SyncService.resolveAddress(
+        force: true,
+        onProgress: (message, {int? current, int? total}) {
+          if (!mounted) return;
+          setState(() => _findMessage = message);
+        },
+      );
+      if (!mounted) return;
+      if (resolved == null) {
+        setState(() {
+          _finding = false;
+          _findMessage = '';
+        });
+        _toast('没找到电脑，看下面的两种连接方式', error: true);
+        return;
+      }
+      setState(() {
+        _finding = false;
+        _findMessage = '';
+        _urlCtrl.text = resolved.baseUrl;
+        _channelKind = resolved.kind;
+      });
+      _toast('已找到：${resolved.kind.label} · ${resolved.baseUrl}');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _finding = false;
+        _findMessage = '';
+        _error = SyncService.describeError(e);
+      });
+      _toast('查找失败', error: true);
+    }
+  }
+
+  /// 一键切到 USB 隧道地址（并验证隧道是否真的通）
+  Future<void> _useUsbTunnel() async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _progress = '正在检查 USB 隧道…';
+      _error = null;
+    });
+    try {
+      await SyncService.setToken(_tokenCtrl.text);
+      final token = _tokenCtrl.text.trim();
+      final ready = await AddressResolver.usbTunnelReady(token: token);
+      if (!ready) {
+        if (!mounted) return;
+        setState(() {
+          _progress = '';
+          _usbReady = false;
+        });
+        _toast('USB 隧道还没通：电脑上执行 npm run usb 后重试', error: true);
+        return;
+      }
+      await SyncService.useUrl(_kUsbUrl, kind: ChannelKind.usb);
+      final info = await SyncService.testConnection(baseUrl: _kUsbUrl, token: token);
+      if (!mounted) return;
+      setState(() {
+        _progress = '';
+        _usbReady = true;
+        _channelKind = ChannelKind.usb;
+        _urlCtrl.text = _kUsbUrl;
+      });
+      _toast(info);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _progress = '';
+        _error = SyncService.describeError(e);
+      });
+      _toast('USB 隧道连接失败', error: true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   void _toast(String message, {bool error = false}) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -96,29 +215,55 @@ class _SyncPageState extends State<SyncPage> {
   }
 
   Future<void> _testConnection() async {
-    final url = _urlCtrl.text.trim();
-    if (url.isEmpty) {
-      _toast('请先填写服务地址', error: true);
-      return;
-    }
+    var url = _urlCtrl.text.trim();
     setState(() {
       _busy = true;
-      _progress = '正在测试连接…';
+      _progress = url.isEmpty ? '正在找电脑…' : '正在测试连接…';
       _error = null;
     });
     try {
-      await SyncService.setBaseUrl(url);
       await SyncService.setToken(_tokenCtrl.text);
+      // 地址留空时先自动找一台
+      if (url.isEmpty) {
+        final resolved = await SyncService.resolveAddress(
+          force: true,
+          onProgress: (message, {int? current, int? total}) {
+            if (!mounted) return;
+            setState(() => _progress = message);
+          },
+        );
+        if (resolved == null) {
+          if (!mounted) return;
+          setState(() {
+            _progress = '';
+            _error = '没找到电脑。USB 方式：电脑上执行 npm run usb，'
+                '手机地址填 $_kUsbUrl；Wi-Fi 方式：确认两边在同一网络。';
+          });
+          _toast('连接失败', error: true);
+          return;
+        }
+        url = resolved.baseUrl;
+      }
+
       final info = await SyncService.testConnection(
         baseUrl: url,
         token: _tokenCtrl.text.trim(),
       );
-      setState(() => _progress = '');
-      _toast(info);
-    } catch (e) {
+      await SyncService.useUrl(url);
+      final status = await SyncService.channelStatus();
+      if (!mounted) return;
       setState(() {
         _progress = '';
-        _error = e.toString();
+        _urlCtrl.text = SyncService.cachedUrl.isEmpty ? url : SyncService.cachedUrl;
+        _usbReady = status.usbReady || SyncService.cachedKind == ChannelKind.usb;
+        _channelKind = SyncService.cachedKind;
+      });
+      _toast(info);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _progress = '';
+        _error = SyncService.describeError(e);
       });
       _toast('连接失败', error: true);
     } finally {
@@ -127,35 +272,31 @@ class _SyncPageState extends State<SyncPage> {
   }
 
   Future<void> _sync() async {
-    final url = _urlCtrl.text.trim();
-    if (url.isEmpty) {
-      _toast('请先填写服务地址（电脑上启动服务后会打印）', error: true);
-      return;
-    }
-
     setState(() {
       _busy = true;
       _error = null;
       _report = null;
-      _progress = '准备同步…';
+      _progress = '正在找电脑…';
     });
 
+    void onProgress(String message, {int? current, int? total}) {
+      if (!mounted) return;
+      setState(() {
+        _progress = message;
+        _progressCurrent = current;
+        _progressTotal = total;
+      });
+    }
+
     try {
-      await SyncService.setBaseUrl(url);
       await SyncService.setToken(_tokenCtrl.text);
 
-      final report = await SyncService.run(
-        baseUrl: url,
-        token: _tokenCtrl.text.trim(),
+      // 优先用输入框里的地址（用户可能手填了）；留空时走通道链自动找
+      final typed = _urlCtrl.text.trim();
+      final report = await SyncService.quickSync(
+        preferredUrl: typed.isEmpty ? null : typed,
         deviceName: '我的手机',
-        onProgress: (message, {int? current, int? total}) {
-          if (!mounted) return;
-          setState(() {
-            _progress = message;
-            _progressCurrent = current;
-            _progressTotal = total;
-          });
-        },
+        onProgress: onProgress,
       );
 
       if (!mounted) return;
@@ -165,8 +306,13 @@ class _SyncPageState extends State<SyncPage> {
         _lastSyncAt = report.finishedAt?.millisecondsSinceEpoch;
         _lastSummary = report.summary;
         _error = report.hasError ? report.errors.join('\n') : null;
+        // 同步成功后把实际用上的地址回填到输入框
+        final used = SyncService.cachedUrl;
+        if (used.isNotEmpty) _urlCtrl.text = used;
+        _channelKind = SyncService.cachedKind;
       });
       _toast(report.hasError ? '同步完成，但有部分问题' : '同步完成');
+      unawaited(_refreshChannelStatus());
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -246,6 +392,8 @@ class _SyncPageState extends State<SyncPage> {
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 40),
         children: [
           _buildIntro(),
+          const SizedBox(height: 14),
+          _buildChannelPanel(),
           const SizedBox(height: 20),
           _buildServerForm(),
           const SizedBox(height: 20),
@@ -284,10 +432,10 @@ class _SyncPageState extends State<SyncPage> {
         children: [
           Row(
             children: const [
-              Icon(Icons.wifi_tethering, size: 17, color: _kPrimary),
+              Icon(Icons.cable, size: 17, color: _kPrimary),
               SizedBox(width: 7),
               Text(
-                '使用前提',
+                '两种连接方式（推荐第一种）',
                 style: TextStyle(
                   fontSize: 13.5,
                   fontWeight: FontWeight.w600,
@@ -297,9 +445,118 @@ class _SyncPageState extends State<SyncPage> {
             ],
           ),
           const SizedBox(height: 8),
-          _bullet('电脑和手机连同一个 Wi-Fi，或者电脑连手机热点'),
-          _bullet('电脑上启动同步服务：web/server 目录执行 npm start'),
-          _bullet('把启动时打印的「手机请填」地址抄到下面'),
+          _bullet('USB 数据线：电脑上执行一次 npm run usb，隧道就通了；'
+              '不看 Wi-Fi、不怕防火墙，地址固定填 $_kUsbUrl'),
+          _bullet('Wi-Fi / 热点：手机与电脑连同一个网络，点下面的「自动找电脑」即可'),
+        ],
+      ),
+    );
+  }
+
+  /// 连接通道面板：USB 隧道状态 + 自动找电脑 + 当前通道
+  Widget _buildChannelPanel() {
+    final kind = _channelKind;
+    final currentUrl = _urlCtrl.text.trim();
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: _usbReady ? const Color(0xFFF2FBF5) : Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: _usbReady ? const Color(0xFFCDEBD8) : _kLine),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                _usbReady ? Icons.usb : Icons.usb_off,
+                size: 16,
+                color: _usbReady ? const Color(0xFF1F9254) : _kMuted,
+              ),
+              const SizedBox(width: 7),
+              Expanded(
+                child: Text(
+                  _usbReady ? 'USB 隧道已就绪' : 'USB 隧道未连接',
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w600,
+                    color: _usbReady ? const Color(0xFF1F9254) : _kInk,
+                  ),
+                ),
+              ),
+              if (kind != null)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF0F3FF),
+                    borderRadius: BorderRadius.circular(5),
+                  ),
+                  child: Text(
+                    '当前：${kind.label}',
+                    style: const TextStyle(fontSize: 11, color: _kPrimary),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            _usbReady
+                ? '手机正通过数据线连接电脑（地址 $currentUrl）'
+                : '插上数据线后，在电脑的 web/server 目录执行 npm run usb',
+            style: const TextStyle(fontSize: 12, height: 1.6, color: Color(0xFF777777)),
+          ),
+          if (_findMessage.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                const SizedBox(
+                  width: 12,
+                  height: 12,
+                  child: CircularProgressIndicator(strokeWidth: 1.8, color: _kPrimary),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    _findMessage,
+                    style: const TextStyle(fontSize: 12, color: _kMuted),
+                  ),
+                ),
+              ],
+            ),
+          ],
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: (_busy || _finding) ? null : _autoFind,
+                  icon: const Icon(Icons.travel_explore, size: 15),
+                  label: const Text('自动找电脑', style: TextStyle(fontSize: 13)),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _kPrimary,
+                    side: const BorderSide(color: _kPrimary),
+                    padding: const EdgeInsets.symmetric(vertical: 9),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _busy ? null : _useUsbTunnel,
+                  icon: const Icon(Icons.usb, size: 15),
+                  label: const Text('用 USB 连', style: TextStyle(fontSize: 13)),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFF1F9254),
+                    side: const BorderSide(color: Color(0xFFCDEBD8)),
+                    padding: const EdgeInsets.symmetric(vertical: 9),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );
@@ -346,7 +603,7 @@ class _SyncPageState extends State<SyncPage> {
           keyboardType: TextInputType.url,
           autocorrect: false,
           decoration: InputDecoration(
-            hintText: 'http://192.168.43.5:3210',
+            hintText: '留空则自动找（USB 隧道固定为 $_kUsbUrl）',
             hintStyle: const TextStyle(color: Color(0xFFBBBBBB), fontSize: 13.5),
             isDense: true,
             contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13),

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../../../../../core/widgets/keyboard_inset_padding.dart';
 import '../../../shared/dialog_utils.dart';
 import '../../../shared/domain/outline_record.dart';
 import '../../../shared/domain/outline_chapter.dart';
@@ -328,13 +329,13 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
 
   /// 章节生成前的字数输入弹窗：返回用户输入的目标字数；取消返回 null
   Future<int?> _showWordCountDialog(int defaultWords) {
+    // 弹窗内容只构造一次：showDialog 的 builder 所在的 Element 会订阅
+    // MediaQuery，键盘弹出动画期间每帧重跑；在闭包里 new 出弹窗，等于整个
+    // 输入弹窗跟着每帧重建。上移交给 KeyboardInsetPadding（只重建它自己那层）。
+    final content = _WordCountDialog(initialWords: defaultWords);
     return showDialog<int>(
       context: context,
-      // 键盘弹出时上移弹窗，避免输入框被键盘遮挡
-      builder: (ctx) => Padding(
-        padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
-        child: _WordCountDialog(initialWords: defaultWords),
-      ),
+      builder: (_) => KeyboardInsetPadding(child: content),
     );
   }
 
@@ -854,8 +855,8 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
                       final editCtrl = TextEditingController(
                         text: summaryCtrl.text,
                       );
-                      final screenHeight = MediaQuery.of(context).size.height;
-                      final screenWidth = MediaQuery.of(context).size.width;
+                      final screenHeight = MediaQuery.heightOf(context);
+                      final screenWidth = MediaQuery.widthOf(context);
                       showDialog(
                         context: context,
                         builder: (ctx2) => AlertDialog(
@@ -1028,7 +1029,7 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
         ),
         content: ConstrainedBox(
           constraints: BoxConstraints(
-            maxHeight: MediaQuery.of(context).size.height * 0.6,
+            maxHeight: MediaQuery.heightOf(context) * 0.6,
           ),
           child: SingleChildScrollView(
             child: TextField(
@@ -1614,7 +1615,7 @@ class _ChapterViewPageState extends State<_ChapterViewPage> {
           // 提炼过程气泡（下方，提炼中实时展示）
           if (processing)
             SizedBox(
-              height: MediaQuery.of(context).size.height * 0.3,
+              height: MediaQuery.heightOf(context) * 0.3,
               child: _ChapterProcessPanel(
                 controller: widget.controller,
                 chapter: chapter,

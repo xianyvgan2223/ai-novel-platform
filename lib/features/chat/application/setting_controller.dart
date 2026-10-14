@@ -33,6 +33,7 @@ class SettingController extends ChangeNotifier {
   String get baiduApiKey => _setting.baiduApiKey;
   int get searchCount => _setting.searchCount;
   String get searchFreshness => _setting.searchFreshness;
+  String get searchEngine => _setting.searchEngine;
 
   /// 从数据库加载配置
   Future<void> loadSettings() async {
@@ -139,9 +140,10 @@ class SettingController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 历史遗留入口：联网开关现在由 [setSearchEngine] 统一管理
+  /// （search_engine 是唯一事实来源）。这里转调一次，避免两个开关状态脱节。
   void setWebSearch(bool v) {
-    _setting = _setting.copyWith(webSearch: v);
-    notifyListeners();
+    setSearchEngine(v ? UserSetting.searchEngineBaidu : UserSetting.searchEngineOff);
   }
 
   void setBaiduApiKey(String v) {
@@ -156,6 +158,17 @@ class SettingController extends ChangeNotifier {
 
   void setSearchFreshness(String v) {
     _setting = _setting.copyWith(searchFreshness: v);
+    notifyListeners();
+  }
+
+  void setSearchEngine(String v) {
+    // search_engine 是联网搜索的「唯一事实来源」，旧的 web_search 布尔量
+    // 只是历史遗留：这里同步写一次，保证两处判断永远一致
+    // （chat_controller 只认 searchEngine，避免两个开关互相打架）。
+    _setting = _setting.copyWith(
+      searchEngine: v,
+      webSearch: v != UserSetting.searchEngineOff,
+    );
     notifyListeners();
   }
 

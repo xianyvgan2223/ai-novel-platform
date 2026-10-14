@@ -93,8 +93,8 @@ class _AiBattlePageState extends State<AiBattlePage> {
   /// 弹出大编辑框方便编辑输入内容
   void _showEnlargeDialog(TextEditingController ctrl, String hint) {
     final editCtrl = TextEditingController(text: ctrl.text);
-    final screenH = MediaQuery.of(context).size.height;
-    final screenW = MediaQuery.of(context).size.width;
+    final screenH = MediaQuery.heightOf(context);
+    final screenW = MediaQuery.widthOf(context);
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(

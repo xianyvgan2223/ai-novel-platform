@@ -2,7 +2,8 @@
 node_modules/
 dist/
 
-# 运行时数据：规范库（deepseek.db / novel.db）与同步元数据（sync.db）
+# 运行时数据：每台设备一个槽位（data/devices/<设备号>/ 下的
+# deepseek.db / novel.db / sync.db）+ 全局登记表 data/sync.db
 # 这里放的是真实数据，绝对不要提交
 data/*
 !data/.gitkeep

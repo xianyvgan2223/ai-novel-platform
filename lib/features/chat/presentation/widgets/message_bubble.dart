@@ -149,7 +149,7 @@ class _MessageBubbleState extends State<MessageBubble> {
           alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
           child: ConstrainedBox(
             constraints: BoxConstraints(
-              maxWidth: MediaQuery.of(context).size.width * 0.8,
+              maxWidth: MediaQuery.widthOf(context) * 0.8,
             ),
             child: bubbleRow,
           ),

@@ -169,7 +169,7 @@ class _HistoryDrawerState extends ConsumerState<HistoryDrawer> {
   @override
   Widget build(BuildContext context) {
     // 占屏幕宽度 70%，超出屏幕时留出右侧间隙
-    final screenWidth = MediaQuery.of(context).size.width;
+    final screenWidth = MediaQuery.widthOf(context);
     final width = screenWidth * HistoryDrawer.widthFactor;
 
     return Drawer(

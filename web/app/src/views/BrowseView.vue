@@ -13,6 +13,7 @@ import { DocumentCopy, Plus, Refresh, Search } from '@element-plus/icons-vue';
 import { api, formatTime, MODULE_LABELS } from '@/api';
 import type { ColumnMeta, DbKey, Row } from '@/api';
 import { useServerStore } from '@/stores/server';
+import { deviceEpoch } from '@/stores/device';
 import PageHeader from '@/components/PageHeader.vue';
 import RichText from '@/components/RichText.vue';
 
@@ -201,6 +202,13 @@ watch(
     void load();
   },
 );
+
+// 切换设备后同一张表的内容完全不同，回到第一页重新取
+watch(deviceEpoch, () => {
+  page.value = 1;
+  detailVisible.value = false;
+  void load();
+});
 
 onMounted(async () => {
   await store.refreshCatalog();

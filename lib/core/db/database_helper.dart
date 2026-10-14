@@ -6,7 +6,7 @@ import 'package:path/path.dart' as p;
 
 class DatabaseHelper {
   static const _dbName = 'deepseek.db';
-  static const _dbVersion = 35;
+  static const _dbVersion = 37;
   static Database? _database;
 
   /// 单例入口，全局复用同一个数据库连接
@@ -97,7 +97,7 @@ class DatabaseHelper {
     await db.execute('''
       CREATE TABLE user_settings (
         id INTEGER PRIMARY KEY,
-        model TEXT NOT NULL DEFAULT 'deepseek-v4-flash',
+        model TEXT NOT NULL DEFAULT 'deepseek-flash',
         apiKey TEXT NOT NULL DEFAULT '',
         temperature REAL NOT NULL DEFAULT 1.0,
         top_p REAL NOT NULL DEFAULT 1.0,
@@ -120,6 +120,7 @@ class DatabaseHelper {
         baidu_api_key TEXT NOT NULL DEFAULT '',
         search_count INTEGER NOT NULL DEFAULT 5,
         search_freshness TEXT NOT NULL DEFAULT '',
+        search_engine TEXT NOT NULL DEFAULT 'baidu',
         history_query INTEGER NOT NULL DEFAULT 0
       )
     ''');
@@ -170,7 +171,7 @@ class DatabaseHelper {
         id INTEGER PRIMARY KEY,
         temperature REAL NOT NULL DEFAULT 0.8,
         max_tokens INTEGER NOT NULL DEFAULT 4096,
-        model TEXT NOT NULL DEFAULT 'deepseek-v4-flash',
+        model TEXT NOT NULL DEFAULT 'deepseek-flash',
         system_prompt TEXT NOT NULL DEFAULT ''
       )
     ''');
@@ -180,7 +181,7 @@ class DatabaseHelper {
       'id': 1,
       'temperature': 0.8,
       'max_tokens': 4096,
-      'model': 'deepseek-v4-flash',
+      'model': 'deepseek-flash',
       'system_prompt': '',
     });
 
@@ -191,7 +192,7 @@ class DatabaseHelper {
         id INTEGER PRIMARY KEY,
         temperature REAL NOT NULL DEFAULT 0.8,
         max_tokens INTEGER NOT NULL DEFAULT 4096,
-        model TEXT NOT NULL DEFAULT 'deepseek-v4-flash',
+        model TEXT NOT NULL DEFAULT 'deepseek-flash',
         system_prompt TEXT NOT NULL DEFAULT '',
         enable_thinking INTEGER NOT NULL DEFAULT 1,
         pause_after_skeleton INTEGER NOT NULL DEFAULT 0,
@@ -203,7 +204,7 @@ class DatabaseHelper {
       'id': 1,
       'temperature': 0.8,
       'max_tokens': 4096,
-      'model': 'deepseek-v4-flash',
+      'model': 'deepseek-flash',
       'system_prompt': '',
       'enable_thinking': 1,
     });
@@ -214,7 +215,7 @@ class DatabaseHelper {
         id INTEGER PRIMARY KEY,
         temperature REAL NOT NULL DEFAULT 0.8,
         max_tokens INTEGER NOT NULL DEFAULT 4096,
-        model TEXT NOT NULL DEFAULT 'deepseek-v4-flash',
+        model TEXT NOT NULL DEFAULT 'deepseek-flash',
         chapter_system_prompt TEXT NOT NULL DEFAULT '',
         enable_thinking INTEGER NOT NULL DEFAULT 1,
         enable_story_state INTEGER NOT NULL DEFAULT 1,
@@ -226,7 +227,7 @@ class DatabaseHelper {
       'id': 1,
       'temperature': 0.8,
       'max_tokens': 4096,
-      'model': 'deepseek-v4-flash',
+      'model': 'deepseek-flash',
       'chapter_system_prompt': '',
       'enable_thinking': 1,
       'enable_story_state': 1,
@@ -488,7 +489,7 @@ class DatabaseHelper {
           id INTEGER PRIMARY KEY,
           temperature REAL NOT NULL DEFAULT 0.8,
           max_tokens INTEGER NOT NULL DEFAULT 4096,
-          model TEXT NOT NULL DEFAULT 'deepseek-v4-flash',
+          model TEXT NOT NULL DEFAULT 'deepseek-flash',
           system_prompt TEXT NOT NULL DEFAULT ''
         )
       ''');
@@ -496,7 +497,7 @@ class DatabaseHelper {
         'id': 1,
         'temperature': 0.8,
         'max_tokens': 4096,
-        'model': 'deepseek-v4-flash',
+        'model': 'deepseek-flash',
         'system_prompt': '',
       });
 
@@ -549,7 +550,7 @@ class DatabaseHelper {
           id INTEGER PRIMARY KEY,
           temperature REAL NOT NULL DEFAULT 0.8,
           max_tokens INTEGER NOT NULL DEFAULT 4096,
-          model TEXT NOT NULL DEFAULT 'deepseek-v4-flash',
+          model TEXT NOT NULL DEFAULT 'deepseek-flash',
           system_prompt TEXT NOT NULL DEFAULT ''
         )
       ''');
@@ -557,7 +558,7 @@ class DatabaseHelper {
         'id': 1,
         'temperature': 0.8,
         'max_tokens': 4096,
-        'model': 'deepseek-v4-flash',
+        'model': 'deepseek-flash',
         'system_prompt': '',
       });
     }
@@ -778,7 +779,7 @@ class DatabaseHelper {
           id INTEGER PRIMARY KEY,
           temperature REAL NOT NULL DEFAULT 0.8,
           max_tokens INTEGER NOT NULL DEFAULT 4096,
-          model TEXT NOT NULL DEFAULT 'deepseek-v4-flash',
+          model TEXT NOT NULL DEFAULT 'deepseek-flash',
           chapter_system_prompt TEXT NOT NULL DEFAULT '',
           enable_thinking INTEGER NOT NULL DEFAULT 1,
           enable_story_state INTEGER NOT NULL DEFAULT 1
@@ -793,7 +794,7 @@ class DatabaseHelper {
             'id': 1,
             'temperature': s['temperature'] ?? 0.8,
             'max_tokens': s['max_tokens'] ?? 4096,
-            'model': s['model'] ?? 'deepseek-v4-flash',
+            'model': s['model'] ?? 'deepseek-flash',
             'chapter_system_prompt': s['chapter_system_prompt'] ?? '',
             'enable_thinking': s['enable_thinking'] ?? 1,
             'enable_story_state': s['enable_story_state'] ?? 1,
@@ -803,7 +804,7 @@ class DatabaseHelper {
             'id': 1,
             'temperature': 0.8,
             'max_tokens': 4096,
-            'model': 'deepseek-v4-flash',
+            'model': 'deepseek-flash',
             'chapter_system_prompt': '',
             'enable_thinking': 1,
             'enable_story_state': 1,
@@ -828,7 +829,7 @@ class DatabaseHelper {
             id INTEGER PRIMARY KEY,
             temperature REAL NOT NULL DEFAULT 0.8,
             max_tokens INTEGER NOT NULL DEFAULT 4096,
-            model TEXT NOT NULL DEFAULT 'deepseek-v4-flash',
+            model TEXT NOT NULL DEFAULT 'deepseek-flash',
             system_prompt TEXT NOT NULL DEFAULT '',
             enable_thinking INTEGER NOT NULL DEFAULT 1
           )
@@ -1015,6 +1016,66 @@ class DatabaseHelper {
           "ALTER TABLE outline_records ADD COLUMN content_backup_at TEXT NOT NULL DEFAULT ''",
         );
       }
+    }
+
+    // V35 → V36：user_settings 增加 search_engine 列（联网搜索来源）。
+    //
+    // 为什么现在只有 'baidu' 一个可用值：用真 key 实测过 DeepSeek 官方 API，
+    // 结论是**官方 API 没有可用的自带联网搜索**，证据如下——
+    //   1) /chat/completions 传 tools:[{"type":"web_search"}] → HTTP 422
+    //      "unknown variant `web_search`, expected `function`"，只认 function 工具；
+    //   2) 顶层 web_search / search / enable_search / search_source 参数 → 200 但被静默忽略；
+    //   3) /responses 传 tools:[{"type":"web_search"}] → 200 不报错，但模型自述
+    //      "系统没有列出工具"，且带工具与不带工具的回答**完全一致**，实测产出率 0/6；
+    //   4) /models 未声明任何搜索能力字段；
+    //   5) 网页版 chat.deepseek.com 的联网是私有接口 + 浏览器登录态，API Key 调不通（429）。
+    // 早期曾观察到模型吐出 `{"title","url","date","content"}` 形状的搜索结果块，
+    // 但那是模型**凭训练记忆编造的**（内容全是旧闻，实跑还会泄漏英文思考过程），
+    // 直接采信会让 App 展示伪造的来源链接，比没有搜索更糟。
+    // 因此 'deepseek' 值只作预留：等官方开放后无需再动表结构。
+    if (oldVersion < 36) {
+      final cols = await db.rawQuery('PRAGMA table_info(user_settings)');
+      if (cols.isNotEmpty && !cols.any((c) => c['name'] == 'search_engine')) {
+        await db.execute(
+          "ALTER TABLE user_settings ADD COLUMN search_engine TEXT NOT NULL DEFAULT 'baidu'",
+        );
+      }
+    }
+
+    // V36 → V37：统一模型标识写法（deepseek-v4-flash → deepseek-flash）。
+    //
+    // 起因：`deepseek-v4-flash` 是早期写死的默认值，但它并不是官方 /models 里的
+    // 正式名字（官方正式名是 `deepseek-flash`；`deepseek-v4-pro` 反而是正式名，
+    // 写成 `deepseek-pro` 会 400，所以 pro 保持不动）。
+    // 这里把库里已有的历史值就地收敛，避免"设置页显示 flash、库里存 v4-flash"
+    // 这种表里不一——否则用户改完别的设置一保存，值又跳回去，看着像没生效。
+    //
+    // 注意 model 只是一个字符串，直接透传给 API，改它不需要动表结构。
+    if (oldVersion < 37) {
+      const remap = <String, String>{'deepseek-v4-flash': 'deepseek-flash'};
+      const tables = <String>[
+        'user_settings',
+        'battle_settings',
+        'outline_settings',
+        'chapter_settings',
+      ];
+      for (final entry in remap.entries) {
+        for (final table in tables) {
+          try {
+            await db.update(
+              table,
+              {'model': entry.value},
+              where: 'model = ?',
+              whereArgs: [entry.key],
+            );
+          } catch (_) {
+            // 该库可能还没有这张表（老版本升级路径），跳过即可
+          }
+        }
+      }
+      // 说明：小说副本的模型名存在 novel.db 的 copy_table.model_config（JSON 串）里，
+      // 属于另一个库、另一套版本号，本迁移不越界处理；且该表通常为空，
+      // 其中残留的历史模型名不影响调用（旧名仍是官方别名）。
     }
   }
 

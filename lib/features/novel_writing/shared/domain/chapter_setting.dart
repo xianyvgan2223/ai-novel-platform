@@ -12,7 +12,7 @@ class ChapterSetting {
   const ChapterSetting({
     this.temperature = 0.8,
     this.maxTokens = 4096,
-    this.model = 'deepseek-v4-flash',
+    this.model = 'deepseek-flash',
     this.chapterSystemPrompt = '',
     this.enableThinking = true,
     this.enableStoryState = true,
@@ -34,7 +34,7 @@ class ChapterSetting {
   factory ChapterSetting.fromMap(Map<String, dynamic> map) => ChapterSetting(
     temperature: (map['temperature'] as num?)?.toDouble() ?? 0.8,
     maxTokens: map['max_tokens'] as int? ?? 4096,
-    model: map['model'] as String? ?? 'deepseek-v4-flash',
+    model: map['model'] as String? ?? 'deepseek-flash',
     chapterSystemPrompt: map['chapter_system_prompt'] as String? ?? '',
     // sqflite 将 INTEGER 列读为 int(0/1)；列缺失（旧库）时默认开启
     enableThinking:

@@ -7,6 +7,7 @@ import {
 } from '@element-plus/icons-vue';
 import { formatTime, MODULE_LABELS } from '@/api';
 import { useServerStore } from '@/stores/server';
+import { activeDeviceId } from '@/stores/device';
 import PageHeader from '@/components/PageHeader.vue';
 import StatCard from '@/components/StatCard.vue';
 
@@ -33,12 +34,12 @@ const cards = computed(() =>
 );
 
 const totalRows = computed(() => {
-  if (!store.stats) return 0;
+  if (!store.stats?.databases) return 0;
   return Object.values(store.stats.databases).reduce((sum, db) => sum + db.total, 0);
 });
 
 const dbSummaries = computed(() => {
-  if (!store.stats) return [];
+  if (!store.stats?.databases) return [];
   return Object.entries(store.stats.databases).map(([key, db]) => ({
     key,
     label: db.label,
@@ -65,7 +66,7 @@ function openTable(db: string, table: string) {
 
 <template>
   <div class="page">
-    <PageHeader title="数据总览" desc="手机 App 的数据同步到这里后，可以在网页上浏览、检索、编辑，再导出回手机。">
+    <PageHeader title="数据总览" :desc="'当前设备：' + activeDeviceId + '。每台设备在服务端有独立数据库，互不同步；可在右上角切换要查看的设备。'">
       <template #actions>
         <el-button :loading="store.loading" :icon="Refresh" @click="store.refreshStats()">重新统计</el-button>
       </template>
@@ -117,12 +118,22 @@ function openTable(db: string, table: string) {
                 </el-tag>
               </el-descriptions-item>
               <el-descriptions-item label="变更水位">
-                <span class="mono">seq = {{ store.stats?.serverSeq ?? '-' }}</span>
+                <span class="mono">seq = {{ store.stats?.deviceSeq ?? '-' }}</span>
               </el-descriptions-item>
               <el-descriptions-item label="数据总行数">
                 <span class="tnum">{{ totalRows }}</span>
               </el-descriptions-item>
               <el-descriptions-item label="服务时间">{{ formatTime(store.health.serverTime) }}</el-descriptions-item>
+              <el-descriptions-item label="设备数量">
+                <span class="tnum">{{ store.devices.length }}</span>
+                <span class="text-muted" style="margin-left: 6px; font-size: 11.5px">各自独立数据库</span>
+              </el-descriptions-item>
+              <el-descriptions-item label="当前设备" :span="2">
+                <span class="mono">{{ activeDeviceId }}</span>
+                <span class="text-muted" style="margin-left: 6px; font-size: 11.5px">
+                  （数据目录 data/devices/{{ activeDeviceId }}/）
+                </span>
+              </el-descriptions-item>
               <el-descriptions-item label="数据目录" :span="2">
                 <span class="mono" style="word-break: break-all">{{ store.health.dataDir }}</span>
               </el-descriptions-item>
@@ -134,7 +145,10 @@ function openTable(db: string, table: string) {
 
       <el-col :xs="24" :lg="10">
         <div class="card card-flush" style="height: 100%">
-          <div class="card-head"><h3>数据库文件</h3></div>
+          <div class="card-head">
+            <h3>数据库文件</h3>
+            <span class="mono text-muted" style="font-size: 11.5px">devices/{{ activeDeviceId }}/</span>
+          </div>
           <div class="card-body" style="padding-bottom: 6px">
             <div v-for="db in dbSummaries" :key="db.key" class="db-file">
               <div class="db-file-icon"><FolderOpened /></div>
@@ -149,7 +163,8 @@ function openTable(db: string, table: string) {
             </div>
           </div>
           <div class="card-foot" style="font-size: 12px; color: var(--ink-3)">
-            导出的文件版本号与 App 完全一致，App 可直接「导入数据库」。
+            这是「{{ activeDeviceId }}」这一台设备自己的文件，导出的版本号与 App 完全一致，
+            App 可直接「导入数据库」；每台设备的文件互不影响。
           </div>
         </div>
       </el-col>

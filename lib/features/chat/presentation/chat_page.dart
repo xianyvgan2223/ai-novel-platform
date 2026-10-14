@@ -74,6 +74,29 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     }
   }
 
+  /// 路由转场（切页 / 返回）是否已经停下。
+  ///
+  /// 为什么要判断这个：`_ModalScope` 是把 `buildPage` 包在 `AnimatedBuilder`
+  /// 里调用的（flutter/lib/src/widgets/routes.dart），所以**转场动画的每一帧
+  /// 都会重跑整页 build**。自动跟随如果在 build 里直接 jumpTo，就等于每帧强制
+  /// 写一次滚动位置——视口要重新布局并重绘，和转场动画、以及输入法收起动画
+  /// 叠在同一帧里，这就是「键盘开着切页掉帧」的主要来源。
+  bool get _transitionIdle {
+    final route = ModalRoute.of(context);
+    if (route == null) return true;
+    for (final animation in <Animation<double>?>[
+      route.animation,
+      route.secondaryAnimation,
+    ]) {
+      final status = animation?.status;
+      if (status == AnimationStatus.forward ||
+          status == AnimationStatus.reverse) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   @override
   void dispose() {
     ref.read(chatProvider).removeListener(_onChatChanged);
@@ -312,7 +335,13 @@ class _ChatPageState extends ConsumerState<ChatPage> {
               icon: const Icon(Icons.menu, color: Color(0xFF333333), size: 20),
               constraints: BoxConstraints(minWidth: 36, minHeight: 36),
               tooltip: '历史会话',
-              onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+              // 打开历史抽屉前先收起输入法：抽屉只是覆盖在聊天页之上、
+              // 不经过 _pushPage，不收的话键盘会一直挂在抽屉下方，
+              // 关掉抽屉回到聊天页时它仍然是展开的。
+              onPressed: () {
+                FocusManager.instance.primaryFocus?.unfocus();
+                _scaffoldKey.currentState?.openDrawer();
+              },
             )
           : BackButton(
               color: const Color(0xFF333333),
@@ -523,8 +552,13 @@ class _ChatPageState extends ConsumerState<ChatPage> {
 
   Widget _buildMessageList(List<ChatMessage> messages, bool isStreamingEmpty) {
     // 流式生成中：若用户在底部附近则自动滚动
-    // 直接 jumpTo 而非 addPostFrameCallback，减少帧回调堆积
-    if (isStreamingEmpty == false && _isNearBottom && _scrollCtrl.hasClients) {
+    // 直接 jumpTo 而非 addPostFrameCallback，减少帧回调堆积；
+    // 但转场动画进行中必须停手——转场每帧都会重跑整页 build（见 _transitionIdle），
+    // 那时 jumpTo 等于每帧强制写一次滚动位置，和转场/输入法收起动画抢同一帧。
+    if (isStreamingEmpty == false &&
+        _isNearBottom &&
+        _transitionIdle &&
+        _scrollCtrl.hasClients) {
       _scrollCtrl.jumpTo(_scrollCtrl.position.maxScrollExtent);
     }
 
@@ -597,7 +631,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
             radius: const Radius.circular(3),
             child: SizedBox(
               width: double.maxFinite,
-              height: MediaQuery.of(ctx).size.height * 0.55,
+              height: MediaQuery.sizeOf(ctx).height * 0.55,
               child: TextField(
                 controller: ctrl,
                 autofocus: true,
@@ -753,7 +787,7 @@ class _StreamingBubble extends ConsumerWidget {
         alignment: Alignment.centerLeft,
         child: ConstrainedBox(
           constraints: BoxConstraints(
-            maxWidth: MediaQuery.of(context).size.width * 0.8,
+            maxWidth: MediaQuery.widthOf(context) * 0.8,
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,

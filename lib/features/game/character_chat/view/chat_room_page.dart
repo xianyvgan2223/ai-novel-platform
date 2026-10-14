@@ -2,6 +2,7 @@
 // 聊天室页面 — 与角色进行对话
 
 import 'package:flutter/material.dart';
+import '../../../../core/widgets/keyboard_inset_padding.dart';
 import '../controller/chat_controller.dart';
 import '../model/character_model.dart';
 
@@ -95,6 +96,10 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      // useSafeArea 走 SafeArea 而不是框架内部的 MediaQuery.removePadding：
+      // 后者是全字段依赖，会让这个面板的 builder 在键盘动画期间被逐帧重新调用。
+      // 这里 bottom 本来就是 false，视觉上无差别。
+      useSafeArea: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
@@ -104,10 +109,11 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
             ctrl.addListener(() {
               if (mounted) setSheetState(() {});
             });
-            return Padding(
-              padding: EdgeInsets.only(
-                bottom: MediaQuery.of(ctx).viewInsets.bottom,
-              ),
+            // 键盘 inset 交给 KeyboardInsetPadding 去读：留在这里的话，
+            // 本 builder 的 Element 会订阅 viewInsets，键盘动画每帧重跑，
+            // 下面整棵面板内容跟着每帧重建。Column 作为 child 传进去后，
+            // 每帧只有 KeyboardInsetPadding 自己那一层重建。
+            return KeyboardInsetPadding(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -615,7 +621,7 @@ class _MessageBubble extends StatelessWidget {
           alignment: isCharacter ? Alignment.centerLeft : Alignment.centerRight,
           child: ConstrainedBox(
             constraints: BoxConstraints(
-              maxWidth: MediaQuery.of(context).size.width * 0.78,
+              maxWidth: MediaQuery.widthOf(context) * 0.78,
             ),
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),

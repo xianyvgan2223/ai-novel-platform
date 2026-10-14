@@ -160,8 +160,8 @@ class _StoryStatePageState extends State<StoryStatePage> {
   /// 剧情状态放大编辑弹窗
   void _showStoryStateEnlargeDialog() {
     final editCtrl = TextEditingController(text: _storyStateCtrl.text);
-    final screenHeight = MediaQuery.of(context).size.height;
-    final screenWidth = MediaQuery.of(context).size.width;
+    final screenHeight = MediaQuery.heightOf(context);
+    final screenWidth = MediaQuery.widthOf(context);
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -284,8 +284,8 @@ class _StoryStatePageState extends State<StoryStatePage> {
   /// 伏笔清单编辑弹窗：多行文本编辑后写回 _foreshadowsCtrl
   void _showForeshadowsEditDialog() {
     final editCtrl = TextEditingController(text: _foreshadowsCtrl.text);
-    final screenHeight = MediaQuery.of(context).size.height;
-    final screenWidth = MediaQuery.of(context).size.width;
+    final screenHeight = MediaQuery.heightOf(context);
+    final screenWidth = MediaQuery.widthOf(context);
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -945,8 +945,8 @@ class _CharacterEditorState extends State<_CharacterEditor> {
     required String label,
   }) {
     final editCtrl = TextEditingController(text: targetCtrl.text);
-    final screenHeight = MediaQuery.of(context).size.height;
-    final screenWidth = MediaQuery.of(context).size.width;
+    final screenHeight = MediaQuery.heightOf(context);
+    final screenWidth = MediaQuery.widthOf(context);
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(

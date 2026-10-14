@@ -6,12 +6,65 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../application/setting_controller.dart';
 import '../application/chat_controller.dart'; // chatProvider
 import '../../../core/db/data_manager.dart';
+import '../../../core/config/deepseek_models.dart';
 import '../../sync/presentation/sync_page.dart';
 
 /// SettingController Riverpod Provider
 final settingProvider = ChangeNotifierProvider<SettingController>(
   (ref) => SettingController(),
 );
+
+/// 归一化搜索来源取值：兼容历史数据（web_search 布尔量为 1 但 search_engine 为空）
+/// 只认当前真正可用的两个值，其余一律回落百度。
+String _normalizeEngine(String raw) {
+  const valid = <String>['baidu', 'deepseek', 'off'];
+  return valid.contains(raw) ? raw : 'baidu';
+}
+
+/// 给每个设置项一个稳定且唯一的 Key。
+///
+/// 这些输入框用的是 StatefulWidget + 自建 TextEditingController，而列表里存在
+/// 若干 `if (...) _ParamInput(...)` 条件项。条件项一增一减，后面所有子项的
+/// **位置**就整体平移，Flutter 会按位置把旧 State 复用到新位置上，于是
+/// controller 里的内容跟着串位——实测「联网搜索」切成关闭后，temperature
+/// 那一行显示出了百度 API Key 的值。
+/// 加上按字段名生成的 Key 后，State 身份与字段绑定，不会再错位。
+Key _k(String name) => ValueKey<String>('setting_$name');
+
+/// 左侧标签与右侧控件的宽度配比（4.6 : 5.4，标签约占 46%）。
+///
+/// 原来两侧都用 150dp 定宽标签 + 剩余空间，问题是标签区按最长的那条
+/// （「读取上方对话记录轮数」10 个字）撑开，在 360dp 屏上吃掉近一半宽度，
+/// 右侧输入框只剩 ~160dp，「留空不限 | pd | pw | pm | py | YYYY-MM-DDtoYYYY-MM-DD」
+/// 这类提示全被省略号截断。
+/// 改成按比例分配后：标签仍逐行对齐（同一 flex），窄屏也不会反过来挤压输入框。
+/// 配比取 4.6:5.4 是实测结果——360dp 屏下标签列约 138dp，正好容下最长的
+/// 「读取上方对话记录轮数」（~137dp @12.5sp）不折行，而输入框仍有 ~176dp，
+/// 比改动前的 ~160dp 宽，提示文字能多露一截。
+/// 4:6 会让最长标签差几 dp 折成两行，行高因此参差，故不用。
+const int _kLabelFlex = 46;
+const int _kControlFlex = 54;
+
+/// 标签与控件之间的最小间距。
+///
+/// 只有比例分配还不够：最长的标签正好占满标签列时，文字会贴到输入框边上
+/// （实测「读取上方对话记录轮数」与输入框几乎无间隙）。留一条固定槽位既解决
+/// 贴边，又给长标签一点余量——比例负责"大致各占多少"，间距负责"不许贴上"。
+const double _kRowGap = 10;
+
+/// 行内标签（与右侧控件同一基线的统一样式）
+class _RowLabel extends StatelessWidget {
+  final String text;
+  const _RowLabel(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text,
+      style: const TextStyle(fontSize: 12.5, color: Color(0xFF666666)),
+    );
+  }
+}
 
 class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key});
@@ -157,32 +210,54 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       body: ListView(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         children: [
-          const _SectionHeader(title: '必选鉴权参数'),
+          const _SectionHeader(title: '必选鉴权参数', isFirst: true),
           _ApiKeyField(initialValue: ctrl.apiKey, onChanged: ctrl.setApiKey),
 
           const _SectionHeader(title: '模型选择配置'),
           _ModelSelector(initialValue: ctrl.model, onChanged: ctrl.setModel),
-          _SwitchParam(
-            label: '联网搜索 (web_search)',
-            initialValue: ctrl.webSearch,
-            onChanged: ctrl.setWebSearch,
+          // 模型选择器是整行控件，联网搜索是「标签 + 值」行；两者都靠左起排时
+          // 上下只隔 10dp，视觉上会粘成一个块，且左边缘不对齐更显得挤。
+          // 这里补一段间距把它们分开（同时给自定义模型的输入框留出余量）。
+          const SizedBox(height: 12),
+          _DropdownParam(
+            key: _k('search_engine'),
+            label: '联网搜索',
+            value: _normalizeEngine(ctrl.searchEngine),
+            items: const [
+              DropdownMenuItem(value: 'baidu', child: Text('百度千帆搜索')),
+              // DeepSeek 自带搜索：官方 API 实测不可用，故置灰。
+              // 保留这一项是为了让结论可见，等官方开放后把 enabled 打开即可。
+              DropdownMenuItem(
+                value: 'deepseek',
+                enabled: false,
+                child: Text(
+                  'DeepSeek 自带搜索（暂不可用）',
+                  style: TextStyle(color: Color(0xFFBBBBBB)),
+                ),
+              ),
+              DropdownMenuItem(value: 'off', child: Text('关闭')),
+            ],
+            onChanged: ctrl.setSearchEngine,
           ),
-          if (ctrl.webSearch)
+          if (_normalizeEngine(ctrl.searchEngine) != 'off')
             _ParamInput(
+              key: _k('baidu_api_key'),
               label: '百度API Key',
               hint: '百度千帆 Bearer Token',
               initialValue: ctrl.baiduApiKey,
               onChanged: ctrl.setBaiduApiKey,
             ),
-          if (ctrl.webSearch)
+          if (_normalizeEngine(ctrl.searchEngine) != 'off')
             _ParamInput(
+              key: _k('search_count'),
               label: '最大搜索条数',
               hint: 'AI 可指定条数，不会超过此上限',
               initialValue: ctrl.searchCount.toString(),
               onChanged: (v) => ctrl.setSearchCount(int.tryParse(v) ?? 5),
             ),
-          if (ctrl.webSearch)
+          if (_normalizeEngine(ctrl.searchEngine) != 'off')
             _ParamInput(
+              key: _k('search_freshness'),
               label: '时间筛选',
               hint: '留空不限 | pd | pw | pm | py | YYYY-MM-DDtoYYYY-MM-DD',
               initialValue: ctrl.searchFreshness,
@@ -191,18 +266,21 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
           const _SectionHeader(title: '日常调优参数'),
           _ParamInput(
+            key: _k('temperature'),
             label: 'temperature',
             hint: '0.0 ~ 2.0',
             initialValue: ctrl.temperature.toString(),
             onChanged: (v) => ctrl.setTemperature(double.tryParse(v) ?? 1.0),
           ),
           _ParamInput(
+            key: _k('top_p'),
             label: 'top_p',
             hint: '0.0 ~ 1.0',
             initialValue: ctrl.topP.toString(),
             onChanged: (v) => ctrl.setTopP(double.tryParse(v) ?? 1.0),
           ),
           _ParamInput(
+            key: _k('max_tokens'),
             label: 'max_tokens',
             hint: '最大输出 token 数（上限 384K）',
             initialValue: ctrl.maxTokens.toString(),
@@ -214,6 +292,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             },
           ),
           _ParamInput(
+            key: _k('stop'),
             label: 'stop',
             hint: '停止词，逗号分隔',
             initialValue: ctrl.stop,
@@ -222,6 +301,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
           const _SectionHeader(title: '流式交互参数'),
           _SwitchParam(
+            key: _k('stream'),
             label: 'stream',
             initialValue: ctrl.stream,
             onChanged: ctrl.setStream,
@@ -229,6 +309,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           // stream_options 仅在流式开启时显示
           if (ctrl.stream)
             _ParamInput(
+              key: _k('stream_options'),
               label: 'stream_options',
               hint: 'JSON 格式',
               initialValue: ctrl.streamOptions,
@@ -237,6 +318,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
           const _SectionHeader(title: '去重优化参数'),
           _ParamInput(
+            key: _k('frequency_penalty'),
             label: 'frequency_penalty',
             hint: '-2.0 ~ 2.0',
             initialValue: ctrl.frequencyPenalty.toString(),
@@ -244,6 +326,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 ctrl.setFrequencyPenalty(double.tryParse(v) ?? 0.0),
           ),
           _ParamInput(
+            key: _k('presence_penalty'),
             label: 'presence_penalty',
             hint: '-2.0 ~ 2.0',
             initialValue: ctrl.presencePenalty.toString(),
@@ -253,6 +336,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
           const _SectionHeader(title: '结构化输出参数'),
           _ParamInput(
+            key: _k('response_format'),
             label: 'response_format',
             hint: 'text / json_object',
             initialValue: ctrl.responseFormat,
@@ -261,6 +345,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
           const _SectionHeader(title: '深度推理参数'),
           _SwitchParam(
+            key: _k('thinking'),
             label: 'thinking',
             initialValue: ctrl.thinking,
             onChanged: ctrl.setThinking,
@@ -268,23 +353,27 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
           const _SectionHeader(title: '高级调试参数'),
           _SwitchParam(
+            key: _k('logprobs'),
             label: 'logprobs',
             initialValue: ctrl.logprobs,
             onChanged: ctrl.setLogprobs,
           ),
           _ParamInput(
+            key: _k('top_logprobs'),
             label: 'top_logprobs',
             hint: '0 ~ 20',
             initialValue: ctrl.topLogprobs.toString(),
             onChanged: (v) => ctrl.setTopLogprobs(int.tryParse(v) ?? 0),
           ),
           _ParamInput(
+            key: _k('logit_bias'),
             label: 'logit_bias',
             hint: 'JSON 格式',
             initialValue: ctrl.logitBias,
             onChanged: ctrl.setLogitBias,
           ),
           _ParamInput(
+            key: _k('n'),
             label: 'n',
             hint: '生成数量',
             initialValue: ctrl.n.toString(),
@@ -293,6 +382,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
           const _SectionHeader(title: '上下文控制参数'),
           _ParamInput(
+            key: _k('context_rounds'),
             label: '读取上方对话记录轮数',
             hint: '1 ~ 100，缩减上下文 token',
             initialValue: ctrl.contextRounds.toString(),
@@ -383,7 +473,10 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             ),
           ),
 
-          const SizedBox(height: 32),
+          // 底部留白：全局悬浮聊天球停在右下角（48dp 球 + 8dp 边距），
+          // 会把列表最后一项压在下面——实测「导入数据库」按钮被挡住约一半宽，
+          // 文字都看不全。这里一次性让出足够高度，内容不再滚进悬浮球的停靠区。
+          const SizedBox(height: 96),
         ],
       ),
     );
@@ -395,12 +488,17 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 /// 分组标题
 class _SectionHeader extends StatelessWidget {
   final String title;
-  const _SectionHeader({required this.title});
+
+  /// 是否是页面第一个分组：首组的 20dp 上边距纯粹是白缝
+  /// （AppBar 下方本来就有 8dp 列表内边距），去掉让首屏能多露一行。
+  final bool isFirst;
+
+  const _SectionHeader({required this.title, this.isFirst = false});
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(top: 20, bottom: 8),
+      padding: EdgeInsets.only(top: isFirst ? 4 : 20, bottom: 8),
       child: Text(
         title,
         style: const TextStyle(
@@ -495,12 +593,10 @@ class _ModelSelectorState extends State<_ModelSelector> {
   @override
   void initState() {
     super.initState();
-    _value = widget.initialValue;
-    _isCustom = ![
-      'deepseek-v4-flash',
-      'deepseek-v4-pro',
-      'deepseek-reasoner',
-    ].contains(_value);
+    // 兼容历史值：deepseek-v4-flash 会先被归一成 deepseek-flash，
+    // 因此老用户打开设置页时看到的也是「flash」而不是掉进"自定义"。
+    _value = DeepSeekModels.toApiId(widget.initialValue);
+    _isCustom = !DeepSeekModels.isOfficial(_value);
     _customCtrl = TextEditingController(text: _isCustom ? _value : '');
   }
 
@@ -509,6 +605,11 @@ class _ModelSelectorState extends State<_ModelSelector> {
     _customCtrl.dispose();
     super.dispose();
   }
+
+  /// 下拉项文案：只显示简称（flash / pro）。
+  /// 真实 API 标识由 DropdownMenuItem 的 value 承载，不占界面位置。
+  static String _labelFor(String id) =>
+      DeepSeekModels.toDisplayName(id) ?? id;
 
   @override
   Widget build(BuildContext context) {
@@ -525,20 +626,10 @@ class _ModelSelectorState extends State<_ModelSelector> {
               isExpanded: true,
               value: _isCustom ? 'custom' : _value,
               style: const TextStyle(fontSize: 14, color: Color(0xFF333333)),
-              items: const [
-                DropdownMenuItem(
-                  value: 'deepseek-v4-flash',
-                  child: Text('deepseek-v4-flash'),
-                ),
-                DropdownMenuItem(
-                  value: 'deepseek-v4-pro',
-                  child: Text('deepseek-v4-pro'),
-                ),
-                DropdownMenuItem(
-                  value: 'deepseek-reasoner',
-                  child: Text('deepseek-reasoner'),
-                ),
-                DropdownMenuItem(value: 'custom', child: Text('自定义模型...')),
+              items: [
+                for (final id in DeepSeekModels.selectableIds)
+                  DropdownMenuItem(value: id, child: Text(_labelFor(id))),
+                const DropdownMenuItem(value: 'custom', child: Text('自定义模型...')),
               ],
               onChanged: (v) {
                 if (v == null) return;
@@ -581,6 +672,7 @@ class _ParamInput extends StatefulWidget {
   final String? Function(String input)? formatter;
 
   const _ParamInput({
+    super.key,
     required this.label,
     required this.hint,
     required this.initialValue,
@@ -626,14 +718,10 @@ class _ParamInputState extends State<_ParamInput> {
       padding: const EdgeInsets.only(bottom: 10),
       child: Row(
         children: [
-          SizedBox(
-            width: 150,
-            child: Text(
-              widget.label,
-              style: const TextStyle(fontSize: 13, color: Color(0xFF666666)),
-            ),
-          ),
+          Expanded(flex: _kLabelFlex, child: _RowLabel(widget.label)),
+          const SizedBox(width: _kRowGap),
           Expanded(
+            flex: _kControlFlex,
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12),
               decoration: BoxDecoration(
@@ -663,6 +751,61 @@ class _ParamInputState extends State<_ParamInput> {
   }
 }
 
+/// 通用下拉参数（与 _ParamInput 同布局：左侧定宽标签 + 右侧控件）
+class _DropdownParam extends StatelessWidget {
+  final String label;
+  final String value;
+  final List<DropdownMenuItem<String>> items;
+  final ValueChanged<String> onChanged;
+
+  const _DropdownParam({
+    super.key,
+    required this.label,
+    required this.value,
+    required this.items,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        children: [
+          Expanded(flex: _kLabelFlex, child: _RowLabel(label)),
+          const SizedBox(width: _kRowGap),
+          Expanded(
+            flex: _kControlFlex,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF5F5F5),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String>(
+                  isExpanded: true,
+                  isDense: true,
+                  value: value,
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  style: const TextStyle(
+                    fontSize: 14,
+                    color: Color(0xFF333333),
+                  ),
+                  items: items,
+                  onChanged: (v) {
+                    if (v != null) onChanged(v);
+                  },
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// 开关参数
 class _SwitchParam extends StatefulWidget {
   final String label;
@@ -670,6 +813,7 @@ class _SwitchParam extends StatefulWidget {
   final ValueChanged<bool> onChanged;
 
   const _SwitchParam({
+    super.key,
     required this.label,
     required this.initialValue,
     required this.onChanged,
@@ -694,20 +838,23 @@ class _SwitchParamState extends State<_SwitchParam> {
       padding: const EdgeInsets.only(bottom: 10),
       child: Row(
         children: [
-          SizedBox(
-            width: 150,
-            child: Text(
-              widget.label,
-              style: const TextStyle(fontSize: 13, color: Color(0xFF666666)),
+          Expanded(flex: _kLabelFlex, child: _RowLabel(widget.label)),
+          const SizedBox(width: _kRowGap),
+          // 开关不像输入框需要占满，靠左排在控件列起点即可，
+          // 这样开关位置与其它行的输入框左边缘对齐。
+          Expanded(
+            flex: _kControlFlex,
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Switch(
+                value: _value,
+                activeTrackColor: const Color(0xFF4D6BFE),
+                onChanged: (v) {
+                  setState(() => _value = v);
+                  widget.onChanged(v);
+                },
+              ),
             ),
-          ),
-          Switch(
-            value: _value,
-            activeTrackColor: const Color(0xFF4D6BFE),
-            onChanged: (v) {
-              setState(() => _value = v);
-              widget.onChanged(v);
-            },
           ),
         ],
       ),

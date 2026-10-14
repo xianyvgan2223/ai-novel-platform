@@ -44,6 +44,12 @@ export interface HealthInfo {
   node: string;
   dataDir: string;
   authRequired: boolean;
+  /** 数据隔离方式：per-device = 每台设备一个独立数据槽位 */
+  isolation?: string;
+  deviceCount?: number;
+  devices?: { deviceId: string; name: string; lastSeenAt: number | null }[];
+  /** v1 遗留的共享库文件名（还在的话） */
+  legacyFiles?: string[];
   databases: { key: DbKey; file: string; appVersion: number; label: string }[];
 }
 
@@ -53,8 +59,14 @@ export interface TableStats {
 }
 
 export interface Stats {
+  /** 当前正在查看哪台设备的槽位 */
+  deviceId: string;
+  deviceExists: boolean;
+  deviceSeq: number;
+  /** 设备清单版本号，变了说明有新设备连上来 */
+  revision: number;
+  devices: DeviceInfo[];
   databases: Record<DbKey, { label: string; file: string; appVersion: number; total: number; tables: Record<string, TableStats> }>;
-  serverSeq: number;
 }
 
 export interface DeviceInfo {
@@ -62,16 +74,32 @@ export interface DeviceInfo {
   name: string;
   platform: string;
   idBase: number;
+  /** 该设备数据在服务端的目录名（devices/<scopeDir>/） */
+  scopeDir: string;
   createdAt: number;
   lastSeenAt: number | null;
-  rowsOwned: number;
+  /** 该设备槽位里的总行数（只有设备清单接口会算） */
+  rowsOwned?: number;
+  /** 按「库.表」统计的行数 */
+  rowCounts?: Record<string, number>;
+  conflicts?: number;
   cursor: number;
   lastPushAt: number | null;
   lastPullAt: number | null;
 }
 
+export interface DeviceList {
+  activeDeviceId: string;
+  devices: DeviceInfo[];
+  totalRows: number;
+  revision: number;
+  /** v1 时期的共享库文件（还存在的话），可手动上传导入到某台设备 */
+  legacyFiles?: { file: string; bytes: number }[];
+}
+
 export interface ConflictInfo {
   id: number;
+  deviceId: string;
   db: string;
   table: string;
   pk: number;
@@ -84,10 +112,14 @@ export interface ConflictInfo {
 }
 
 export interface SyncOverview {
-  serverSeq: number;
+  deviceId: string;
+  deviceExists: boolean;
+  deviceSeq: number;
+  revision: number;
   devices: DeviceInfo[];
   recentConflicts: ConflictInfo[];
-  stats: Stats['databases'];
+  allConflicts: number;
+  stats: Stats['databases'] | null;
 }
 
 export type Row = Record<string, unknown>;
@@ -107,7 +139,9 @@ export interface PagedMeta {
 export interface ImportReport {
   db: string;
   mode: string;
+  /** 数据实际落到了哪台设备的槽位 */
   deviceId: string;
+  targetDevice?: string;
   importedAt: number;
   uploadedBytes: number;
   sourceVersion: number;

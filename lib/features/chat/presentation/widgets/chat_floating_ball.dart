@@ -28,6 +28,17 @@ const double _kMinPanelHeight = 300;
 /// 悬浮面板“展开”进入完整聊天页的路由名（用于识别并隐藏悬浮球）
 const String _kFloatingChatRouteName = '/floating_chat';
 
+/// 在「事件回调 / 一次性读取」里取 MediaQuery，不建立依赖。
+///
+/// `MediaQuery.of` 会把调用它的那个 Element 注册成依赖方；而悬浮层挂在
+/// Overlay 上（在 Scaffold 之上），拿到的是**根** MediaQuery——键盘弹出动画
+/// 期间 viewInsets 每帧都在变。于是只要拖动 / 缩放一次，悬浮球或迷你面板
+/// 就会被每帧重建，等于把刚修掉的漏洞又从后门放回来。
+/// `getInheritedWidgetOfExactType` 只查表返回，不注册依赖，正合这类场景。
+MediaQueryData _mqDataOf(BuildContext context) =>
+    context.getInheritedWidgetOfExactType<MediaQuery>()?.data ??
+    MediaQueryData.fromView(View.of(context));
+
 /// 路由观察者：维护当前路由栈，判断何时显示悬浮球。
 class FloatingChatRouteObserver extends NavigatorObserver {
   final List<Route<dynamic>> _stack = [];
@@ -115,7 +126,7 @@ class _ChatFloatingBallHostState extends ConsumerState<ChatFloatingBallHost> {
   void _initPositions() {
     final overlay = widget.navigatorKey.currentState?.overlay;
     if (overlay == null) return;
-    final size = MediaQuery.of(overlay.context).size;
+    final size = _mqDataOf(overlay.context).size;
     _ballPosition.value = Offset(
       size.width - _kBallSize - 16,
       size.height - 200,
@@ -247,11 +258,26 @@ class _FloatingChatLayer extends StatelessWidget {
         // 迷你聊天面板（自由定位，支持拖动与边缘缩放）
         AnimatedBuilder(
           animation: Listenable.merge([panelOpen, panelPosition, panelSize]),
-          builder: (context, _) {
+          // 面板作为 child 传进来，不要写在 builder 里：
+          // 键盘动画期间 viewInsets 每帧都在变，builder 也就每帧重跑；
+          // 若在 builder 里 new 一个 _MiniChatPanel，这个「始终挂载」的面板
+          // 就会每帧整棵重建——和上面注释里说的是同一类问题，
+          // 只是触发源从拖动换成了键盘。
+          child: RepaintBoundary(
+            child: _MiniChatPanel(
+              visible: panelOpen,
+              positionNotifier: panelPosition,
+              sizeNotifier: panelSize,
+              onMinimize: onMinimizePanel,
+              onMaximize: onMaximizePanel,
+            ),
+          ),
+          builder: (context, child) {
             final rawPos = panelPosition.value;
             final pSize = panelSize.value;
-            final viewInsets = MediaQuery.of(context).viewInsets.bottom;
-            final screen = MediaQuery.of(context).size;
+            // 按 aspect 读：只有键盘 inset / 屏幕尺寸变化才重跑 builder
+            final viewInsets = MediaQuery.viewInsetsOf(context).bottom;
+            final screen = MediaQuery.sizeOf(context);
             // 键盘弹出时自动上移，避免遮挡输入区
             final maxDx = math.max(0.0, screen.width - pSize.width - 8);
             final maxDy = math.max(
@@ -265,18 +291,10 @@ class _FloatingChatLayer extends StatelessWidget {
               top: effDy,
               child: Offstage(
                 offstage: !panelOpen.value,
-                child: RepaintBoundary(
-                  child: SizedBox(
-                    width: pSize.width,
-                    height: pSize.height,
-                    child: _MiniChatPanel(
-                      visible: panelOpen,
-                      positionNotifier: panelPosition,
-                      sizeNotifier: panelSize,
-                      onMinimize: onMinimizePanel,
-                      onMaximize: onMaximizePanel,
-                    ),
-                  ),
+                child: SizedBox(
+                  width: pSize.width,
+                  height: pSize.height,
+                  child: child,
                 ),
               ),
             );
@@ -329,8 +347,8 @@ class _FloatingBallState extends ConsumerState<_FloatingBall>
 
   void _onDragUpdate(DragUpdateDetails details) {
     _snapCtrl.stop();
-    final size = MediaQuery.of(context).size;
-    final topPadding = MediaQuery.of(context).padding.top;
+    final size = _mqDataOf(context).size;
+    final topPadding = _mqDataOf(context).padding.top;
     final current = widget.positionNotifier.value;
     final next = Offset(
       (current.dx + details.delta.dx).clamp(4.0, size.width - _kBallSize - 4),
@@ -343,7 +361,7 @@ class _FloatingBallState extends ConsumerState<_FloatingBall>
   }
 
   void _onDragEnd(DragEndDetails details) {
-    final size = MediaQuery.of(context).size;
+    final size = _mqDataOf(context).size;
     final current = widget.positionNotifier.value;
     final targetX = current.dx < size.width / 2
         ? 8.0
@@ -598,8 +616,8 @@ class _MiniChatPanelState extends ConsumerState<_MiniChatPanel> {
   void _onMove(DragUpdateDetails details) {
     final pos = widget.positionNotifier.value;
     final pSize = widget.sizeNotifier.value;
-    final screen = MediaQuery.of(context).size;
-    final viewInsets = MediaQuery.of(context).viewInsets.bottom;
+    final screen = _mqDataOf(context).size;
+    final viewInsets = _mqDataOf(context).viewInsets.bottom;
     final maxX = math.max(0.0, screen.width - pSize.width - 8);
     final maxY = math.max(0.0, screen.height - viewInsets - 8 - pSize.height);
     widget.positionNotifier.value = Offset(
@@ -612,7 +630,7 @@ class _MiniChatPanelState extends ConsumerState<_MiniChatPanel> {
   void _onResizeRight(DragUpdateDetails details) {
     final pos = widget.positionNotifier.value;
     final pSize = widget.sizeNotifier.value;
-    final screen = MediaQuery.of(context).size;
+    final screen = _mqDataOf(context).size;
     final maxW = math.max(_kMinPanelWidth, screen.width - pos.dx - 8);
     final newW = (pSize.width + details.delta.dx).clamp(_kMinPanelWidth, maxW);
     widget.sizeNotifier.value = Size(newW, pSize.height);
@@ -635,8 +653,8 @@ class _MiniChatPanelState extends ConsumerState<_MiniChatPanel> {
   void _onResizeBottom(DragUpdateDetails details) {
     final pos = widget.positionNotifier.value;
     final pSize = widget.sizeNotifier.value;
-    final screen = MediaQuery.of(context).size;
-    final viewInsets = MediaQuery.of(context).viewInsets.bottom;
+    final screen = _mqDataOf(context).size;
+    final viewInsets = _mqDataOf(context).viewInsets.bottom;
     final maxH = math.max(
       _kMinPanelHeight,
       screen.height - viewInsets - 8 - pos.dy,
@@ -858,7 +876,7 @@ class _MiniStreamingBubble extends ConsumerWidget {
         alignment: Alignment.centerLeft,
         child: ConstrainedBox(
           constraints: BoxConstraints(
-            maxWidth: MediaQuery.of(context).size.width * 0.8,
+            maxWidth: MediaQuery.widthOf(context) * 0.8,
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,

@@ -58,7 +58,7 @@ class BattleSetting {
   const BattleSetting({
     this.temperature = 0.8,
     this.maxTokens = 4096,
-    this.model = 'deepseek-v4-flash',
+    this.model = 'deepseek-flash',
     this.systemPrompt = '',
   });
 
@@ -72,7 +72,7 @@ class BattleSetting {
   factory BattleSetting.fromMap(Map<String, dynamic> map) => BattleSetting(
     temperature: (map['temperature'] as num?)?.toDouble() ?? 0.8,
     maxTokens: map['max_tokens'] as int? ?? 4096,
-    model: map['model'] as String? ?? 'deepseek-v4-flash',
+    model: map['model'] as String? ?? 'deepseek-flash',
     systemPrompt: map['system_prompt'] as String? ?? '',
   );
 

@@ -4,7 +4,11 @@
  * 只依赖 fetch，不引入 axios，减少一层抽象。
  * 所有接口统一返回 { ok, data, meta }，这里把 data 拆出来，
  * 出错则抛出带后端说明的 Error，交给调用方用 ElMessage 提示。
+ *
+ * 每个请求都会带上 x-device-id 请求头 —— 服务端按它决定读写哪台设备的数据槽位。
  */
+import { activeDeviceId } from '@/stores/device';
+
 const BASE = (import.meta.env.VITE_API_BASE ?? '').replace(/\/+$/, '');
 const TOKEN = import.meta.env.VITE_API_TOKEN ?? '';
 
@@ -29,6 +33,9 @@ export class ApiError extends Error {
 function headers(extra?: HeadersInit): HeadersInit {
   const base: Record<string, string> = {};
   if (TOKEN) base['x-api-token'] = TOKEN;
+  // 数据隔离的关键：告诉服务端这次操作针对哪台设备
+  const device = activeDeviceId.value;
+  if (device) base['x-device-id'] = device;
   return { ...base, ...(extra ?? {}) };
 }
 

@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
-import { ElMessage } from 'element-plus';
-import { ChatDotRound, DataLine, Grid, Iphone, Refresh, RefreshRight } from '@element-plus/icons-vue';
-import { api } from '@/api';
+import { ElMessage, ElMessageBox } from 'element-plus';
+import { ChatDotRound, DataLine, Delete, Grid, Iphone, Monitor, Refresh, RefreshRight } from '@element-plus/icons-vue';
+import { api, formatTime } from '@/api';
 import { useServerStore } from '@/stores/server';
+import { activeDeviceId, deviceEpoch, setActiveDevice } from '@/stores/device';
 
 const store = useServerStore();
 const route = useRoute();
@@ -13,18 +14,26 @@ const route = useRoute();
  * 「同步手机」：网页这边读的永远是服务端实时数据，不需要同步；
  * 需要同步的是手机 —— 但手机上的数据只有手机 App 自己能读写，
  * 所以这里是「请求」：记一条待办，手机 App 在前台时轮询领取并执行。
+ *
+ * 指定了设备时只请求那一台：它推上来的数据只会进它自己的槽位。
  */
 const phoneSyncBusy = ref(false);
 const phoneSyncHint = ref('');
 const phoneSyncPercent = ref<number | null>(null);
+/** 只让选中的设备响应（Web 控制台自己没法响应，所以不指定） */
+const syncTargetDevice = computed(() =>
+  activeDeviceId.value === 'web-console' ? '' : activeDeviceId.value,
+);
 
 async function syncPhone() {
   if (phoneSyncBusy.value) return;
   phoneSyncBusy.value = true;
-  phoneSyncHint.value = '已请求，等待手机响应…';
+  phoneSyncHint.value = syncTargetDevice.value
+    ? '已请求 ' + syncTargetDevice.value + '，等待响应…'
+    : '已请求，等待手机响应…';
   phoneSyncPercent.value = null;
   try {
-    const request = await api.requestPhoneSync();
+    const request = await api.requestPhoneSync(syncTargetDevice.value);
     const deadline = Date.now() + 60000;
 
     while (Date.now() < deadline) {
@@ -47,7 +56,7 @@ async function syncPhone() {
         phoneSyncHint.value = '';
         phoneSyncPercent.value = null;
         ElMessage.success('手机同步完成' + (status.result ? '：' + status.result : ''));
-        await store.refreshStats();
+        await Promise.all([store.refreshStats(), store.refreshOverview().catch(() => undefined)]);
         return;
       } else if (status.status === 'failed') {
         phoneSyncHint.value = '';
@@ -69,6 +78,52 @@ async function syncPhone() {
   }
 }
 
+// ── 设备切换（数据隔离的核心入口）──
+
+const devicePickerOpen = ref(false);
+
+function describeDevice(deviceId: string): string {
+  if (deviceId === 'web-console') return 'Web 控制台自己的槽位（上传 .db 默认落在这里）';
+  return '该手机独立的数据槽位';
+}
+
+async function pickDevice(deviceId: string) {
+  devicePickerOpen.value = false;
+  await store.switchDevice(deviceId);
+}
+
+/** 删掉一台设备在服务端的数据；手机本地库不受影响 */
+async function forgetDevice(deviceId: string) {
+  if (deviceId === 'web-console') return;
+  try {
+    await ElMessageBox.confirm(
+      '将删除服务端为「' + deviceId + '」保存的全部数据（独立数据库文件）。\n' +
+        '手机本地数据不受影响，下次同步会重新推一份上来。此操作不可撤销。',
+      '删除该设备的数据',
+      { type: 'warning', confirmButtonText: '我确认删除', cancelButtonText: '取消' },
+    );
+  } catch {
+    return;
+  }
+  try {
+    const result = await api.removeDevice(deviceId);
+    ElMessage.success('已删除 ' + result.deviceId + (result.purgedFiles ? ' 的数据目录' : ' 的记录'));
+    if (activeDeviceId.value === deviceId) setActiveDevice('web-console');
+    deviceEpoch.value += 1;
+    await Promise.all([store.refreshStats(), store.refreshOverview().catch(() => undefined)]);
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : String(err));
+  }
+}
+
+/** 定期看一眼设备清单：新手机连上来时下拉框能自动出现 */
+let deviceTimer: number | undefined;
+onUnmounted(() => {
+  if (deviceTimer) window.clearInterval(deviceTimer);
+});
+
+// ── 导航 ──
+
 const navItems = [
   { path: '/', label: '总览', icon: DataLine, match: (p: string) => p === '/' },
   { path: '/sessions', label: '对话会话', icon: ChatDotRound, match: (p: string) => p.startsWith('/sessions') },
@@ -81,6 +136,10 @@ const pageTitle = computed(() => (route.meta.title as string | undefined) ?? '�
 
 onMounted(() => {
   void store.bootstrap();
+  deviceTimer = window.setInterval(() => {
+    if (!store.online) return;
+    void store.refreshStats().catch(() => undefined);
+  }, 15000);
 });
 </script>
 
@@ -128,13 +187,77 @@ onMounted(() => {
       <header class="topbar">
         <div class="topbar-left">
           <span class="topbar-title">{{ pageTitle }}</span>
-          <span v-if="store.stats" class="topbar-badge mono">seq {{ store.stats.serverSeq }}</span>
+          <span v-if="store.stats" class="topbar-badge mono">seq {{ store.stats.deviceSeq }}</span>
         </div>
         <div class="topbar-right">
           <span v-if="phoneSyncHint" class="sync-hint">
             {{ phoneSyncHint }}
             <span v-if="phoneSyncPercent !== null" class="sync-pct">{{ phoneSyncPercent }}%</span>
           </span>
+
+          <!-- 设备切换：数据按设备隔离，这里决定「现在看谁的数据」 -->
+          <el-popover v-model:visible="devicePickerOpen" placement="bottom-end" :width="360" trigger="click">
+            <template #reference>
+              <button class="device-picker" :class="{ busy: store.loading }" type="button">
+                <el-icon class="dp-icon"><Monitor /></el-icon>
+                <span class="dp-text">
+                  <span class="dp-label">当前设备</span>
+                  <span class="dp-name mono">{{ store.activeDeviceLabel }}</span>
+                </span>
+                <span class="dp-caret">▾</span>
+              </button>
+            </template>
+
+            <div class="dp-panel">
+              <div class="dp-panel-head">
+                <div>
+                  <div class="dp-panel-title">查看哪台设备的数据</div>
+                  <div class="dp-panel-sub">每台设备在服务端有独立数据库，互不同步、互不覆盖</div>
+                </div>
+                <el-button size="small" text :icon="Refresh" @click="store.refreshStats()" />
+              </div>
+
+              <div class="dp-list">
+                <button
+                  v-for="device in store.devices"
+                  :key="device.deviceId"
+                  class="dp-item"
+                  :class="{ on: device.deviceId === activeDeviceId }"
+                  type="button"
+                  @click="pickDevice(device.deviceId)"
+                >
+                  <span class="dp-item-main">
+                    <span class="dp-item-name">
+                      {{ device.name && device.name !== device.deviceId ? device.name : device.deviceId }}
+                      <span v-if="device.deviceId === 'web-console'" class="dp-tag">Web</span>
+                    </span>
+                    <span class="dp-item-id mono">{{ device.deviceId }}</span>
+                    <span class="dp-item-meta">
+                      {{ describeDevice(device.deviceId) }}
+                      · 行数 {{ device.rowsOwned ?? 0 }}
+                      <template v-if="device.lastSeenAt">· 最近 {{ formatTime(device.lastSeenAt) }}</template>
+                    </span>
+                  </span>
+                  <el-icon
+                    v-if="device.deviceId !== 'web-console'"
+                    class="dp-item-del"
+                    title="删除该设备在服务端的数据"
+                    @click.stop="forgetDevice(device.deviceId)"
+                  >
+                    <Delete />
+                  </el-icon>
+                </button>
+                <div v-if="!store.devices.length" class="dp-empty">
+                  还没有任何设备 —— 在手机上打开 App 同步一次即可。
+                </div>
+              </div>
+
+              <div class="dp-panel-foot">
+                切换后，总览 / 会话 / 数据浏览 / 导入导出都作用于该设备；手机之间不会互相同步。
+              </div>
+            </div>
+          </el-popover>
+
           <div class="status-pill" :class="store.online ? 'on' : 'off'">
             <span class="dot" />
             {{ store.online ? '同步服务已连接' : '未连接同步服务' }}
@@ -391,6 +514,100 @@ onMounted(() => {
 
 .status-pill.on { color: #047857; background: var(--ok-soft); border-color: #d1fae5; }
 .status-pill.off { color: #be123c; background: var(--danger-soft); border-color: #ffe4e9; }
+
+/* ── 设备切换器 ── */
+.device-picker {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 5px 11px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: #fff;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  max-width: 300px;
+}
+
+.device-picker:hover { border-color: #c7d0f5; box-shadow: 0 2px 10px -6px rgba(77, 107, 254, 0.7); }
+.device-picker.busy { opacity: 0.7; }
+.dp-icon { color: var(--brand); font-size: 15px; }
+
+.dp-text { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; }
+.dp-label { font-size: 10px; color: var(--ink-4); line-height: 1.2; }
+
+.dp-name {
+  font-size: 12px;
+  color: var(--ink-1);
+  font-weight: 600;
+  max-width: 230px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dp-caret { font-size: 10px; color: var(--ink-4); }
+
+.dp-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--line);
+}
+
+.dp-panel-title { font-size: 13px; font-weight: 620; color: var(--ink-1); }
+.dp-panel-sub { margin-top: 2px; font-size: 11.5px; color: var(--ink-3); line-height: 1.5; }
+
+.dp-list { max-height: 320px; overflow: auto; margin: 8px 0; }
+
+.dp-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 9px;
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+}
+
+.dp-item:hover { background: var(--bg-soft); }
+.dp-item.on { background: var(--brand-soft); border-color: #c9d2ff; }
+.dp-item-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+
+.dp-item-name { font-size: 12.5px; font-weight: 600; color: var(--ink-1); }
+
+.dp-tag {
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: #fff;
+  border: 1px solid #c9d2ff;
+  color: var(--brand);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.dp-item-id { font-size: 11px; color: var(--ink-3); }
+.dp-item-meta { font-size: 10.5px; color: var(--ink-4); line-height: 1.5; }
+
+.dp-item-del { color: var(--ink-4); font-size: 14px; flex: 0 0 auto; }
+.dp-item-del:hover { color: var(--danger, #f43f5e); }
+
+.dp-empty { padding: 14px 10px; font-size: 12px; color: var(--ink-3); text-align: center; }
+
+.dp-panel-foot {
+  padding-top: 9px;
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--ink-4);
+  line-height: 1.6;
+}
 
 .content {
   flex: 1;

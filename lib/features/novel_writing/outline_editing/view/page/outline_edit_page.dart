@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import '../../../shared/dialog_utils.dart';
 import '../../../shared/domain/outline_chapter.dart';
 import '../../../shared/domain/outline_record.dart';
@@ -593,6 +594,18 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
         Expanded(
           child: ListView.builder(
             controller: _scrollCtrl,
+            // 缓存区特意放大（默认只有 250px）。
+            //
+            // 为什么：输入法升起时视口变矮，屏幕下方的卡片会掉出缓存区被**卸载**；
+            // 收起时视口还原，它们又要**重新 build** 回来。卸载便宜、重建贵
+            // （一张卡片含标题 / 概要两个 TextField），所以症状表现为
+            // 「升起还行、收起下降时掉帧」。
+            //
+            // 取值依据：最坏情况是「原本贴着视口底边的那张卡片」，它不被卸载的条件是
+            // `缓存区 ≥ 键盘高度 − 卡片高度`，取最坏（卡片高度趋 0）即约等于键盘高度。
+            // 手机键盘 300~400px，平板竖屏 / 横屏可达 500~600px，故取 1000 留足余量。
+            // 代价是多保活几张卡片；若快速滑动列表时出现空白帧，可适当调小。
+            scrollCacheExtent: const ScrollCacheExtent.pixels(1000),
             padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
             itemCount: drafts.length,
             itemBuilder: (context, index) =>
@@ -963,8 +976,8 @@ class _ForeshadowsSheetState extends State<_ForeshadowsSheet> {
         content: ConstrainedBox(
           // 编辑器占屏幕大半高度，长清单也能一眼看全
           constraints: BoxConstraints(
-            maxHeight: MediaQuery.of(context).size.height * 0.6,
-            maxWidth: MediaQuery.of(context).size.width * 0.92,
+            maxHeight: MediaQuery.heightOf(context) * 0.6,
+            maxWidth: MediaQuery.widthOf(context) * 0.92,
           ),
           child: TextField(
             controller: editCtrl,
@@ -1036,7 +1049,7 @@ class _ForeshadowsSheetState extends State<_ForeshadowsSheet> {
     return Container(
       // 不用满屏高度：上方编辑页仍可见，方便对着大纲看伏笔
       constraints: BoxConstraints(
-        maxHeight: MediaQuery.of(context).size.height * 0.78,
+        maxHeight: MediaQuery.heightOf(context) * 0.78,
       ),
       decoration: const BoxDecoration(
         color: Colors.white,
