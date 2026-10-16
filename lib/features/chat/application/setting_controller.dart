@@ -34,6 +34,7 @@ class SettingController extends ChangeNotifier {
   int get searchCount => _setting.searchCount;
   String get searchFreshness => _setting.searchFreshness;
   String get searchEngine => _setting.searchEngine;
+  bool get searchNeedContent => _setting.searchNeedContent;
 
   /// 从数据库加载配置
   Future<void> loadSettings() async {
@@ -158,6 +159,12 @@ class SettingController extends ChangeNotifier {
 
   void setSearchFreshness(String v) {
     _setting = _setting.copyWith(searchFreshness: v);
+    notifyListeners();
+  }
+
+  /// 是否抓取网页正文（DeepSeek 官方搜索的 need_content）
+  void setSearchNeedContent(bool v) {
+    _setting = _setting.copyWith(searchNeedContent: v);
     notifyListeners();
   }
 

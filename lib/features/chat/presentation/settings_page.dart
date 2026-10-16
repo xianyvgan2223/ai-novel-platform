@@ -14,11 +14,15 @@ final settingProvider = ChangeNotifierProvider<SettingController>(
   (ref) => SettingController(),
 );
 
-/// 归一化搜索来源取值：兼容历史数据（web_search 布尔量为 1 但 search_engine 为空）
-/// 只认当前真正可用的两个值，其余一律回落百度。
+/// 归一化搜索来源取值：兼容历史数据。
+///
+/// 只认三个已知值，其余（列缺失导致的空串、脏数据）一律按「关闭」处理——
+/// 搜索会花钱（DeepSeek 按次计费 / 百度要单独申请 Key），认不出来时宁可不开，
+/// 也不能替用户打开。真正的"老库只有 web_search 布尔量"兼容在数据层做
+/// （UserSetting._engineFromMap），那里能看到布尔量。
 String _normalizeEngine(String raw) {
   const valid = <String>['baidu', 'deepseek', 'off'];
-  return valid.contains(raw) ? raw : 'baidu';
+  return valid.contains(raw) ? raw : 'off';
 }
 
 /// 给每个设置项一个稳定且唯一的 Key。
@@ -224,22 +228,24 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             label: '联网搜索',
             value: _normalizeEngine(ctrl.searchEngine),
             items: const [
-              DropdownMenuItem(value: 'baidu', child: Text('百度千帆搜索')),
-              // DeepSeek 自带搜索：官方 API 实测不可用，故置灰。
-              // 保留这一项是为了让结论可见，等官方开放后把 enabled 打开即可。
               DropdownMenuItem(
                 value: 'deepseek',
-                enabled: false,
-                child: Text(
-                  'DeepSeek 自带搜索（暂不可用）',
-                  style: TextStyle(color: Color(0xFFBBBBBB)),
-                ),
+                child: Text('DeepSeek 官方搜索'),
               ),
+              DropdownMenuItem(value: 'baidu', child: Text('百度千帆搜索')),
               DropdownMenuItem(value: 'off', child: Text('关闭')),
             ],
             onChanged: ctrl.setSearchEngine,
           ),
-          if (_normalizeEngine(ctrl.searchEngine) != 'off')
+          // DeepSeek 官方搜索用的是对话接口同一个 Key，不用再配第三方 Key；
+          // 这里把结论直接摆出来，省得用户去找"搜索专用的 Key"在哪填。
+          if (_normalizeEngine(ctrl.searchEngine) == 'deepseek')
+            const _InfoRow(
+              key: ValueKey('setting_search_deepseek_info'),
+              label: '搜索鉴权',
+              text: '复用上方 DeepSeek API Key；官方按次计费（5 元/1000 次）',
+            ),
+          if (_normalizeEngine(ctrl.searchEngine) == 'baidu')
             _ParamInput(
               key: _k('baidu_api_key'),
               label: '百度API Key',
@@ -259,9 +265,19 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             _ParamInput(
               key: _k('search_freshness'),
               label: '时间筛选',
-              hint: '留空不限 | pd | pw | pm | py | YYYY-MM-DDtoYYYY-MM-DD',
+              hint: _normalizeEngine(ctrl.searchEngine) == 'deepseek'
+                  ? '留空不限 | pd | pw | pm | py | YYYY-MM-DDtoYYYY-MM-DD'
+                  : '留空不限 | pd | pw | pm | py',
               initialValue: ctrl.searchFreshness,
               onChanged: ctrl.setSearchFreshness,
+            ),
+          // 「抓取正文」只有 DeepSeek 官方搜索有这个开关（need_content）
+          if (_normalizeEngine(ctrl.searchEngine) == 'deepseek')
+            _SwitchParam(
+              key: _k('search_need_content'),
+              label: '抓取网页正文',
+              initialValue: ctrl.searchNeedContent,
+              onChanged: ctrl.setSearchNeedContent,
             ),
 
           const _SectionHeader(title: '日常调优参数'),
@@ -796,6 +812,42 @@ class _DropdownParam extends StatelessWidget {
                   onChanged: (v) {
                     if (v != null) onChanged(v);
                   },
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 只读提示行（与 _ParamInput 同布局，右侧不是输入框而是一段说明文字）
+class _InfoRow extends StatelessWidget {
+  final String label;
+  final String text;
+
+  const _InfoRow({super.key, required this.label, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(flex: _kLabelFlex, child: _RowLabel(label)),
+          const SizedBox(width: _kRowGap),
+          Expanded(
+            flex: _kControlFlex,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Text(
+                text,
+                style: const TextStyle(
+                  fontSize: 12,
+                  height: 1.35,
+                  color: Color(0xFF999999),
                 ),
               ),
             ),

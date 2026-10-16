@@ -6,7 +6,7 @@ import 'package:path/path.dart' as p;
 
 class DatabaseHelper {
   static const _dbName = 'deepseek.db';
-  static const _dbVersion = 37;
+  static const _dbVersion = 38;
   static Database? _database;
 
   /// 单例入口，全局复用同一个数据库连接
@@ -120,7 +120,8 @@ class DatabaseHelper {
         baidu_api_key TEXT NOT NULL DEFAULT '',
         search_count INTEGER NOT NULL DEFAULT 5,
         search_freshness TEXT NOT NULL DEFAULT '',
-        search_engine TEXT NOT NULL DEFAULT 'baidu',
+        search_engine TEXT NOT NULL DEFAULT 'off',
+        search_need_content INTEGER NOT NULL DEFAULT 1,
         history_query INTEGER NOT NULL DEFAULT 0
       )
     ''');
@@ -1076,6 +1077,39 @@ class DatabaseHelper {
       // 说明：小说副本的模型名存在 novel.db 的 copy_table.model_config（JSON 串）里，
       // 属于另一个库、另一套版本号，本迁移不越界处理；且该表通常为空，
       // 其中残留的历史模型名不影响调用（旧名仍是官方别名）。
+    }
+
+    // V37 → V38：DeepSeek 官方搜索可用后的两处收口。
+    //
+    // 背景（2026-10 官方上线 Search / Fetch 接口）：
+    //   POST https://api.deepseek.com/v1/tools/search，与对话接口共用同一个
+    //   Bearer Key，返回 title/url/snippet/summary/content/date/authority 等字段。
+    //   真 Key 实测 200 且有结果，`need_content=true` 时带网页正文。
+    //   于是上面 V35→V36 那段"官方 API 没有可用的自带搜索"的结论**已经过时**：
+    //   它说的其实是"模型不会自己调用服务端搜索工具"，而这条 Search 接口是
+    //   独立工具接口，由 App 自己发请求，绕开了那个限制。
+    //
+    // 于是这里补两件事：
+    //   1) 修 V35→V36 的遗留缺陷：那次加列是一律 `DEFAULT 'baidu'`，把从未开过
+    //      联网搜索（web_search=0）的用户也标成了"百度搜索已开启"——而
+    //      chat_controller 只认 search_engine，结果是这些人每发一条消息都被
+    //      拦下要求填百度 Key。这里按历史布尔量回填真实意图。
+    //      能这么回填是因为 setSearchEngine() 一直同步写两列：web_search=0 而
+    //      search_engine='baidu' 只可能来自那次加列的默认值，不可能是用户选择。
+    //   2) 新增 search_need_content 列（DeepSeek 搜索的 need_content 开关）。
+    if (oldVersion < 38) {
+      final cols = await db.rawQuery('PRAGMA table_info(user_settings)');
+      if (cols.isNotEmpty &&
+          !cols.any((c) => c['name'] == 'search_need_content')) {
+        await db.execute(
+          'ALTER TABLE user_settings '
+          "ADD COLUMN search_need_content INTEGER NOT NULL DEFAULT 1",
+        );
+      }
+      await db.rawUpdate(
+        "UPDATE user_settings SET search_engine = 'off' "
+        "WHERE search_engine = 'baidu' AND web_search = 0",
+      );
     }
   }
 

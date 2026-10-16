@@ -3,39 +3,7 @@
 
 import 'package:flutter/material.dart';
 import '../../domain/chat_message.dart';
-
-/// 搜索详情弹窗
-void showSearchDetailDialog(
-  BuildContext context,
-  String title,
-  String url,
-  String snippet,
-  String content,
-) {
-  final buffer = StringBuffer();
-  if (title.isNotEmpty) buffer.writeln('标题：$title');
-  if (url.isNotEmpty) buffer.writeln('链接：$url');
-  if (snippet.isNotEmpty) buffer.writeln('\n摘要：\n$snippet');
-  if (content.isNotEmpty) buffer.writeln('\n正文：\n$content');
-  showDialog(
-    context: context,
-    builder: (ctx) => AlertDialog(
-      title: const Text('搜索详情', style: TextStyle(fontSize: 14)),
-      content: SingleChildScrollView(
-        child: SelectableText(
-          buffer.toString(),
-          style: const TextStyle(fontSize: 12, height: 1.5),
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(ctx).pop(),
-          child: const Text('关闭', style: TextStyle(fontSize: 13)),
-        ),
-      ],
-    ),
-  );
-}
+import 'search_sources_card.dart';
 
 /// 消息气泡组件（带 RepaintBoundary 独立渲染层）
 class MessageBubble extends StatefulWidget {
@@ -60,7 +28,7 @@ class MessageBubble extends StatefulWidget {
 
 class _MessageBubbleState extends State<MessageBubble> {
   bool _showThinking = false;
-  bool _showSearchResults = false;
+  // 搜索来源的展开/收起状态由 SearchSourcesCard 自己管（它同时用于流式回答区）
 
   @override
   Widget build(BuildContext context) {
@@ -228,87 +196,9 @@ class _MessageBubbleState extends State<MessageBubble> {
   }
 
   Widget _buildSearchResultsSection() {
-    final results = widget.message.searchResults!;
-    return GestureDetector(
-      onTap: () => setState(() => _showSearchResults = !_showSearchResults),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        decoration: BoxDecoration(
-          color: const Color(0xFFE8EEFF),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: const Color(0xFFB3C5FF)),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.public, size: 14, color: Color(0xFF4D6BFE)),
-                const SizedBox(width: 4),
-                const Text('搜索来源',
-                  style: TextStyle(fontSize: 11, color: Color(0xFF4D6BFE)),
-                ),
-                const Spacer(),
-                Icon(
-                  _showSearchResults
-                      ? Icons.keyboard_arrow_up
-                      : Icons.keyboard_arrow_down,
-                  size: 14, color: const Color(0xFF4D6BFE),
-                ),
-              ],
-            ),
-            if (_showSearchResults) ...[
-              const SizedBox(height: 6),
-              ...results.take(5).map((r) {
-                final title = r['name']?.toString() ?? r['title']?.toString() ?? '';
-                final url = r['url']?.toString() ?? r['link']?.toString() ?? '';
-                final snippet = r['snippet']?.toString() ?? '';
-                final content = r['content']?.toString() ?? '';
-                return GestureDetector(
-                  onTap: () => showSearchDetailDialog(
-                    context, title, url, snippet, content,
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.only(bottom: 6),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(title,
-                          style: const TextStyle(
-                            fontSize: 11, fontWeight: FontWeight.w600,
-                            color: Color(0xFF333333),
-                          ),
-                        ),
-                        if (snippet.isNotEmpty)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 2),
-                            child: Text(snippet,
-                              style: const TextStyle(
-                                fontSize: 10, color: Color(0xFF666666),
-                              ),
-                              maxLines: 2, overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        if (url.isNotEmpty)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 1),
-                            child: Text(url,
-                              style: const TextStyle(
-                                fontSize: 9, color: Color(0xFF4D6BFE),
-                                decoration: TextDecoration.underline,
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                );
-              }),
-            ],
-          ],
-        ),
-      ),
+    return SearchSourcesCard(
+      results: widget.message.searchResults!,
+      collapsible: true,
     );
   }
 

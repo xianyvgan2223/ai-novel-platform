@@ -12,6 +12,7 @@ import 'settings_page.dart';
 import 'session_setting_page.dart';
 import '../../novel_writing/novel_writing_page.dart';
 import 'widgets/message_bubble.dart';
+import 'widgets/search_sources_card.dart';
 import '../../game/game_hub_page.dart';
 
 /// ChatController Riverpod Provider 定义见 chat_controller.dart（全局单例）
@@ -881,9 +882,9 @@ class _StreamingBubble extends ConsumerWidget {
                   chat.streamingSearchResults!.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
-                  child: _buildStreamingSearchResults(
-                    context,
-                    chat.streamingSearchResults!,
+                  child: SearchSourcesCard(
+                    results: chat.streamingSearchResults!,
+                    collapsible: false,
                   ),
                 ),
             ],
@@ -920,89 +921,6 @@ class _StreamingBubble extends ConsumerWidget {
             thinking,
             style: const TextStyle(fontSize: 11, color: Color(0xFF666666)),
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStreamingSearchResults(
-    BuildContext context,
-    List<Map<String, dynamic>> results,
-  ) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-      margin: const EdgeInsets.only(bottom: 6),
-      decoration: BoxDecoration(
-        color: const Color(0xFFE8EEFF),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFFB3C5FF)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.public, size: 14, color: Color(0xFF4D6BFE)),
-              SizedBox(width: 4),
-              Text(
-                '搜索来源',
-                style: TextStyle(fontSize: 11, color: Color(0xFF4D6BFE)),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          ...results.take(5).map((r) {
-            final title = r['name']?.toString() ?? r['title']?.toString() ?? '';
-            final url = r['url']?.toString() ?? r['link']?.toString() ?? '';
-            final snippet = r['snippet']?.toString() ?? '';
-            final content = r['content']?.toString() ?? '';
-            return GestureDetector(
-              onTap: () =>
-                  showSearchDetailDialog(context, title, url, snippet, content),
-              child: Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFF333333),
-                      ),
-                    ),
-                    if (snippet.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 2),
-                        child: Text(
-                          snippet,
-                          style: const TextStyle(
-                            fontSize: 10,
-                            color: Color(0xFF666666),
-                          ),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    if (url.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 1),
-                        child: Text(
-                          url,
-                          style: const TextStyle(
-                            fontSize: 9,
-                            color: Color(0xFF4D6BFE),
-                            decoration: TextDecoration.underline,
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            );
-          }),
         ],
       ),
     );

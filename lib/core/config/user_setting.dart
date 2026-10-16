@@ -6,13 +6,16 @@ class UserSetting {
 
   // ── 联网搜索来源 ──
 
-  /// 百度千帆 AI 搜索（当前唯一可用来源）
+  /// 百度千帆 AI 搜索（第三方，需要单独申请百度 Key）
   static const String searchEngineBaidu = 'baidu';
 
   /// 关闭联网搜索
   static const String searchEngineOff = 'off';
 
-  /// DeepSeek 官方 API「自带搜索」（预留位，见 db V35→V36 迁移注释）
+  /// DeepSeek 官方「网页搜索」接口（`/v1/tools/search`）
+  ///
+  /// 2026 年官方新上：与对话接口共用同一个 API Key，不需要再申请第三方搜索
+  /// Key，也不需要模型支持服务端工具——由 App 自己调接口、把结果喂给模型。
   static const String searchEngineDeepseek = 'deepseek';
 
   final int? id;
@@ -40,11 +43,19 @@ class UserSetting {
   final int searchCount;
   final String searchFreshness;
 
-  /// 联网搜索来源：仅 [searchEngineBaidu] 真正可用。
+  /// 联网搜索来源：[searchEngineBaidu] / [searchEngineDeepseek] / [searchEngineOff]。
   ///
-  /// 保留此字段是为了让设置项能表达「想用哪个来源」，并给将来官方开放
-  /// 自带搜索留出通路 —— 实测结论见 db V35→V36 迁移处的注释。
+  /// 默认 **关闭**：搜索是要花钱的外部请求（DeepSeek 按次计费、百度要单独申请
+  /// Key），不该在用户没选之前就替他打开。V38 之前这里的默认值是 `baidu`，
+  /// 配合"非 off 即开启"的判断，会让从未开过搜索的用户每次发消息都被拦下要求
+  /// 填百度 Key —— V37→V38 迁移已按历史 web_search 布尔量回填修正。
   final String searchEngine;
+
+  /// DeepSeek 搜索是否抓取网页正文（官方 `need_content`）。
+  ///
+  /// true：结果里带完整正文（模型答得更准，但注入上下文的字数明显更多）；
+  /// false：只有 100~200 字的 snippet 与 600~800 字的 summary。
+  final bool searchNeedContent;
 
   const UserSetting({
     this.id,
@@ -71,7 +82,8 @@ class UserSetting {
     this.baiduApiKey = '',
     this.searchCount = 5,
     this.searchFreshness = '',
-    this.searchEngine = searchEngineBaidu,
+    this.searchEngine = searchEngineOff,
+    this.searchNeedContent = true,
   });
 
   /// 实体 → 数据库 Map
@@ -102,6 +114,7 @@ class UserSetting {
       'search_count': searchCount,
       'search_freshness': searchFreshness,
       'search_engine': searchEngine,
+      'search_need_content': searchNeedContent ? 1 : 0,
     };
   }
 
@@ -132,8 +145,21 @@ class UserSetting {
       baiduApiKey: map['baidu_api_key'] as String? ?? '',
       searchCount: map['search_count'] as int? ?? 5,
       searchFreshness: map['search_freshness'] as String? ?? '',
-      searchEngine: map['search_engine'] as String? ?? searchEngineBaidu,
+      searchEngine: _engineFromMap(map),
+      searchNeedContent: (map['search_need_content'] as int?) != 0,
     );
+  }
+
+  /// 读取联网搜索来源，兼容三种历史形态：
+  ///   1. 有 search_engine 列 → 以它为准；
+  ///   2. 列缺失/空串（V36 之前的老库）→ 按当年的 web_search 布尔量判断；
+  ///   3. 都没有 → 关闭（不替用户开搜索）。
+  static String _engineFromMap(Map<String, dynamic> map) {
+    final raw = map['search_engine'] as String?;
+    if (raw != null && raw.isNotEmpty) return raw;
+    return (map['web_search'] as int?) == 1
+        ? searchEngineBaidu
+        : searchEngineOff;
   }
 
   /// 不可变复制，支持部分字段覆盖
@@ -163,6 +189,7 @@ class UserSetting {
     int? searchCount,
     String? searchFreshness,
     String? searchEngine,
+    bool? searchNeedContent,
   }) {
     return UserSetting(
       id: id ?? this.id,
@@ -190,6 +217,7 @@ class UserSetting {
       searchCount: searchCount ?? this.searchCount,
       searchFreshness: searchFreshness ?? this.searchFreshness,
       searchEngine: searchEngine ?? this.searchEngine,
+      searchNeedContent: searchNeedContent ?? this.searchNeedContent,
     );
   }
 
