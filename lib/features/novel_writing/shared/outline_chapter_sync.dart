@@ -1,7 +1,10 @@
+import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../../../core/db/database_helper.dart';
+import 'data/outline_record_db_helper.dart';
 import 'domain/outline_chapter.dart';
+import 'domain/outline_record.dart';
 import 'outline_event_parser.dart';
 
 /// 结构校正结果（供日志与「干跑」报告使用）
@@ -149,4 +152,37 @@ Future<int> _contentChars(Transaction txn, int outlineId) async {
   );
   final n = rows.isEmpty ? null : rows.first['n'];
   return n is int ? n : 0;
+}
+
+/// 取某条大纲的**最新**记录（正文以库里的为准）。
+///
+/// 为什么每个按正文解析事件的页面都需要它：列表页传下来的是打开列表那一刻的
+/// 快照（`OutlineRecord.content` 是 final，编辑页保存时只写库、不回填内存）。
+/// 拿旧快照去 [reconcileOutlineChapters] 会**解析出错误的事件结构**：
+/// - 已被删掉的事件又「长回来」（库里行已删、旧正文里还在 → 当成新增 INSERT）；
+/// - 改过的标题 / 概要被翻回旧值；
+/// - 章表为空时甚至一条事件都解析不出来（页面显示「没有可朗读的事件」）。
+///
+/// 读失败 / 记录已不存在时退回 [snapshot]，让调用方仍能按手里的数据往下走。
+Future<OutlineRecord> latestOutlineRecord(OutlineRecord snapshot) async {
+  final id = snapshot.id;
+  if (id == null) return snapshot;
+  try {
+    final row = await OutlineRecordDbHelper().getById(id);
+    if (row == null) return snapshot;
+    final latest = OutlineRecord.fromMap(row);
+    // 库里正文为空而快照里有内容（老数据 / 写到一半）：保留快照那份，别把结构清空
+    if (latest.content.trim().isEmpty &&
+        snapshot.content.trim().isNotEmpty) {
+      return OutlineRecord.fromMap({
+        ...row,
+        'content': snapshot.content,
+        'id': id,
+      });
+    }
+    return latest;
+  } catch (e, st) {
+    debugPrint('[outline_sync] 读取最新大纲记录失败 id=$id：$e\n$st');
+    return snapshot;
+  }
 }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'ai_battle/view/page/ai_battle_page.dart';
 import 'outline_generation/view/page/outline_generation_page.dart';
 import 'outline_editing/view/page/outline_edit_novel_list_page.dart';
+import 'outline_listening/view/page/outline_listen_novel_list_page.dart';
 import 'chapter_writing/view/page/chapter_list_page.dart';
 import 'outline_format/view/page/outline_format_page.dart';
 
@@ -69,6 +70,16 @@ class NovelWritingPage extends StatelessWidget {
                       label: '大纲编辑',
                       color: const Color(0xFF2196F3),
                       page: const OutlineEditNovelListPage(),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // 听大纲改名（系统 TTS 朗读 + 边听边改 + 一键改人名地名）
+                    _buildNavButton(
+                      context,
+                      icon: Icons.headphones,
+                      label: '听大纲改名',
+                      color: const Color(0xFF00ACC1),
+                      page: const OutlineListenNovelListPage(),
                     ),
                     const SizedBox(height: 16),
 

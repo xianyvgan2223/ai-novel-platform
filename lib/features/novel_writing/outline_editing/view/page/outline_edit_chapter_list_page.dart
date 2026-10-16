@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import '../../../shared/data/outline_chapter_db_helper.dart';
-import '../../../shared/data/outline_record_db_helper.dart';
 import '../../../shared/domain/outline_chapter.dart';
 import '../../../shared/domain/outline_record.dart';
 import '../../../shared/list_scroll_offset.dart';
@@ -68,23 +67,10 @@ class OutlineEditChapterListPageState
   ///
   /// 正文为空是有效状态（用户可能把事件全删了），必须照它清空结构，
   /// 所以只在**读失败 / 记录已不存在**时才退回快照。
-  Future<OutlineRecord> _latestRecord(int id) async {
-    try {
-      final content = await OutlineRecordDbHelper().getContentById(id);
-      if (content == null || content == widget.outline.content) {
-        return widget.outline;
-      }
-      // content 是 final：套一份带最新正文的记录（其余字段原样带过来）
-      return OutlineRecord.fromMap({
-        ...widget.outline.toMap(),
-        'id': id,
-        'content': content,
-      });
-    } catch (e, st) {
-      debugPrint('[outline_edit_chapters] 读取最新大纲正文失败 outline=$id：$e\n$st');
-      return widget.outline;
-    }
-  }
+  ///
+  /// 具体实现抽在 `shared/outline_chapter_sync.dart` 的 [latestOutlineRecord]：
+  /// 「听大纲改名」页也要按最新正文校正事件结构，两处必须是同一套口径。
+  Future<OutlineRecord> _latestRecord(int id) => latestOutlineRecord(_outline);
 
   /// 读取章节结构。
   ///

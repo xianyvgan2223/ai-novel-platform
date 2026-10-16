@@ -45,5 +45,11 @@
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
         </intent>
+        <!-- 「听大纲改名」用的系统 TTS：Android 11+ 的包可见性限制下，不声明这条
+             queries，系统可能看不到已安装的语音引擎，TextToSpeech 初始化直接失败
+             （现象：页面提示「本机没有可用的语音引擎」）。 -->
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE"/>
+        </intent>
     </queries>
 </manifest>
