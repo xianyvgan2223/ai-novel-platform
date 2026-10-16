@@ -21,6 +21,9 @@ class FakeTtsEngine implements TtsEngine {
   /// [stop] 的调用次数
   int stopCount = 0;
 
+  /// [reset] 的调用次数（「重试」是否真的把引擎丢掉重建，靠它验）
+  int resetCount = 0;
+
   /// 下一次 [speak] 是否返回失败（模拟引擎报错）
   bool failNextSpeak = false;
 
@@ -42,6 +45,68 @@ class FakeTtsEngine implements TtsEngine {
 
   @override
   Future<bool> init({String language = 'zh-CN'}) async => available;
+
+  /// 「重试」要把引擎丢掉重建：假引擎只需记下次数并清掉上次的失败文案，
+  /// 这样测试能区分「真重试了」和「只把错误条关了」。
+  @override
+  Future<void> reset() async {
+    resetCount++;
+    errorMessage = '';
+    _speaking = false;
+  }
+
+  /// 测试可注入：本机有没有 TTS 引擎、中文支持情况。
+  ///
+  /// 默认是「一切正常」：绝大多数测试关心的是朗读流程，不该被引擎体检提示条干扰；
+  /// 要验「本机没有引擎 / 缺中文语音包」的测试自己注入对应状态。
+  TtsEngineStatus status = const TtsEngineStatus(
+    engines: ['com.iflytek.speechsuite'],
+    defaultEngine: 'com.iflytek.speechsuite',
+    zhState: 'ok',
+  );
+
+  @override
+  Future<TtsEngineStatus> diagnose() async => status;
+
+  /// [openTtsSettings] 的调用次数：页面上的「去系统设置」按钮是否真的接了通道
+  int openSettingsCount = 0;
+
+  @override
+  Future<bool> openTtsSettings() async {
+    openSettingsCount++;
+    return true;
+  }
+
+  /// [openVoiceEngineStore] 的调用次数：没有引擎时页面是否给出了「去商店装」这条路
+  int openStoreCount = 0;
+  String? lastStoreQuery;
+
+  @override
+  Future<bool> openVoiceEngineStore({String query = '语音引擎'}) async {
+    openStoreCount++;
+    lastStoreQuery = query;
+    return true;
+  }
+
+  /// 测试可注入的「可选引擎」清单
+  List<TtsEngineOption> engineOptions = [
+    TtsEngineOption.autoOption,
+    TtsEngineOption.builtinOption,
+    const TtsEngineOption(id: 'com.reecedunn.espeak', label: 'com.reecedunn.espeak'),
+  ];
+
+  String _selectedEngineId = TtsEngineOption.autoId;
+
+  @override
+  Future<List<TtsEngineOption>> availableEngines() async => engineOptions;
+
+  @override
+  Future<void> selectEngine(String engineId) async {
+    _selectedEngineId = engineId;
+  }
+
+  @override
+  String get selectedEngineId => _selectedEngineId;
 
   @override
   Future<bool> speak(TtsSpeechRequest request) async {

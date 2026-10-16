@@ -64,7 +64,9 @@ class OutlineSpeechSettings {
   });
 
   /// 可选的语速档位（界面用一排按钮呈现，不做连续滑块：朗读语速用整数档更好挑）
-  static const List<double> rateOptions = [0.75, 1.0, 1.25, 1.5, 2.0];
+  ///
+  /// 3.0x 是本地离线合成（VITS）还听得清的上限，也够用来快速过一遍大纲。
+  static const List<double> rateOptions = [0.75, 1.0, 1.25, 1.5, 2.0, 3.0];
 
   OutlineSpeechSettings copyWith({
     double? rate,

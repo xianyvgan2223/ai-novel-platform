@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:deepseekapp/features/novel_writing/outline_listening/controller/outline_listen_controller.dart';
+import 'package:deepseekapp/features/novel_writing/outline_listening/service/tts_engine.dart';
 import 'package:deepseekapp/features/novel_writing/outline_listening/service/tts_engine_fake.dart';
 import 'package:deepseekapp/features/novel_writing/outline_listening/view/page/outline_listen_page.dart';
 import 'package:deepseekapp/features/novel_writing/shared/domain/outline_chapter.dart';
@@ -172,6 +173,131 @@ void main() {
     await tester.tap(find.byTooltip('关闭提示'));
     await tester.pumpAndSettle();
     expect(find.text('朗读失败（测试）'), findsNothing);
+  });
+
+  testWidgets('朗读出错时点「重试」：先重建引擎再读，不再是空点一下', (tester) async {
+    final env = await pumpPage(tester);
+
+    // 引擎暂时不可用 → 报错
+    env.engine.available = false;
+    await tester.tap(cardPlay(0));
+    await tester.pumpAndSettle();
+    expect(find.text('重试'), findsOneWidget);
+    expect(env.ctrl.playing, isFalse);
+
+    // 用户去系统里装好 / 启用好引擎（假引擎里就是恢复 available），回来点重试
+    env.engine.available = true;
+    await tester.tap(find.text('重试'));
+    await tester.pumpAndSettle();
+
+    expect(env.engine.resetCount, 1); // 「重试」真的把旧引擎丢了重建
+    expect(env.engine.spoken, isNotEmpty); // 并且真的读出来了
+    expect(env.ctrl.playing, isTrue);
+  });
+
+  testWidgets('提示条上有「去系统设置」入口（本机装/换语音引擎都在这）', (tester) async {
+    final env = await pumpPage(tester);
+
+    env.engine.available = false;
+    await tester.tap(cardPlay(0));
+    await tester.pumpAndSettle();
+
+    expect(find.text('去系统设置'), findsOneWidget);
+    await tester.tap(find.text('去系统设置'));
+    await tester.pumpAndSettle();
+
+    expect(env.engine.openSettingsCount, 1); // 按钮真的接到了引擎通道
+  });
+
+  testWidgets('本机一个引擎都没有时：给「去商店装引擎」一键路（魅族 18 那种机器）', (tester) async {
+    // 真机场景：系统「文字转语音」页里首选引擎是「无」，用户到那儿也没东西可选，
+    // 必须先在手机商店里装一个引擎 App —— 所以第一步该是「去商店搜语音引擎」
+    final engine = FakeTtsEngine(available: false)
+      ..status = const TtsEngineStatus(zhState: 'no_engine');
+    final ctrl = OutlineListenController(
+      OutlineRecord(title: '测试小说', content: '', protagonist: '李云飞'),
+      engine: engine,
+    );
+    ctrl.init([ch(1, 'major', '初入江湖', '李云飞在青阳城醒来。')], reload: false);
+    addTearDown(() => tester.pumpWidget(const SizedBox()));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: OutlineListenPage(
+          outline: ctrl.outline,
+          chapters: const [],
+          controller: ctrl,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // 进页面就有商店入口（体检提示条上）
+    expect(find.text('去商店装引擎'), findsOneWidget);
+    await tester.tap(find.text('去商店装引擎'));
+    await tester.pumpAndSettle();
+    expect(engine.openStoreCount, 1);
+    expect(engine.lastStoreQuery, '语音引擎');
+
+    // 点播放失败后，错误条上也留着这条路
+    await tester.tap(cardPlay(0));
+    await tester.pumpAndSettle();
+    expect(find.text('重试'), findsOneWidget);
+    expect(find.text('去商店装引擎'), findsOneWidget);
+  });
+
+  testWidgets('进页面就体检：本机没有语音引擎时提前说明，并给「去系统设置」', (tester) async {
+    final engine = FakeTtsEngine(available: false)
+      ..status = const TtsEngineStatus(zhState: 'no_engine');
+    final ctrl = OutlineListenController(
+      OutlineRecord(title: '测试小说', content: '', protagonist: '李云飞'),
+      engine: engine,
+    );
+    ctrl.init([ch(1, 'major', '初入江湖', '李云飞在青阳城醒来。')], reload: false);
+    addTearDown(() => tester.pumpWidget(const SizedBox()));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: OutlineListenPage(
+          outline: ctrl.outline,
+          chapters: const [],
+          controller: ctrl,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // 还没点播放就把问题说清楚，并给一个能走下去的入口
+    expect(find.textContaining('没有可用的「文字转语音」引擎'), findsOneWidget);
+    expect(find.text('去系统设置'), findsOneWidget);
+
+    await tester.tap(find.text('去系统设置'));
+    await tester.pumpAndSettle();
+    expect(engine.openSettingsCount, 1);
+  });
+
+  testWidgets('朗读设置面板里能选引擎：默认跟随系统，也能指定内置语音/系统引擎', (tester) async {
+    final env = await pumpPage(tester);
+
+    await tester.tap(find.byTooltip('朗读设置'));
+    await tester.pumpAndSettle();
+
+    // 面板里有「朗读引擎」这一段，且三个选项都在
+    expect(find.text('朗读引擎'), findsOneWidget);
+    expect(find.textContaining('跟随系统'), findsOneWidget);
+    expect(find.textContaining('内置离线语音'), findsOneWidget);
+    expect(find.textContaining('com.reecedunn.espeak'), findsOneWidget);
+
+    // 默认选中的是「跟随系统」
+    expect(env.ctrl.selectedEngineId, TtsEngineOption.autoId);
+
+    // 选内置语音 → 控制器记住选择（页面据此把朗读固定到内置引擎）
+    await tester.tap(find.textContaining('内置离线语音'));
+    await tester.pumpAndSettle();
+    expect(env.ctrl.selectedEngineId, TtsEngineOption.builtinId);
+
+    // 再选某个系统引擎（例如装了 eSpeak）→ 同样记下来
+    await tester.tap(find.textContaining('com.reecedunn.espeak'));
+    await tester.pumpAndSettle();
+    expect(env.ctrl.selectedEngineId, 'com.reecedunn.espeak');
   });
 
   testWidgets('没有可用语音引擎时如实提示，不假装在播', (tester) async {

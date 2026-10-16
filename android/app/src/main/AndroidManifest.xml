@@ -51,5 +51,16 @@
         <intent>
             <action android:name="android.intent.action.TTS_SERVICE"/>
         </intent>
+        <!-- 本机没有语音引擎时，页面上的「去商店搜语音引擎」要跳到应用商店的搜索页。
+             Android 11+ 的包可见性下，不声明这两条，resolveActivity / startActivity
+             会看不到商店（返回 false，按钮变成「没找到商店」）。 -->
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="market"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="mstore"/>
+        </intent>
     </queries>
 </manifest>

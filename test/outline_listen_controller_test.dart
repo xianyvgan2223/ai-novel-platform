@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:deepseekapp/features/novel_writing/outline_listening/controller/outline_listen_controller.dart';
 import 'package:deepseekapp/features/novel_writing/outline_listening/model/listening_segment.dart';
 import 'package:deepseekapp/features/novel_writing/outline_listening/service/name_finder.dart';
+import 'package:deepseekapp/features/novel_writing/outline_listening/service/tts_engine.dart';
 import 'package:deepseekapp/features/novel_writing/outline_listening/service/tts_engine_fake.dart';
 import 'package:deepseekapp/features/novel_writing/shared/domain/outline_chapter.dart';
 import 'package:deepseekapp/features/novel_writing/shared/domain/outline_record.dart';
@@ -274,6 +275,154 @@ void main() {
       expect(ctrl.activeIndex, -1);
       expect(ctrl.spokenCount, 0);
       expect(ctrl.playing, isFalse);
+    });
+
+    test('改语速立即生效：正在读的这一条从头重读一遍', () async {
+      final engine = FakeTtsEngine();
+      final ctrl = build(engine: engine);
+      addTearDown(ctrl.dispose);
+
+      await ctrl.play();
+      expect(engine.spoken.length, 1);
+
+      // 朗读中把语速从 1.0 改到 3.0：应当立刻用新语速重读当前这条，
+      // 而不是等这条读完（几十秒）才生效
+      ctrl.updateSettings(ctrl.settings.copyWith(rate: 3.0));
+
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(engine.spoken.length, greaterThan(1));
+      expect(engine.requests.last.rate, 3.0);
+      expect(ctrl.playing, isTrue);
+    });
+
+    test('改音调 / 朗读范围不重读（只有语速改动才立即生效）', () async {
+      final engine = FakeTtsEngine();
+      final ctrl = build(engine: engine);
+      addTearDown(ctrl.dispose);
+
+      await ctrl.play();
+      final spokenBefore = engine.spoken.length;
+
+      ctrl.updateSettings(ctrl.settings.copyWith(pitch: 1.4));
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+      expect(engine.spoken.length, spokenBefore);
+
+      ctrl.updateSettings(
+        ctrl.settings.copyWith(mode: OutlineListenMode.titleOnly),
+      );
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+      expect(engine.spoken.length, spokenBefore);
+    });
+
+    test('语速档位含 3.0x（本地离线合成也支持到 3.0）', () {
+      expect(OutlineSpeechSettings.rateOptions, contains(3.0));
+      expect(OutlineSpeechSettings.rateOptions.last, 3.0);
+    });
+
+    test('重试会先把引擎丢掉重建再读（真机上「重试」无效就是栽在这里）', () async {
+      // 真机复现过：引擎初始化失败后，原生侧把失败结果缓存住，用户在系统里
+      // 装好 / 启用好引擎再回来点「重试」，只重发一次 init 拿回的还是失败。
+      // 所以重试必须走 engine.reset()，让下一次 init 真的重建引擎。
+      final engine = FakeTtsEngine(available: false);
+      final ctrl = build(engine: engine);
+      addTearDown(ctrl.dispose);
+
+      await ctrl.play();
+      expect(ctrl.playing, isFalse);
+      expect(ctrl.errorMessage, isNotEmpty);
+      expect(engine.resetCount, 0);
+
+      // 用户在系统里装好引擎（假引擎里就是 available 变 true），回来点重试
+      engine.available = true;
+      final started = await ctrl.retryPlay();
+
+      expect(started, isTrue);
+      expect(engine.resetCount, 1); // 先丢了旧引擎
+      expect(ctrl.playing, isTrue);
+      expect(ctrl.errorMessage, isEmpty);
+      expect(engine.spoken, isNotEmpty); // 真的读了
+    });
+
+    test('重试仍失败时保留新的失败原因，不静默', () async {
+      final engine = FakeTtsEngine(available: false);
+      final ctrl = build(engine: engine);
+      addTearDown(ctrl.dispose);
+
+      await ctrl.play();
+      final started = await ctrl.retryPlay();
+
+      expect(started, isFalse);
+      expect(engine.resetCount, 1);
+      expect(ctrl.playing, isFalse);
+      expect(ctrl.errorMessage, isNotEmpty);
+    });
+
+    test('进页面体检：本机没有语音引擎时提前给提示', () async {
+      final engine = FakeTtsEngine(available: false)
+        ..status = const TtsEngineStatus(zhState: 'no_engine');
+      final ctrl = build(engine: engine);
+      addTearDown(ctrl.dispose);
+
+      final hint = await ctrl.refreshEngineHint();
+
+      expect(hint, contains('没有可用的「文字转语音」引擎'));
+      expect(ctrl.engineHint, isNotEmpty);
+    });
+
+    test('进页面体检：引擎正常时不打扰用户', () async {
+      final engine = FakeTtsEngine()
+        ..status = const TtsEngineStatus(
+          engines: ['com.iflytek.speechsuite'],
+          defaultEngine: 'com.iflytek.speechsuite',
+          zhState: 'ok',
+        );
+      final ctrl = build(engine: engine);
+      addTearDown(ctrl.dispose);
+
+      final hint = await ctrl.refreshEngineHint();
+
+      expect(hint, isEmpty);
+      expect(ctrl.engineHint, isEmpty);
+    });
+
+    test('进页面体检：中文支持未知时不误报（真机上误报过「不支持中文」）', () async {
+      // 引擎存在、但还没绑定成功时原生侧回 unknown，不能据此说人家不支持中文
+      final engine = FakeTtsEngine()
+        ..status = const TtsEngineStatus(
+          engines: ['com.iflytek.speechsuite'],
+          defaultEngine: 'com.iflytek.speechsuite',
+          zhState: 'unknown',
+        );
+      final ctrl = build(engine: engine);
+      addTearDown(ctrl.dispose);
+
+      await ctrl.refreshEngineHint();
+
+      expect(ctrl.engineHint, isEmpty);
+    });
+
+    test('引擎起来开始朗读后，进页面留下的体检提示要消失（提示条不能是粘的）', () async {
+      final engine = FakeTtsEngine()
+        ..status = const TtsEngineStatus(
+          engines: ['com.iflytek.speechsuite'],
+          defaultEngine: 'com.iflytek.speechsuite',
+          zhState: 'missing_data',
+        );
+      final ctrl = build(engine: engine);
+      addTearDown(ctrl.dispose);
+
+      await ctrl.refreshEngineHint();
+      expect(ctrl.engineHint, isNotEmpty); // 缺中文语音包：先说一声
+
+      // 引擎实际能用（这里以「能读起来」为准）→ 提示必须撤掉
+      await ctrl.play();
+
+      expect(ctrl.playing, isTrue);
+      expect(ctrl.engineHint, isEmpty);
     });
   });
 

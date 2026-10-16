@@ -11,6 +11,7 @@ import '../../../shared/outline_load_error_view.dart';
 import '../../../outline_editing/view/widget/event_type_tag.dart';
 import '../../controller/outline_listen_controller.dart';
 import '../../model/listening_segment.dart';
+import '../../service/tts_engine.dart';
 import 'outline_rename_sheet.dart';
 
 /// 「听大纲改名」页面：把大纲读出来，并且**边听边改**。
@@ -70,8 +71,22 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
       _loading = false;
     }
     // 提前把语音引擎准备好：第一次点播放不用等初始化（失败也无妨，
-    // 真正播放时会再试一次并把原因显示出来）
-    unawaited(_controller.engine.init());
+    // 真正播放时会再试一次并把原因显示出来）。
+    //
+    // 控制器默认用 FallbackTtsEngine（系统 TTS 优先、失败自动回落到 App 自带的
+    // 离线语音）：有些手机（魅族 18 这类精简 ROM）系统里一个 TTS 引擎都没有，
+    // 以前只能报错，现在内置语音直接顶上；系统引擎可用时仍然走系统那条路。
+    unawaited(_prepareEngine());
+    // 顺手体检一次：本机没有语音引擎 / 缺中文语音包的话，进页面就说清楚，
+    // 而不是等用户点了播放才弹一句「初始化失败」
+    unawaited(_controller.refreshEngineHint());
+  }
+
+  /// 准备朗读引擎（能成功就顺手把「正在用内置语音」告诉页面）
+  Future<void> _prepareEngine() async {
+    await _controller.engine.init();
+    if (!mounted) return;
+    setState(() {});
   }
   @override
   void dispose() {
@@ -230,6 +245,9 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
                     children: [
                       _buildPlayer(),
                       if (_controller.errorMessage.isNotEmpty) _buildErrorBar(),
+                      if (_controller.errorMessage.isEmpty &&
+                          _controller.engineHint.isNotEmpty)
+                        _buildEngineHintBar(),
                       Expanded(
                         child: hasContent
                             ? _buildList()
@@ -496,6 +514,20 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
                 : _controller.replayCurrent,
           ),
           const SizedBox(width: 2),
+          // 正在用 App 自带的离线语音（手机系统里没有可用的 TTS 引擎）：
+          // 让用户知道声音从哪来，别以为是手机系统在念
+          if (_controller.usingBuiltinVoice)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+              decoration: BoxDecoration(
+                color: const Color(0xFFEDF2FF),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: const Text(
+                '内置语音',
+                style: TextStyle(fontSize: 9, color: Color(0xFF4D6BFE)),
+              ),
+            ),
           // 语速：窄屏放不下时干脆不显示（设置面板里既能看到也能改）
           if (showRate)
             Text(
@@ -556,38 +588,182 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
   }
 
   /// 朗读出错时的提示条：给出原因 + 重试入口（不静默失败）
+  ///
+  /// 「重试」走 [OutlineListenController.retryPlay]：它会先把原生引擎实例丢掉
+  /// 重建再读——用户按提示去系统里装好 / 启用好语音引擎后，只有这样才能在不杀
+  /// App 的前提下恢复（只重发一次 init 会拿回原生缓存的失败结果）。
   Widget _buildErrorBar() {
+    final noEngine = !_controller.engine.isAvailable && _controller.engineHint.isNotEmpty;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(12, 6, 6, 6),
       color: const Color(0xFFFFF4E5),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.error_outline, size: 16, color: Color(0xFFE65100)),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              _controller.errorMessage,
-              style: const TextStyle(fontSize: 11.5, color: Color(0xFFE65100)),
-            ),
+          Row(
+            children: [
+              const Icon(Icons.error_outline, size: 16, color: Color(0xFFE65100)),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  _controller.errorMessage,
+                  style: const TextStyle(fontSize: 11.5, color: Color(0xFFE65100)),
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close, size: 16),
+                color: const Color(0xFFE65100),
+                tooltip: '关闭提示',
+                visualDensity: VisualDensity.compact,
+                onPressed: _controller.clearError,
+              ),
+            ],
           ),
-          TextButton(
-            onPressed: _controller.play,
-            style: TextButton.styleFrom(
-              visualDensity: VisualDensity.compact,
-              minimumSize: Size.zero,
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-            ),
-            child: const Text('重试', style: TextStyle(fontSize: 12)),
-          ),
-          IconButton(
-            icon: const Icon(Icons.close, size: 16),
-            color: const Color(0xFFE65100),
-            tooltip: '关闭提示',
-            visualDensity: VisualDensity.compact,
-            onPressed: _controller.clearError,
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              // 本机一个引擎都没有时，第一条该走的是「先去商店装一个」：
+              // 系统设置页里首选引擎是「无」，用户到那儿没有东西可选
+              if (noEngine)
+                TextButton(
+                  onPressed: _openVoiceEngineStore,
+                  style: TextButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    minimumSize: Size.zero,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                  ),
+                  child: const Text('去商店装引擎', style: TextStyle(fontSize: 12)),
+                ),
+              TextButton(
+                onPressed: _openTtsSettings,
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  minimumSize: Size.zero,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                ),
+                child: const Text('去系统设置', style: TextStyle(fontSize: 12)),
+              ),
+              TextButton(
+                onPressed: _retryPlay,
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  minimumSize: Size.zero,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                ),
+                child: const Text('重试', style: TextStyle(fontSize: 12)),
+              ),
+            ],
           ),
         ],
+      ),
+    );
+  }
+
+  /// 进页面体检出的引擎问题（本机没有引擎 / 缺中文语音包）：提前说清 + 两条出路。
+  ///
+  /// 与 [_buildErrorBar] 的分工：这条是**还没点播放**时的预警，那条是**读完失败**
+  /// 后的报错；同时只显示一条，免得同一个原因说两遍。
+  ///
+  /// 「去商店装引擎」排在前面是有原因的：本机一个引擎都没有时，系统「文字转语音」
+  /// 页里首选引擎就是「无」，用户到那儿也没东西可选（魅族 18 真机实测画面），
+  /// 必须先在手机商店里装一个引擎 App。
+  Widget _buildEngineHintBar() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(12, 6, 6, 6),
+      color: const Color(0xFFFFF8E1),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.info_outline, size: 16, color: Color(0xFF8D6E63)),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  _controller.engineHint,
+                  style: const TextStyle(fontSize: 11.5, color: Color(0xFF8D6E63)),
+                ),
+              ),
+            ],
+          ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton(
+                onPressed: _openVoiceEngineStore,
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  minimumSize: Size.zero,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                ),
+                child: const Text(
+                  '去商店装引擎',
+                  style: TextStyle(fontSize: 12, color: Color(0xFF8D6E63)),
+                ),
+              ),
+              TextButton(
+                onPressed: _openTtsSettings,
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  minimumSize: Size.zero,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                ),
+                child: const Text(
+                  '去系统设置',
+                  style: TextStyle(fontSize: 12, color: Color(0xFF8D6E63)),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 去应用商店搜「语音引擎」：本机一个引擎都没有时的第一步。
+  ///
+  /// App 不能替用户装引擎（Android 不允许静默安装 APK），但能把他送到商店搜索页，
+  /// 在手机上一键搜到、一键装完，回来点「重试」即可。
+  Future<void> _openVoiceEngineStore() async {
+    final ok = await _controller.openVoiceEngineStore();
+    if (!mounted || ok) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          '没找到应用商店，请在手机商店里搜「语音引擎」安装（讯飞语音引擎 / Google 语音服务等）',
+          style: TextStyle(fontSize: 12.5),
+        ),
+        duration: Duration(seconds: 5),
+      ),
+    );
+  }
+
+  /// 重试：丢掉旧引擎重建后再读；仍失败就把最新原因留在提示条上
+  Future<void> _retryPlay() async {
+    final ok = await _controller.retryPlay();
+    if (!mounted || ok) return;
+    final reason = _controller.errorMessage.isEmpty ? '还是没能开始朗读' : _controller.errorMessage;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(reason, style: const TextStyle(fontSize: 12.5)),
+        duration: const Duration(seconds: 4),
+      ),
+    );
+  }
+
+  /// 去系统「文字转语音」设置页：装引擎 / 换引擎 / 换发音人都在这一步
+  Future<void> _openTtsSettings() async {
+    final ok = await _controller.openTtsSettings();
+    if (!mounted || ok) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          '本机没找到「文字转语音」设置页，请在系统设置里搜索「文字转语音」或「TTS」',
+          style: TextStyle(fontSize: 12.5),
+        ),
+        duration: Duration(seconds: 4),
       ),
     );
   }
@@ -805,12 +981,10 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 11.5, color: Color(0xFFBBBBBB)),
             ),
-            if (!_controller.engine.isAvailable) ...[
+            if (_controller.engineHint.isNotEmpty) ...[
               const SizedBox(height: 12),
               Text(
-                _controller.engine.errorMessage.isEmpty
-                    ? '本机可能没有可用的语音引擎'
-                    : _controller.engine.errorMessage,
+                _controller.engineHint,
                 textAlign: TextAlign.center,
                 style: const TextStyle(fontSize: 11, color: Color(0xFFE65100)),
               ),
@@ -937,6 +1111,45 @@ class _SpeechSettingsSheet extends StatefulWidget {
 }
 
 class _SpeechSettingsSheetState extends State<_SpeechSettingsSheet> {
+  /// 本机可选的朗读引擎（跟随系统 / 内置语音 / 各个系统引擎），打开面板时拉一次
+  List<TtsEngineOption> _engines = const [];
+  bool _loadingEngines = true;
+  bool _switchingEngine = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadEngines();
+  }
+
+  Future<void> _loadEngines() async {
+    final list = await widget.controller.availableEngines();
+    if (!mounted) return;
+    setState(() {
+      _engines = list;
+      _loadingEngines = false;
+    });
+  }
+
+  /// 换引擎：立刻重新初始化，并把结果反馈给用户（起不来就说清原因）
+  Future<void> _pickEngine(TtsEngineOption option) async {
+    if (_switchingEngine) return;
+    setState(() => _switchingEngine = true);
+    final ok = await widget.controller.selectEngine(option.id);
+    if (!mounted) return;
+    setState(() => _switchingEngine = false);
+    final reason = widget.controller.errorMessage;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          ok ? '已切换到：${option.label}' : (reason.isEmpty ? '这个引擎没能启动' : reason),
+          style: const TextStyle(fontSize: 12.5),
+        ),
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
   /// 改设置时**不打断朗读**：正在读的那一条读完后，下一条就用新设置
   /// （改一下语速就从头重读，听感上更烦）。因此这里只改配置、不重启引擎。
   void _update(OutlineSpeechSettings next) {
@@ -981,6 +1194,46 @@ class _SpeechSettingsSheetState extends State<_SpeechSettingsSheet> {
               ],
             ),
             const SizedBox(height: 4),
+            // 朗读引擎：默认「跟随系统」，系统没有引擎时自动用 App 自带的离线语音；
+            // 也可以在这里指定某个系统引擎（例如装了 eSpeak 之后想固定用它）。
+            const Text(
+              '朗读引擎',
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF333333),
+              ),
+            ),
+            const SizedBox(height: 6),
+            if (_loadingEngines)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 6),
+                child: Text(
+                  '正在读取本机可用的引擎…',
+                  style: TextStyle(fontSize: 11.5, color: Color(0xFF999999)),
+                ),
+              )
+            else
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final option in _engines)
+                    _choice(
+                      label: option.label,
+                      selected: widget.controller.selectedEngineId == option.id,
+                      onTap: _switchingEngine ? () {} : () => _pickEngine(option),
+                    ),
+                ],
+              ),
+            const SizedBox(height: 4),
+            Text(
+              widget.controller.usingBuiltinVoice
+                  ? '当前用的是 App 自带语音（系统里没有可用引擎）'
+                  : '正在用手机系统里的语音引擎；想换手机自带的其他引擎去系统设置里换',
+              style: const TextStyle(fontSize: 11, color: Color(0xFF999999)),
+            ),
+            const SizedBox(height: 12),
             const Text(
               '朗读范围',
               style: TextStyle(

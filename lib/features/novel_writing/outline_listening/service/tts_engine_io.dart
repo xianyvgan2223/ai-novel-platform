@@ -29,6 +29,31 @@ class UnsupportedTtsEngine implements TtsEngine {
   @override
   String get errorMessage => reason;
 
+  /// 本机没有朗读能力：如实地报「没有引擎」，让页面提示去系统设置装一个
+  @override
+  Future<TtsEngineStatus> diagnose() async =>
+      const TtsEngineStatus(zhState: 'no_engine');
+
+  @override
+  Future<void> reset() async {}
+
+  @override
+  Future<bool> openTtsSettings() async => false;
+
+  @override
+  Future<bool> openVoiceEngineStore({String query = '语音引擎'}) async => false;
+
+  /// 没有系统引擎可挑：只有一个「跟随系统」的选项
+  @override
+  Future<List<TtsEngineOption>> availableEngines() async =>
+      const [TtsEngineOption.autoOption];
+
+  @override
+  Future<void> selectEngine(String engineId) async {}
+
+  @override
+  String get selectedEngineId => TtsEngineOption.autoId;
+
   @override
   Future<bool> init({String language = 'zh-CN'}) async => false;
 
@@ -61,6 +86,9 @@ class _AndroidTtsEngine implements TtsEngine {
   bool _speaking = false;
   String _error = '';
 
+  /// 用户选的引擎：`auto` = 跟随系统默认，其余是系统 TTS 引擎的包名
+  String _selected = TtsEngineOption.autoId;
+
   @override
   bool get isAvailable => _available;
 
@@ -71,25 +99,142 @@ class _AndroidTtsEngine implements TtsEngine {
   String get errorMessage => _error;
 
   @override
+  String get selectedEngineId => _selected;
+
+  @override
+  Future<List<TtsEngineOption>> availableEngines() async {
+    final out = <TtsEngineOption>[TtsEngineOption.autoOption];
+    try {
+      final raw = await _methods.invokeMethod<List<dynamic>>('listEngines');
+      final defaultEngine = await _methods.invokeMethod<String>('defaultEngine');
+      for (final item in raw ?? const []) {
+        final pkg = item?.toString() ?? '';
+        if (pkg.isEmpty) continue;
+        out.add(
+          TtsEngineOption(
+            id: pkg,
+            label: pkg == defaultEngine ? '$pkg（系统默认）' : pkg,
+          ),
+        );
+      }
+    } catch (_) {
+      // 列不出来就只给「跟随系统」这一项，功能不因此不可用
+    }
+    return out;
+  }
+
+  @override
+  Future<void> selectEngine(String engineId) async {
+    if (_selected == engineId) return;
+    _selected = engineId;
+    // 换引擎必须把旧实例丢掉重建，否则原生还抱着上一个引擎
+    await reset();
+  }
+
+  @override
   Future<bool> init({String language = 'zh-CN'}) async {
     if (_available) return true;
     _listenEvents();
     try {
       final ok = await _methods.invokeMethod<bool>('init', {
         'language': language,
+        // 'auto' 表示跟随系统默认；其余按包名指定引擎（设置面板里选的）
+        if (_selected != TtsEngineOption.autoId) 'engine': _selected,
       });
       _available = ok ?? false;
-      if (!_available) {
-        _error = '系统语音引擎初始化失败，请在系统设置里安装 / 启用「文字转语音」引擎';
+      if (_available) {
+        _error = '';
+      } else {
+        // init 只说「没成功」，说不出为什么；再问一次诊断，把原因落到可执行的文案上。
+        // 诊断失败不影响主流程，退回原来那句通用提示。
+        _error = await _failureMessage();
       }
     } on PlatformException catch (e) {
       _available = false;
-      _error = '系统语音引擎初始化失败：${e.message ?? e.code}';
+      _error = _messageForCode(e.code, e.message);
     } on MissingPluginException {
       _available = false;
       _error = '当前设备没有接入朗读通道（请重新安装 App）';
     }
     return _available;
+  }
+
+  /// 初始化 / 朗读失败时的可执行文案。
+  ///
+  /// 分因的理由（真机复现过）：只缺中文语音包时引擎其实是好的，让用户去
+  /// 「安装语音引擎」白折腾；反过来引擎被停用时，让他去下语音包也没用。
+  Future<String> _failureMessage() async {
+    final status = await diagnose();
+    if (!status.hasEngine) {
+      return '系统语音引擎初始化失败：本机没有可用的「文字转语音」引擎，'
+          '请点下面的「去系统设置」装一个（讯飞语音引擎 / Google 语音服务等）并设为默认';
+    }
+    final zh = status.zhStateLabel;
+    if (zh.isNotEmpty) {
+      return '系统语音引擎初始化失败：$zh，请点下面的「去系统设置」处理后再回来重试';
+    }
+    return '系统语音引擎初始化失败：本机语音引擎没起来'
+        '（可能被系统停用或冻结），请点下面的「去系统设置」检查，再回来重试';
+  }
+
+  /// PlatformException 的 code → 文案（code 由 MainActivity 侧给出）
+  String _messageForCode(String code, String? message) => switch (code) {
+    'TTS_NOT_INIT' => '语音引擎未就绪：请点下面的「去系统设置」检查本机的「文字转语音」引擎',
+    'TTS_LANG_MISSING_DATA' =>
+      '本机语音引擎缺少中文语音数据：请到「设置 → 文字转语音 → 引擎设置」里下载中文语音包',
+    'TTS_LANG_NOT_SUPPORTED' => '本机语音引擎不支持中文：请到「设置 → 文字转语音」换一个支持中文的引擎',
+    'TTS_SYNTH_FAILED' => '语音引擎拒绝了这次朗读，请重试或换一个引擎',
+    _ => message ?? code,
+  };
+
+  @override
+  Future<TtsEngineStatus> diagnose() async {
+    try {
+      final raw = await _methods.invokeMethod<Map<dynamic, dynamic>>('diagnose');
+      if (raw == null) return const TtsEngineStatus();
+      final engines = (raw['engines'] as List?)?.whereType<String>().toList() ?? const <String>[];
+      return TtsEngineStatus(
+        engines: engines,
+        defaultEngine: raw['default'] as String?,
+        zhState: (raw['zhState'] as String?) ?? 'unknown',
+      );
+    } catch (_) {
+      // 诊断只是「把话说清楚」的加分项，失败不该盖掉原本的失败信息
+      return const TtsEngineStatus();
+    }
+  }
+
+  @override
+  Future<void> reset() async {
+    try {
+      await _methods.invokeMethod<bool>('reset');
+    } catch (_) {
+      // 重置失败也要把本地状态放开，让下一次 init 至少重新走一遍
+    }
+    _available = false;
+    _speaking = false;
+    _error = '';
+  }
+
+  @override
+  Future<bool> openTtsSettings() async {
+    try {
+      return await _methods.invokeMethod<bool>('openTtsSettings') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
+  Future<bool> openVoiceEngineStore({String query = '语音引擎'}) async {
+    try {
+      return await _methods.invokeMethod<bool>('openVoiceEngineStore', {
+            'query': query,
+          }) ??
+          false;
+    } catch (_) {
+      return false;
+    }
   }
 
   @override
@@ -111,7 +256,7 @@ class _AndroidTtsEngine implements TtsEngine {
       return _speaking;
     } on PlatformException catch (e) {
       _speaking = false;
-      _error = '朗读失败：${e.message ?? e.code}';
+      _error = _messageForCode(e.code, e.message);
       return false;
     } on MissingPluginException {
       _speaking = false;

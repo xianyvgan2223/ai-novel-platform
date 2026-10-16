@@ -12,6 +12,7 @@ import '../service/name_ai_service.dart';
 import '../service/name_finder.dart';
 import '../service/outline_rename.dart';
 import '../service/tts_engine.dart';
+import '../service/tts_engine_fallback.dart';
 
 /// 「听大纲改名」控制器：把一条大纲拆成**一个事件一张卡片**，逐事件朗读，
 /// 并负责把改动写回 `outline_chapters` 与大纲正文。
@@ -33,7 +34,7 @@ class OutlineListenController extends ChangeNotifier {
     this.outline, {
     TtsEngine? engine,
     OutlineNameAiService? nameAiService,
-  })  : _engine = engine ?? createTtsEngine(),
+  })  : _engine = engine ?? FallbackTtsEngine(),
         _nameAi = nameAiService ?? OutlineNameAiService(),
         outlineContent = outline.content {
     _engine.setCallbacks(
@@ -46,6 +47,14 @@ class OutlineListenController extends ChangeNotifier {
   final OutlineNameAiService _nameAi;
 
   TtsEngine get engine => _engine;
+
+  /// 正在用内置离线语音吗（系统里没有可用引擎时自动回落到它）
+  ///
+  /// 页面用它给用户一句说明：声音不是手机系统的，是 App 自带的。
+  bool get usingBuiltinVoice {
+    final engine = _engine;
+    return engine is FallbackTtsEngine && engine.usingLocal;
+  }
 
   /// 大纲正文（改标题 / 概要、批量改名都会合并写回其中并持久化）
   String outlineContent;
@@ -76,6 +85,10 @@ class OutlineListenController extends ChangeNotifier {
   bool saving = false;
   String saveError = '';
   String errorMessage = '';
+
+  /// 进页面时体检出来的语音引擎问题（空串 = 没发现问题）
+  String engineHint = '';
+  bool _engineChecked = false;
 
   /// 是否读完了全部内容（自动连读走到末尾）
   bool finished = false;
@@ -216,10 +229,18 @@ class OutlineListenController extends ChangeNotifier {
 
   /// 改朗读设置。卡片本身与事件一一对应，所以改设置（含朗读范围）**不用重建
   /// 列表**——朗读范围只影响 [OutlineListenSegment.speechText]。
+  ///
+  /// 例外：**语速改了要立刻生效**——正在读的这一条直接从开头重读一遍，否则用户
+  /// 拖了 3.0x 还得等当前这条读完（几十秒）才听出新速度，等于没改成。
+  /// 其它设置（音调 / 朗读范围 / 连读 / 循环）仍然「下一条生效」，中途重读更烦。
   void updateSettings(OutlineSpeechSettings next) {
     if (next == settings) return;
+    final rateChanged = next.rate != settings.rate;
     settings = next;
     notifyListeners();
+    if (rateChanged && playing && activeIndex >= 0) {
+      unawaited(replayCurrent());
+    }
   }
 
   /// 收起 / 展开上方播控区
@@ -356,6 +377,9 @@ class OutlineListenController extends ChangeNotifier {
         notifyListeners();
         return false;
       }
+      // 引擎起来了：进页面体检时留下的提示（可能是在引擎还没就绪时问出来的）
+      // 就不该再挂着——真机上出现过「一边正常朗读、一边提示不支持中文」
+      _clearEngineHint();
     }
     final seq = ++_speechSeq;
     final started = await _engine.speak(
@@ -427,6 +451,100 @@ class OutlineListenController extends ChangeNotifier {
   void clearError() {
     if (errorMessage.isEmpty) return;
     errorMessage = '';
+    notifyListeners();
+  }
+
+  /// 「重试」：先把引擎丢掉重建，再从当前位置读一次。
+  ///
+  /// 为什么不能只调 [play]：原生侧把引擎实例与初始化结果都缓存了，用户按提示去
+  /// 系统里装好 / 启用好语音引擎再回来，光重发一次 init 拿回的还是同一个失败结果
+  /// （真机复现：恢复引擎后点重试，logcat 里连一次 rebind 都没有，必须杀 App 重开）。
+  /// 所以这里先 [TtsEngine.reset] 让下一次 init 真的重建引擎。
+  ///
+  /// 返回是否真的开始了朗读，供页面给一句反馈。
+  Future<bool> retryPlay() async {
+    if (_disposed) return false;
+    _engineReady = false;
+    await _engine.reset();
+    if (_disposed) return false;
+    errorMessage = '';
+    if (segments.isEmpty) {
+      notifyListeners();
+      return false;
+    }
+    await play();
+    if (playing) _clearEngineHint();
+    return playing;
+  }
+
+  /// 打开系统「文字转语音」设置页（装引擎 / 换引擎 / 调发音人都在这）
+  Future<bool> openTtsSettings() => _engine.openTtsSettings();
+
+  /// 打开应用商店搜索页找语音引擎。
+  ///
+  /// 这条是本机**根本没有引擎**时唯一能自助走下去的路：系统「文字转语音」页里
+  /// 首选引擎显示「无」，用户到那儿也没东西可挑（魅族 18 真机上就是这个画面）。
+  Future<bool> openVoiceEngineStore({String query = '语音引擎'}) =>
+      _engine.openVoiceEngineStore(query: query);
+
+  /// 设置面板可选用的朗读引擎（跟随系统 / 内置语音 / 本机各个系统引擎）
+  Future<List<TtsEngineOption>> availableEngines() => _engine.availableEngines();
+
+  /// 当前选中的引擎标识
+  String get selectedEngineId => _engine.selectedEngineId;
+
+  /// 换朗读引擎：记住选择 → 重新初始化 → 刷新体检提示。
+  ///
+  /// 选中「内置语音」时不需要系统引擎；选中某个系统引擎（如 eSpeak）则只走那一个，
+  /// 起不来就如实报错（用户明确指定了，不该偷偷换回别的）。
+  Future<bool> selectEngine(String engineId) async {
+    if (_disposed || engineId == _engine.selectedEngineId) return _engineReady;
+    await _engine.selectEngine(engineId);
+    if (_disposed) return false;
+    _engineReady = false;
+    errorMessage = '';
+    notifyListeners();
+
+    final ok = await _engine.init(language: settings.language);
+    if (_disposed) return false;
+    _engineReady = ok;
+    if (ok) {
+      _clearEngineHint();
+    } else {
+      errorMessage = _engine.errorMessage.isNotEmpty
+          ? _engine.errorMessage
+          : '这个引擎没能启动，换一个试试';
+    }
+    notifyListeners();
+    return ok;
+  }
+
+  /// 进页面时先问一次本机语音引擎情况：不可用就在页面上提前说清，而不是
+  /// 等用户点了播放才报错。返回要展示的提示（可用时为空串）。
+  ///
+  /// 只查一次（[_engineChecked]）：这是给用户的提示，不是每次操作都要跑的检查。
+  Future<String> refreshEngineHint() async {
+    if (_disposed || _engineChecked) return engineHint;
+    _engineChecked = true;
+    engineHint = '';
+    final status = await _engine.diagnose();
+    if (_disposed) return '';
+    if (!status.hasEngine) {
+      engineHint = '本机没有可用的「文字转语音」引擎，朗读功能用不了；'
+          '点「去商店装引擎」在手机上一键装一个（也可点「去系统设置」自查）';
+    } else if (status.zhState == 'missing_data') {
+      // 只有在**明确问出**缺中文语音包时才提示。引擎还没就绪时原生侧返回
+      // unknown（不是 missing_data），这里就不会误报。
+      engineHint = '${status.zhStateLabel}，朗读可能读不出中文；请点「去系统设置」下载中文语音包';
+    }
+    notifyListeners();
+    return engineHint;
+  }
+
+  /// 清掉进页面体检的提示（引擎已经证明可用时调）
+  void _clearEngineHint() {
+    if (engineHint.isEmpty) return;
+    engineHint = '';
     notifyListeners();
   }
 

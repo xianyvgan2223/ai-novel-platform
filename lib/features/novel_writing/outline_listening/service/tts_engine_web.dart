@@ -50,6 +50,47 @@ class _WebTtsEngine implements TtsEngine {
     return _available;
   }
 
+  /// 浏览器没有「系统语音引擎」这个概念，只有 SpeechSynthesis 是否可用
+  @override
+  Future<TtsEngineStatus> diagnose() async => TtsEngineStatus(
+    engines: _synth == null ? const [] : const ['browser-speech-synthesis'],
+    defaultEngine: _synth == null ? null : 'browser-speech-synthesis',
+    zhState: _synth == null ? 'no_engine' : 'unknown',
+  );
+
+  /// 浏览器这边没有「重建引擎」的概念：取消当前朗读、清掉错误即可。
+  /// 页面上的「重试」走到这里不会卡住。
+  @override
+  Future<void> reset() async {
+    try {
+      _synth?.callMethod<JSAny?>('cancel'.toJS);
+    } catch (_) {
+      // 取消失败不影响后面重新朗读
+    }
+    _current = null;
+    _speaking = false;
+    _error = '';
+  }
+
+  /// 浏览器没有一站式的 TTS 设置页，交给系统自己去设。
+  @override
+  Future<bool> openTtsSettings() async => false;
+
+  /// 浏览器里「装语音引擎」是装系统组件 / 浏览器语音包，App 这边给不了入口
+  @override
+  Future<bool> openVoiceEngineStore({String query = '语音引擎'}) async => false;
+
+  /// 浏览器端不提供跨引擎选择（系统里装了什么就用什么）
+  @override
+  Future<List<TtsEngineOption>> availableEngines() async =>
+      const [TtsEngineOption.autoOption];
+
+  @override
+  Future<void> selectEngine(String engineId) async {}
+
+  @override
+  String get selectedEngineId => TtsEngineOption.autoId;
+
   @override
   Future<bool> speak(TtsSpeechRequest request) async {
     final text = request.text.trim();
