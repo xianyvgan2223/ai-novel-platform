@@ -3,6 +3,7 @@ package com.deepseek.deepseekapp
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
@@ -71,6 +72,9 @@ class MainActivity : FlutterActivity() {
     /** 内置离线朗读（sherpa-onnx）：系统没有 TTS 引擎时兜底，见 LocalTtsChannel */
     private var localTts: LocalTtsChannel? = null
 
+    /** 「一键生成大纲」的后台进度通道（前台服务 + 通知点击回传），见 OutlineBackgroundChannel */
+    private var outlineBackground: OutlineBackgroundChannel? = null
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
@@ -78,6 +82,11 @@ class MainActivity : FlutterActivity() {
         // Dart 侧一套回调就能同时接住系统引擎与内置引擎的「读完了」
         localTts = LocalTtsChannel(applicationContext)
         localTts?.register(flutterEngine.dartExecutor.binaryMessenger)
+
+        // 大纲生成的后台通道：生成离开页面后继续跑、通知栏显示进度、点通知回到大纲页。
+        // 和 TTS 通道一样挂在引擎上：引擎销毁时通道一起失效（Dart 侧也不可能再有生成回调）。
+        outlineBackground = OutlineBackgroundChannel(this, this)
+        outlineBackground?.register(flutterEngine.dartExecutor.binaryMessenger)
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, methodChannelName)
             .setMethodCallHandler { call, result ->
@@ -467,7 +476,38 @@ class MainActivity : FlutterActivity() {
 
     // ---- 生命周期 ----
 
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        // 通知点击拉起（冷启动）时 Intent 里带 open_outline_generation：
+        // 此刻 Flutter 侧还没开始监听事件，交给 OutlineBackgroundChannel 记成 pending，
+        // Dart 启动后用 consumeLaunchTap 消费。
+        // savedInstanceState 非空 = 配置变更重建，同一份 intent 会被系统再投递一次，
+        // 不能当成新的点击（否则处理完又被拉回大纲页）。
+        // 放在 super.onCreate 之后：平台消息在 onCreate 这个主线程消息处理完之后才会派发，
+        // Dart 不可能抢在 handleLaunchIntent 之前调 consumeLaunchTap。
+        if (savedInstanceState == null) {
+            OutlineBackgroundChannel.handleLaunchIntent(intent)
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        // App 已在运行时点通知走这里：extra 只处理一次，handleLaunchIntent 内部会清掉它
+        setIntent(intent)
+        OutlineBackgroundChannel.handleLaunchIntent(intent)
+    }
+
     override fun onDestroy() {
+        // 真正退出 App（返回键退出 / 系统回收），不是横竖屏等配置变更：
+        // Flutter 引擎跟着一起销毁，Dart 侧的生成循环已经停了，但前台服务还在的话
+        // 通知栏会永远停在「生成中」。让服务按「已中断」收尾（释放 wakelock、退出前台）。
+        // 只动通知与前台服务，生成数据仍留在 Dart/本地，重新打开后可从「继续上次」恢复。
+        if (isFinishing && !isChangingConfigurations) {
+            OutlineGenerationService.hostActivityDestroyed(applicationContext)
+        }
+        // 通道跟着引擎一起失效：摘掉事件回调，避免之后还有通知点击往已销毁的引擎发事件
+        outlineBackground?.dispose()
+        outlineBackground = null
         cancelInitTimeout()
         stopSpeaking()
         localTts?.dispose()

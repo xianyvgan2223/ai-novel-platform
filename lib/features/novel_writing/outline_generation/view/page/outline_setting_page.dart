@@ -1,8 +1,24 @@
+// lib/features/novel_writing/outline_generation/view/page/outline_setting_page.dart
+// 大纲生成设置页 — 大纲专属配置（与章节写作设置完全独立）
+//
+// 布局 v2（本轮重做）：与主设置页 settings_page.dart 同一套视觉语言 ——
+// 浅灰页面 + 白色 16dp 圆角卡片 + 卡外分区标题（26dp 图标 chip + 标题 + 副标题），
+// 全部组件 / 色值 / 尺寸都来自 core/widgets/settings_kit.dart；本文件只保留
+// 「页面结构 + 业务逻辑」，不再出现行内魔法数字 / 灰框输入 / 裸 Slider。
+//
+// 行为与改造前完全一致：
+// - initState 读 outline_settings 表（OutlineDbHelper.getSettings → fromMap）；
+// - 系统提示词为空时回填默认提示词；maxTokens 的显示值来自读库结果；
+// - 保存走「读旧行 copyWith 只覆盖本页字段」，保留其余字段的数据库原值；
+// - 成功 SnackBar『设置已保存』+ pop；
+// - 放大编辑用 kit 的 showSettingsPromptDialog：取消不变更、确定写回 controller。
+
 import 'package:flutter/material.dart';
+
 import '../../../../../core/config/deepseek_models.dart';
-import '../../../shared/dialog_utils.dart';
-import '../../../shared/domain/outline_setting.dart';
+import '../../../../../core/widgets/settings_kit.dart';
 import '../../../shared/data/outline_db_helper.dart';
+import '../../../shared/domain/outline_setting.dart';
 
 /// 大纲生成设置页面 — 大纲专属配置（与章节写作设置完全独立）
 class OutlineSettingPage extends StatefulWidget {
@@ -23,8 +39,10 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
   bool _pauseAfterSkeleton = false;
   bool _pauseAfterEvents = false;
   bool _pauseAfterMinor = false;
+
+  /// 系统提示词由页面持有 controller：保存时直接读最新文本，
+  /// 放大编辑弹窗也是把结果写回这个 controller（kit 不接管其生命周期）。
   final TextEditingController _systemCtrl = TextEditingController();
-  final TextEditingController _maxTokensCtrl = TextEditingController();
 
   bool _loading = true;
 
@@ -47,14 +65,13 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
         _pauseAfterEvents = setting.pauseAfterEvents;
         _pauseAfterMinor = setting.pauseAfterMinor;
         _systemCtrl.text = setting.systemPrompt;
-        _maxTokensCtrl.text = '${setting.maxTokens}';
       }
-    } catch (_) {}
+    } catch (_) {
+      // 首次启动 / widget test 下数据库插件可能不可用（MissingPluginException），
+      // 落回字段默认值继续渲染即可（业务读取失败与改造前一样静默）。
+    }
     if (_systemCtrl.text.trim().isEmpty) {
       _systemCtrl.text = _defaultSystemPrompt();
-    }
-    if (_maxTokensCtrl.text.isEmpty) {
-      _maxTokensCtrl.text = '$_maxTokens';
     }
     if (mounted) setState(() => _loading = false);
   }
@@ -78,7 +95,10 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
     await OutlineDbHelper().saveSettings(setting.toMap());
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('设置已保存'), duration: Duration(seconds: 1)),
+        const SnackBar(
+          content: Text('设置已保存'),
+          duration: Duration(seconds: 1),
+        ),
       );
       Navigator.of(context).pop();
     }
@@ -88,367 +108,180 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
     return '你是一个专业的小说大纲生成助手，请用纯文本格式输出。';
   }
 
-  void _showEnlargeDialog({
-    required TextEditingController targetCtrl,
-    required String hintText,
-    required Color accentColor,
-  }) {
-    final editCtrl = TextEditingController(text: targetCtrl.text);
-    final screenHeight = MediaQuery.heightOf(context);
-    final screenWidth = MediaQuery.widthOf(context);
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        titlePadding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-        contentPadding: const EdgeInsets.fromLTRB(4, 6, 4, 0),
-        actionsPadding: const EdgeInsets.fromLTRB(4, 0, 4, 4),
-        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
-        title: const Text(
-          '编辑系统提示',
-          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
-        ),
-        content: ConstrainedBox(
-          constraints: BoxConstraints(
-            maxHeight: screenHeight * 0.72,
-            maxWidth: screenWidth * 0.92,
-          ),
-          child: TextField(
-            controller: editCtrl,
-            maxLines: null,
-            expands: true,
-            textAlignVertical: TextAlignVertical.top,
-            decoration: InputDecoration(
-              hintText: hintText,
-              hintStyle: const TextStyle(
-                fontSize: 13,
-                color: Color(0xFFBBBBBB),
-                height: 1.5,
-              ),
-              border: InputBorder.none,
-              contentPadding: const EdgeInsets.fromLTRB(4, 2, 4, 2),
-              filled: true,
-              fillColor: const Color(0xFFFAFAFA),
-            ),
-            style: const TextStyle(fontSize: 10, height: 1.5),
-          ),
-        ),
-        actions: [
-          TextButton(
-            style: TextButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              minimumSize: Size.zero,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-            onPressed: () {
-              if (!closeDialogSafely(ctx)) return;
-              scheduleControllerDispose(editCtrl);
-            },
-            child: const Text('取消', style: TextStyle(fontSize: 12)),
-          ),
-          TextButton(
-            style: TextButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              minimumSize: Size.zero,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-            onPressed: () {
-              if (!closeDialogSafely(ctx)) return;
-              targetCtrl.text = editCtrl.text;
-              scheduleControllerDispose(editCtrl);
-            },
-            child: Text(
-              '确定',
-              style: TextStyle(fontSize: 12, color: accentColor),
-            ),
-          ),
-        ],
-      ),
+  /// 放大编辑：把提示词丢进 kit 的 v2 大编辑弹窗。
+  /// 语义与改造前一致：取消 / 点遮罩不变更，点「确定」才写回 controller。
+  void _openEnlargeEditor() {
+    showSettingsPromptDialog(
+      context,
+      title: '编辑系统提示',
+      controller: _systemCtrl,
+      hint: _defaultSystemPrompt(),
     );
   }
 
   @override
   void dispose() {
     _systemCtrl.dispose();
-    _maxTokensCtrl.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        title: const Text(
-          '大纲生成设置',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-        ),
-        backgroundColor: Colors.white,
-        elevation: 0.5,
-        centerTitle: true,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Color(0xFF333333)),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-        actions: [
-          TextButton(
-            onPressed: _loading ? null : _save,
-            child: const Text(
-              '保存',
-              style: TextStyle(fontSize: 14, color: Color(0xFF4D6BFE)),
-            ),
-          ),
-        ],
+      backgroundColor: kSettingsPageBg,
+      appBar: SettingsAppBar(
+        title: '大纲生成设置',
+        // 加载中保存按钮显示为禁用态（与改造前 AppBar 的禁用语义一致）。
+        onSave: _save,
+        saveEnabled: !_loading,
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(child: CircularProgressIndicator(color: kSettingsPrimary))
           : ListView(
-              padding: const EdgeInsets.all(16),
+              padding: EdgeInsets.only(
+                top: 2,
+                left: kSettingsCardMarginH,
+                right: kSettingsCardMarginH,
+                bottom: 40 + MediaQuery.paddingOf(context).bottom,
+              ),
+              keyboardDismissBehavior:
+                  ScrollViewKeyboardDismissBehavior.onDrag,
               children: [
-                // ════════════════════════════════════════
-                //  大纲生成系统提示
-                // ════════════════════════════════════════
-                const Text(
-                  '大纲生成 · 系统提示',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF333333),
-                  ),
+                // ── 1. 系统提示 ──
+                const SettingsSectionHeader(
+                  icon: Icons.edit_note_rounded,
+                  title: '系统提示',
+                  subtitle: '一键生成大纲时使用的 AI 指令',
+                  isFirst: true,
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  '一键生成大纲时使用的 AI 指令',
-                  style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                SettingsCard(
+                  children: [
+                    SettingsPromptCard(
+                      icon: Icons.edit_note_rounded,
+                      title: '系统提示词',
+                      controller: _systemCtrl,
+                      hintText: _defaultSystemPrompt(),
+                      minLines: 4,
+                      maxLines: 8,
+                      onExpand: _openEnlargeEditor,
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _systemCtrl,
-                  maxLines: 4,
-                  decoration: InputDecoration(
-                    hintText: _defaultSystemPrompt(),
-                    hintStyle: const TextStyle(
-                      fontSize: 13,
-                      color: Color(0xFFBBBBBB),
-                      height: 1.5,
-                    ),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: Color(0xFFDDDDDD)),
-                    ),
-                    contentPadding: const EdgeInsets.all(12),
-                    filled: true,
-                    fillColor: const Color(0xFFFAFAFA),
-                    suffixIcon: IconButton(
-                      icon: const Icon(Icons.open_in_full, size: 18),
-                      tooltip: '放大编辑',
-                      color: const Color(0xFF999999),
-                      onPressed: () => _showEnlargeDialog(
-                        targetCtrl: _systemCtrl,
-                        hintText: _defaultSystemPrompt(),
-                        accentColor: const Color(0xFF4D6BFE),
-                      ),
-                    ),
-                  ),
-                  style: const TextStyle(fontSize: 14, height: 1.5),
-                ),
-                const SizedBox(height: 24),
 
-                // ════════════════════════════════════════
-                //  模型选择
-                // ════════════════════════════════════════
-                const Text(
-                  'AI 模型',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF333333),
-                  ),
+                // ── 2. 模型 ──
+                // 分区标题用「模型选择」，避免与卡片内唯一的行标签「模型」上下重复。
+                const SettingsSectionHeader(
+                  icon: Icons.memory_rounded,
+                  title: '模型选择',
                 ),
-                const SizedBox(height: 8),
-                Column(
-                  children: _models
-                      .map(
-                        (m) => InkWell(
-                          onTap: () => setState(() => _model = m),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 4),
-                            child: Row(
-                              children: [
-                                Radio<String>(
-                                  value: m,
-                                  groupValue: _model,
-                                  activeColor: const Color(0xFF4D6BFE),
-                                  onChanged: (v) {
-                                    if (v != null) setState(() => _model = v);
-                                  },
-                                ),
-                                const SizedBox(width: 4),
-                                Text(
-                                  DeepSeekModels.toDisplayName(m) ?? m,
-                                  style: const TextStyle(fontSize: 14),
-                                ),
-                              ],
-                            ),
+                SettingsCard(
+                  children: [
+                    SettingsSelectRow(
+                      key: const ValueKey('outline_model'),
+                      label: '模型',
+                      value: _model,
+                      options: [
+                        for (final id in _models)
+                          SettingsSelectOption(
+                            id,
+                            DeepSeekModels.toDisplayName(id) ?? id,
                           ),
-                        ),
-                      )
-                      .toList(),
-                ),
-                const SizedBox(height: 24),
-
-                // ════════════════════════════════════════
-                //  思考模式
-                // ════════════════════════════════════════
-                const Text(
-                  '思考模式',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF333333),
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '关闭后模型不再先进行推理思考，max_tokens 全部用于正式内容，生成更快更省；复杂任务精度可能略降',
-                  style: TextStyle(fontSize: 12, color: Colors.grey[500]),
-                ),
-                const SizedBox(height: 4),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(
-                    _enableThinking ? '开启思考' : '关闭思考',
-                    style: const TextStyle(fontSize: 14),
-                  ),
-                  value: _enableThinking,
-                  activeTrackColor: const Color(0xFF4D6BFE),
-                  onChanged: (v) => setState(() => _enableThinking = v),
-                ),
-                const SizedBox(height: 24),
-
-                // ════════════════════════════════════════
-                //  生成检查点
-                // ════════════════════════════════════════
-                const Text(
-                  '生成检查点',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF333333),
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '开启后，对应阶段生成完成即暂停，可编辑或重新生成该阶段内容，再手动点击「继续」',
-                  style: TextStyle(fontSize: 12, color: Colors.grey[500]),
-                ),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('粗骨架检查点', style: TextStyle(fontSize: 14)),
-                  subtitle: const Text(
-                    '三幕粗骨架生成完成后暂停，可编辑/重新生成骨架再继续',
-                    style: TextStyle(fontSize: 12, color: Color(0xFF999999)),
-                  ),
-                  value: _pauseAfterSkeleton,
-                  activeTrackColor: const Color(0xFF4D6BFE),
-                  onChanged: (v) => setState(() => _pauseAfterSkeleton = v),
-                ),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('大事件检查点', style: TextStyle(fontSize: 14)),
-                  subtitle: const Text(
-                    '大事件精写（含伏笔账本）完成后暂停，可编辑/重新生成大事件再继续',
-                    style: TextStyle(fontSize: 12, color: Color(0xFF999999)),
-                  ),
-                  value: _pauseAfterEvents,
-                  activeTrackColor: const Color(0xFF4D6BFE),
-                  onChanged: (v) => setState(() => _pauseAfterEvents = v),
-                ),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('小事件检查点', style: TextStyle(fontSize: 14)),
-                  subtitle: const Text(
-                    '全部小事件展开完毕后暂停，可编辑全文、返回上一步再继续',
-                    style: TextStyle(fontSize: 12, color: Color(0xFF999999)),
-                  ),
-                  value: _pauseAfterMinor,
-                  activeTrackColor: const Color(0xFF4D6BFE),
-                  onChanged: (v) => setState(() => _pauseAfterMinor = v),
-                ),
-                const SizedBox(height: 24),
-
-                // ════════════════════════════════════════
-                //  温度
-                // ════════════════════════════════════════
-                const Text(
-                  '温度 (Temperature)',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF333333),
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '数值越高，输出越有创造性（0.0 ~ 2.0）',
-                  style: TextStyle(fontSize: 12, color: Colors.grey[500]),
-                ),
-                Slider(
-                  value: _temperature,
-                  min: 0.0,
-                  max: 2.0,
-                  divisions: 40,
-                  activeColor: const Color(0xFF4D6BFE),
-                  label: _temperature.toStringAsFixed(1),
-                  onChanged: (v) => setState(() => _temperature = v),
-                ),
-                Text(
-                  _temperature.toStringAsFixed(1),
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF4D6BFE),
-                  ),
-                ),
-                const SizedBox(height: 24),
-
-                // ════════════════════════════════════════
-                //  最大长度
-                // ════════════════════════════════════════
-                const Text(
-                  '最大生成长度 (Max Tokens)',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF333333),
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '单次生成的最大 token 数',
-                  style: TextStyle(fontSize: 12, color: Colors.grey[500]),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _maxTokensCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: InputDecoration(
-                    hintText: '输入最大 token 数',
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: Color(0xFFDDDDDD)),
+                      ],
+                      onChanged: (v) => setState(() => _model = v),
                     ),
-                    contentPadding: const EdgeInsets.all(12),
-                    filled: true,
-                    fillColor: const Color(0xFFFAFAFA),
-                  ),
-                  style: const TextStyle(fontSize: 14),
-                  onChanged: (v) {
-                    final n = int.tryParse(v);
-                    if (n != null && n >= 1 && n <= 384000) {
-                      setState(() => _maxTokens = n);
-                    }
-                  },
+                  ],
+                ),
+
+                // ── 3. 生成参数 ──
+                const SettingsSectionHeader(
+                  icon: Icons.tune_rounded,
+                  title: '生成参数',
+                  subtitle: '影响生成速度、精度与输出长度',
+                ),
+                SettingsCard(
+                  children: [
+                    SettingsSwitchRow(
+                      key: const ValueKey('outline_enable_thinking'),
+                      label: '思考模式',
+                      // 行副标题必须 ≤14 个汉字（kit 是单行 + 省略号），
+                      // 完整旧文案放在本卡下方的 SettingsNote 里，信息不丢。
+                      subtitle: '关闭后更快更省',
+                      initialValue: _enableThinking,
+                      onChanged: (v) => setState(() => _enableThinking = v),
+                    ),
+                    SettingsSliderRow(
+                      key: const ValueKey('outline_temperature'),
+                      label: '温度',
+                      subtitle: '数值越高越有创造性',
+                      value: _temperature,
+                      min: 0,
+                      max: 2,
+                      divisions: 40,
+                      // 温度步长 0.05，真机习惯看一位小数。
+                      valueLabel: (v) => v.toStringAsFixed(1),
+                      onChanged: (v) => setState(() => _temperature = v),
+                    ),
+                    SettingsTextRow(
+                      key: const ValueKey('outline_max_tokens'),
+                      label: '最大生成长度',
+                      hint: '1 ~ 384000',
+                      keyboardType: TextInputType.number,
+                      initialValue: '$_maxTokens',
+                      // 钳制语义与改造前一致：只有 1..384000 的整数才更新内存值，
+                      // 非法输入不写入（保存时仍用最后一次合法值）。
+                      onChanged: (v) {
+                        final n = int.tryParse(v);
+                        if (n != null && n >= 1 && n <= 384000) {
+                          setState(() => _maxTokens = n);
+                        }
+                      },
+                    ),
+                  ],
+                ),
+                // 思考模式的完整旧文案（行副标题放不下，按 spec §2.1 放进说明卡）
+                const SizedBox(height: kSettingsSectionGapBot),
+                const SettingsNote(
+                  text: '思考模式关闭后，模型不再先进行推理思考，max_tokens 全部用于'
+                      '正式内容，生成更快更省；复杂任务精度可能略降。',
+                ),
+
+                // ── 4. 生成检查点 ──
+                const SettingsSectionHeader(
+                  icon: Icons.pause_circle_outline_rounded,
+                  title: '生成检查点',
+                  subtitle: '阶段完成后暂停，可编辑后继续',
+                ),
+                SettingsCard(
+                  children: [
+                    SettingsSwitchRow(
+                      key: const ValueKey('outline_pause_after_skeleton'),
+                      label: '粗骨架检查点',
+                      subtitle: '三幕骨架完成后暂停',
+                      initialValue: _pauseAfterSkeleton,
+                      onChanged: (v) =>
+                          setState(() => _pauseAfterSkeleton = v),
+                    ),
+                    SettingsSwitchRow(
+                      key: const ValueKey('outline_pause_after_events'),
+                      label: '大事件检查点',
+                      subtitle: '大事件精写完成后暂停',
+                      initialValue: _pauseAfterEvents,
+                      onChanged: (v) => setState(() => _pauseAfterEvents = v),
+                    ),
+                    SettingsSwitchRow(
+                      key: const ValueKey('outline_pause_after_minor'),
+                      label: '小事件检查点',
+                      subtitle: '小事件全部展开后暂停',
+                      initialValue: _pauseAfterMinor,
+                      onChanged: (v) => setState(() => _pauseAfterMinor = v),
+                    ),
+                  ],
+                ),
+                // 三个检查点的完整旧说明（行副标题放不下，按 spec §2.1 放进说明卡）
+                const SizedBox(height: kSettingsSectionGapBot),
+                const SettingsNote(
+                  text: '开启后对应阶段生成完成即暂停，可编辑或重新生成该阶段内容，'
+                      '再手动点击「继续」推进后续流程。',
                 ),
               ],
             ),

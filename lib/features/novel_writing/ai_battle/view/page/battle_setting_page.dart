@@ -1,11 +1,27 @@
+/// 战斗场景设置页面 — 系统提示、模型、温度、最大生成长度
+///
+/// 视觉：与主设置页 v2 完全一致（浅灰页面 + 白色圆角卡片 + 卡外分区标题），
+/// 组件 / 色值 / 尺寸全部来自 core/widgets/settings_kit.dart：
+/// - 主色统一为 [kSettingsPrimary]（去掉了旧版橙色 #FF5722：保存胶囊 / 滑杆 /
+///   选中态 / 数值全部走主色）；
+/// - 系统提示改成焦点输入卡（填充输入框 + 放大编辑），不再画大段浅灰框；
+/// - 模型从单选列表改成整行可点的下拉选择；
+/// - 温度 / 最大生成长度从「裸 Slider + 下方大号数字」改成
+///   SettingsSliderRow（标签 + 右上角主色数值 + 全宽滑杆）。
+///
+/// 行为与改造前一致：initState 调 BattleDbHelper.getSettings → BattleSetting.fromMap
+/// 回填；空提示词填 BattleAiService.buildSystemPrompt()；保存用 BattleSetting +
+/// saveSettings，SnackBar『设置已保存』后 pop。
+library;
+
 import 'package:flutter/material.dart';
+
 import '../../../../../core/config/deepseek_models.dart';
-import '../../../shared/dialog_utils.dart';
+import '../../../../../core/widgets/settings_kit.dart';
 import '../../model/battle_model.dart';
 import '../../model/db/battle_db_helper.dart';
 import '../../service/battle_ai_service.dart';
 
-/// 战斗场景设置页面 — 温度、最大长度、模型选择
 class BattleSettingPage extends StatefulWidget {
   const BattleSettingPage({super.key});
 
@@ -63,78 +79,14 @@ class _BattleSettingPageState extends State<BattleSettingPage> {
     }
   }
 
-  /// 弹出大编辑框方便编辑系统提示
-  void _showEnlargeDialog() {
-    final editCtrl = TextEditingController(text: _systemCtrl.text);
-    final screenHeight = MediaQuery.heightOf(context);
-    final screenWidth = MediaQuery.widthOf(context);
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        titlePadding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-        contentPadding: const EdgeInsets.fromLTRB(4, 6, 4, 0),
-        actionsPadding: const EdgeInsets.fromLTRB(4, 0, 4, 4),
-        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
-        title: const Text(
-          '编辑系统提示',
-          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
-        ),
-        content: ConstrainedBox(
-          constraints: BoxConstraints(
-            maxHeight: screenHeight * 0.72,
-            maxWidth: screenWidth * 0.92,
-          ),
-          child: TextField(
-            controller: editCtrl,
-            maxLines: null,
-            expands: true,
-            textAlignVertical: TextAlignVertical.top,
-            decoration: InputDecoration(
-              hintText: BattleAiService.buildSystemPrompt(),
-              hintStyle: const TextStyle(
-                fontSize: 13,
-                color: Color(0xFFBBBBBB),
-                height: 1.5,
-              ),
-              border: InputBorder.none,
-              contentPadding: const EdgeInsets.fromLTRB(4, 2, 4, 2),
-              filled: true,
-              fillColor: const Color(0xFFFAFAFA),
-            ),
-            style: const TextStyle(fontSize: 10, height: 1.5),
-          ),
-        ),
-        actions: [
-          TextButton(
-            style: TextButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              minimumSize: Size.zero,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-            onPressed: () {
-              if (!closeDialogSafely(ctx)) return;
-              scheduleControllerDispose(editCtrl);
-            },
-            child: const Text('取消', style: TextStyle(fontSize: 12)),
-          ),
-          TextButton(
-            style: TextButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              minimumSize: Size.zero,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-            onPressed: () {
-              if (!closeDialogSafely(ctx)) return;
-              _systemCtrl.text = editCtrl.text;
-              scheduleControllerDispose(editCtrl);
-            },
-            child: const Text(
-              '确定',
-              style: TextStyle(fontSize: 12, color: Color(0xFFFF5722)),
-            ),
-          ),
-        ],
-      ),
+  /// 放大编辑：替换旧的自绘 AlertDialog，改用 kit 的 v2 大编辑弹窗。
+  /// 语义不变：取消不变更，确定才把文本写回 controller。
+  void _openEnlargeEditor() {
+    showSettingsPromptDialog(
+      context,
+      title: '编辑系统提示',
+      controller: _systemCtrl,
+      hint: BattleAiService.buildSystemPrompt(),
     );
   }
 
@@ -146,184 +98,103 @@ class _BattleSettingPageState extends State<BattleSettingPage> {
 
   @override
   Widget build(BuildContext context) {
+    final modelOptions = [
+      for (final id in _models)
+        SettingsSelectOption(id, DeepSeekModels.toDisplayName(id) ?? id),
+    ];
+
     return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        title: const Text(
-          '战斗设置',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-        ),
-        backgroundColor: Colors.white,
-        elevation: 0.5,
-        centerTitle: true,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Color(0xFF333333)),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-        actions: [
-          TextButton(
-            onPressed: _loading ? null : _save,
-            child: const Text(
-              '保存',
-              style: TextStyle(fontSize: 14, color: Color(0xFFFF5722)),
-            ),
-          ),
-        ],
+      backgroundColor: kSettingsPageBg,
+      appBar: SettingsAppBar(
+        title: '战斗设置',
+        // 与改造前一致：加载中「保存」仍占位，但置灰不可点。
+        onSave: _save,
+        saveEnabled: !_loading,
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(
+              child: CircularProgressIndicator(color: kSettingsPrimary),
+            )
           : ListView(
-              padding: const EdgeInsets.all(16),
+              padding: EdgeInsets.only(
+                top: 2,
+                left: kSettingsCardMarginH,
+                right: kSettingsCardMarginH,
+                bottom: 40 + MediaQuery.paddingOf(context).bottom,
+              ),
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
               children: [
-                // ── 系统提示 ──
-                const Text(
-                  '系统提示 (System Prompt)',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF333333),
-                  ),
+                // ── 1. 系统提示 ──
+                const SettingsSectionHeader(
+                  icon: Icons.chat_bubble_outline_rounded,
+                  title: '系统提示',
+                  subtitle: '自定义 AI 的战斗指令，留空使用默认',
+                  isFirst: true,
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  '自定义 AI 的指令，为空时使用默认战斗提示',
-                  style: TextStyle(fontSize: 12, color: Colors.grey[500]),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _systemCtrl,
-                  maxLines: 6,
-                  decoration: InputDecoration(
-                    hintText: BattleAiService.buildSystemPrompt(),
-                    hintStyle: const TextStyle(
-                      fontSize: 13,
-                      color: Color(0xFFBBBBBB),
-                      height: 1.5,
+                SettingsCard(
+                  children: [
+                    SettingsPromptCard(
+                      icon: Icons.edit_note_rounded,
+                      title: '系统提示词',
+                      controller: _systemCtrl,
+                      hintText: BattleAiService.buildSystemPrompt(),
+                      minLines: 5,
+                      maxLines: 10,
+                      onExpand: _openEnlargeEditor,
                     ),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: Color(0xFFDDDDDD)),
+                  ],
+                ),
+
+                // ── 2. 模型选择（分区标题与行标签分开，避免同名重复）──
+                const SettingsSectionHeader(
+                  icon: Icons.memory_rounded,
+                  title: '模型选择',
+                  subtitle: '选择战斗场景生成使用的模型',
+                ),
+                SettingsCard(
+                  children: [
+                    SettingsSelectRow(
+                      label: '模型',
+                      value: _model,
+                      options: modelOptions,
+                      onChanged: (v) => setState(() => _model = v),
                     ),
-                    contentPadding: const EdgeInsets.all(12),
-                    filled: true,
-                    fillColor: const Color(0xFFFAFAFA),
-                    suffixIcon: IconButton(
-                      icon: const Icon(Icons.open_in_full, size: 18),
-                      tooltip: '放大编辑',
-                      color: const Color(0xFF999999),
-                      onPressed: () => _showEnlargeDialog(),
+                  ],
+                ),
+
+                // ── 3. 生成参数 ──
+                const SettingsSectionHeader(
+                  icon: Icons.tune_rounded,
+                  title: '生成参数',
+                  subtitle: '影响战斗描写的创造性与长度',
+                ),
+                SettingsCard(
+                  children: [
+                    SettingsSliderRow(
+                      label: '温度',
+                      // 旧版副标题「数值越高，输出越有创造性（0.0 ~ 2.0）」：
+                      // 单行副标题要 ≤14 汉字（spec §2.1），这里压缩成
+                      // 「…（0~2.0）」，取值范围信息不丢。
+                      subtitle: '数值越高，输出越有创造性（0~2.0）',
+                      value: _temperature,
+                      min: 0,
+                      max: 2,
+                      divisions: 40,
+                      valueLabel: (v) => v.toStringAsFixed(1),
+                      onChanged: (v) => setState(() => _temperature = v),
                     ),
-                  ),
-                  style: const TextStyle(fontSize: 14, height: 1.5),
-                ),
-                const SizedBox(height: 24),
-
-                // ── 模型选择 ──
-                const Text(
-                  'AI 模型',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF333333),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Column(
-                  children: _models
-                      .map(
-                        (m) => InkWell(
-                          onTap: () => setState(() => _model = m),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 4),
-                            child: Row(
-                              children: [
-                                Radio<String>(
-                                  value: m,
-                                  groupValue: _model,
-                                  activeColor: const Color(0xFFFF5722),
-                                  onChanged: (v) {
-                                    if (v != null) setState(() => _model = v);
-                                  },
-                                ),
-                                const SizedBox(width: 4),
-                                Text(
-                                  DeepSeekModels.toDisplayName(m) ?? m,
-                                  style: const TextStyle(fontSize: 14),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      )
-                      .toList(),
-                ),
-                const SizedBox(height: 24),
-
-                // ── 温度 ──
-                const Text(
-                  '温度 (Temperature)',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF333333),
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '数值越高，输出越有创造性（0.0 ~ 2.0）',
-                  style: TextStyle(fontSize: 12, color: Colors.grey[500]),
-                ),
-                Slider(
-                  value: _temperature,
-                  min: 0.0,
-                  max: 2.0,
-                  divisions: 40,
-                  activeColor: const Color(0xFFFF5722),
-                  label: _temperature.toStringAsFixed(1),
-                  onChanged: (v) => setState(() => _temperature = v),
-                ),
-                Text(
-                  _temperature.toStringAsFixed(1),
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFFFF5722),
-                  ),
-                ),
-                const SizedBox(height: 24),
-
-                // ── 最大长度 ──
-                const Text(
-                  '最大生成长度 (Max Tokens)',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF333333),
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '单次生成的最大 token 数',
-                  style: TextStyle(fontSize: 12, color: Colors.grey[500]),
-                ),
-                Slider(
-                  value: _maxTokens.toDouble(),
-                  min: 512,
-                  max: 8192,
-                  divisions: 15,
-                  activeColor: const Color(0xFFFF5722),
-                  label: _maxTokens.toString(),
-                  onChanged: (v) => setState(() => _maxTokens = v.round()),
-                ),
-                Text(
-                  '$_maxTokens',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFFFF5722),
-                  ),
+                    SettingsSliderRow(
+                      label: '最大生成长度',
+                      subtitle: '单次生成的最大 token 数',
+                      value: _maxTokens.toDouble(),
+                      min: 512,
+                      max: 8192,
+                      divisions: 15,
+                      valueLabel: (v) => v.round().toString(),
+                      onChanged: (v) =>
+                          setState(() => _maxTokens = v.round()),
+                    ),
+                  ],
                 ),
               ],
             ),

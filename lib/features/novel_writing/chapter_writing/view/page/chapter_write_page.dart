@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../../../../../core/config/route_names.dart';
 import '../../../../../core/widgets/keyboard_inset_padding.dart';
 import '../../../shared/dialog_utils.dart';
 import '../../../shared/domain/outline_record.dart';
@@ -160,7 +161,13 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
               tooltip: 'AI 设置',
               onPressed: () {
                 Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const ChapterSettingPage()),
+                  MaterialPageRoute(
+                    // 命名路由：让全局悬浮球在章节写作设置页隐藏（见 route_names.dart）
+                    settings: const RouteSettings(
+                      name: kChapterSettingsRouteName,
+                    ),
+                    builder: (_) => const ChapterSettingPage(),
+                  ),
                 );
               },
             ),

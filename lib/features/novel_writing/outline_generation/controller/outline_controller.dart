@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
+import '../background/outline_background_notification.dart';
 import '../service/outline_service.dart';
 import '../service/outline_meta_refs.dart';
 import '../service/outline_chunk_normalizer.dart';
@@ -109,6 +110,21 @@ class OutlineController extends ChangeNotifier {
   File? _progressFile;
   Future<void>? _runFuture; // 当前正在执行的生成流程，启动新流程前需等待其彻底结束
 
+  /// 页面 detach 前记录的滚动位置：重新挂回同一会话时恢复，
+  /// 让用户点通知回来看到的就是他离开时的那一段生成内容。
+  double? detachedScrollOffset;
+
+  // ─── 后台生成通知（Android 前台服务 + 进度通知） ─────────────
+  /// 原生通知桥；单元测试可注入假实现，非 Android 平台自动 no-op。
+  final OutlineBackgroundNotification _backgroundNotification;
+
+  /// 本次生成流程是否已经向原生发过 start（决定后续该 update 还是 start）。
+  bool _backgroundTaskActive = false;
+
+  /// 通知栏当前是否还展示着这条生成通知（进度态或完成态）。
+  /// 控制器被彻底丢弃时用它决定要不要顺手清掉完成通知。
+  bool _backgroundTaskNotified = false;
+
   // 并行展开状态
   List<_ExpandChunk> _chunks = [];
   int _flushIndex = 0; // 已按序刷入 rawText 的块数
@@ -174,6 +190,28 @@ class OutlineController extends ChangeNotifier {
   String? get lastStepSummary =>
       _stepStats.isEmpty ? null : _stepStats.last.summary;
 
+  /// 是否处于「生成活动中」：正在生成，或停在下述检查点等用户确认后继续。
+  ///
+  /// 后台会话（[OutlineGenerationSession]）据此决定页面关闭后是否保留控制器：
+  /// 保留 = 生成继续（这正是「后台生成」的关键），空闲才销毁。
+  bool get isRunning => loading || paused;
+
+  /// 当前检查点类型的中文名（通知栏「等待确认」文案用）。
+  String get checkpointLabel {
+    switch (checkpointKind) {
+      case 'title':
+        return '书名和核心概念';
+      case 'skeleton':
+        return '粗骨架';
+      case 'events':
+        return '大事件';
+      case 'minor':
+        return '小事件';
+      default:
+        return '生成内容';
+    }
+  }
+
   /// 预估 AI 调用次数（步骤1 + 粗骨架 + 精写批次 + 账本批次 + 展开块数）
   int get estimatedApiCalls {
     final batchSize = _calcBatchSize(majorEventCount);
@@ -190,8 +228,79 @@ class OutlineController extends ChangeNotifier {
   /// 是否存在可续跑的进度草稿（同步判断，文件路径已知时）
   bool get hasPendingDraft => _progressFile?.existsSync() ?? false;
 
-  OutlineController({OutlineService? outlineService})
-    : _outlineService = outlineService ?? OutlineService();
+  OutlineController({
+    OutlineService? outlineService,
+    OutlineBackgroundNotification? backgroundNotification,
+  }) : _outlineService = outlineService ?? OutlineService(),
+       _backgroundNotification =
+           backgroundNotification ?? OutlineBackgroundNotification.instance;
+
+  // ─── 后台通知同步 ────────────────────────────────────────────
+
+  /// 每次状态变化顺带同步一次后台通知（进度条 / 暂停等待 / 完成 / 中断）。
+  ///
+  /// 放在 [notifyListeners] 这一层做，而不是在每个步骤里手写通知调用：
+  /// 生成流程的状态出口只有这一个，所有分支（成功、失败、取消、检查点暂停、
+  /// 断点续跑）都能自动覆盖，后续新增分支也不会漏掉通知更新。
+  /// 非 Android 平台或原生不可用时由 [OutlineBackgroundNotification] 自行 no-op。
+  @override
+  void notifyListeners() {
+    super.notifyListeners();
+    _syncBackgroundNotification();
+  }
+
+  void _syncBackgroundNotification() {
+    final active = loading || paused;
+    if (!active) {
+      if (!_backgroundTaskActive) return;
+      _backgroundTaskActive = false;
+      if (_cancelled) {
+        // 用户主动取消：通知栏里没必要继续留着「生成中」
+        _backgroundTaskNotified = false;
+        unawaited(_backgroundNotification.cancel());
+        return;
+      }
+      final succeeded = error == null;
+      final content = OutlineNotificationContent.finished(
+        bookTitle: title,
+        success: succeeded,
+        message: succeeded ? message : error,
+        charCount: rawText.length,
+      );
+      _backgroundTaskNotified = true;
+      unawaited(_backgroundNotification.finish(content, success: succeeded));
+      return;
+    }
+
+    final content = paused
+        ? OutlineNotificationContent.paused(
+            bookTitle: title,
+            checkpointLabel: checkpointLabel,
+            progress: _notificationProgressPercent,
+          )
+        : OutlineNotificationContent.running(
+            bookTitle: title,
+            // totalSteps 要等 _doRunAll 读到设置后才算出来；刚点开始的那一瞬
+            // 直接用 progressText 会出现「 (1/0)」这种难看的中间态
+            progressText: totalSteps > 0 ? progressText : '正在准备生成...',
+            progress: _notificationProgressPercent,
+            lastStepSummary: lastStepSummary,
+          );
+    _backgroundTaskNotified = true;
+    if (!_backgroundTaskActive) {
+      _backgroundTaskActive = true;
+      // 通知权限是 Android 13+ 的运行时权限：第一次开始生成时顺带申请，
+      // 被拒绝也不影响生成，只是通知栏看不到进度。
+      unawaited(_backgroundNotification.ensurePermission());
+      unawaited(_backgroundNotification.start(content));
+    } else {
+      _backgroundNotification.update(content);
+    }
+  }
+
+  /// 通知进度条百分比：按「步骤完成数」计算（展开阶段每个块是一步）。
+  int get _notificationProgressPercent =>
+      ((progress * 100).round()).clamp(0, 100);
 
   // ─── 对外辅助 ────────────────────────────────────────────────
 
@@ -587,6 +696,13 @@ class OutlineController extends ChangeNotifier {
     }
     _activeTokens.clear();
     _cancelToken?.cancel();
+    // 会话被彻底丢弃时（生成已结束且页面关闭 / 用户从菜单开了新页面），
+    // 通知栏里那条「已完成 / 已中断」的通知也一并清掉，避免留下过时通知。
+    // 生成中的控制器不会被 dispose（会话会保留），所以这里不会误删进度通知。
+    if (_backgroundTaskNotified) {
+      _backgroundTaskNotified = false;
+      unawaited(_backgroundNotification.cancel());
+    }
     genreController.dispose();
     themeController.dispose();
     protagonistController.dispose();
@@ -2760,6 +2876,38 @@ class OutlineController extends ChangeNotifier {
 
   @visibleForTesting
   String get debugStepPreviewForTest => _stepPreview;
+
+  /// 后台通知同步的测试钩子：直接摆出「生成中 / 检查点暂停 / 完成」等状态，
+  /// 再触发一次 notifyListeners，验证通知文案与阶段切换（不发起任何网络请求）。
+  @visibleForTesting
+  void debugSetRunStateForTest({
+    bool? loading,
+    bool? paused,
+    String? title,
+    int? currentStep,
+    int? totalSteps,
+    String? checkpointKind,
+    String? error,
+    String? message,
+  }) {
+    if (loading != null) this.loading = loading;
+    if (paused != null) this.paused = paused;
+    if (title != null) this.title = title;
+    if (currentStep != null) this.currentStep = currentStep;
+    if (totalSteps != null) this.totalSteps = totalSteps;
+    if (checkpointKind != null) this.checkpointKind = checkpointKind;
+    if (error != null) this.error = error;
+    if (message != null) this.message = message;
+    notifyListeners();
+  }
+
+  /// 本次生成是否已向原生发过 start（单测断言通知阶段切换用）。
+  @visibleForTesting
+  bool get debugBackgroundTaskActiveForTest => _backgroundTaskActive;
+
+  /// 通知栏当前是否还挂着这条生成通知（单测断言 dispose 清理用）。
+  @visibleForTesting
+  bool get debugBackgroundTaskNotifiedForTest => _backgroundTaskNotified;
 
   void _resetState() {
     _checkpointSyncTimer?.cancel();

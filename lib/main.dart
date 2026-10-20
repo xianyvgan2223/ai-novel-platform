@@ -1,6 +1,8 @@
 /// lib/main.dart
 /// 应用入口 — 挂载 Riverpod ProviderScope，启动主对话页面
 
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
@@ -8,6 +10,8 @@ import 'package:flutter_displaymode/flutter_displaymode.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'features/chat/presentation/chat_page.dart';
 import 'features/chat/presentation/widgets/chat_floating_ball.dart';
+import 'features/novel_writing/outline_generation/background/outline_background_notification.dart';
+import 'features/novel_writing/outline_generation/view/page/outline_generation_page.dart';
 import 'features/sync/application/sync_poller.dart';
 
 void main() async {
@@ -69,6 +73,69 @@ class MyApp extends StatefulWidget {
 class _MyAppState extends State<MyApp> {
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   final FloatingChatRouteObserver _routeObserver = FloatingChatRouteObserver();
+
+  /// 「大纲生成进度」通知点击的订阅（App 生命周期内常驻）。
+  StreamSubscription<void>? _outlineTapSubscription;
+
+  /// 防止冷启动 pending 标记 + 点击事件同时到达时 push 出两个生成页。
+  bool _openingOutlinePage = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _installOutlineNotificationHandler();
+  }
+
+  /// 通知栏「大纲生成进度」点击 → 回到「一键生成大纲」页面查看当前生成详情。
+  ///
+  /// 两条路径都要处理：
+  /// - App 还活着：原生通过 EventChannel 实时发 tap 事件；
+  /// - App 被杀后点通知冷启动：原生保留 pending 标记，由 [consumeLaunchTap] 取走。
+  /// 生成状态本身在进程级会话里（OutlineGenerationPage 打开时自动挂回），
+  /// 所以这里只负责导航，不传递任何生成数据。
+  Future<void> _installOutlineNotificationHandler() async {
+    _outlineTapSubscription = OutlineBackgroundNotification.instance.onTap.listen(
+      (_) => _openOutlineGenerationPage(),
+    );
+    final launchedByTap = await OutlineBackgroundNotification.instance
+        .consumeLaunchTap();
+    if (launchedByTap) _openOutlineGenerationPage();
+  }
+
+  void _openOutlineGenerationPage() {
+    if (_openingOutlinePage) return;
+    // 生成页已经在前台：不重复 push（原生通知已在点击时 autoCancel 掉）
+    if (OutlineGenerationPage.openInstanceCount > 0) return;
+    _openingOutlinePage = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      void push() {
+        if (!mounted) {
+          _openingOutlinePage = false;
+          return;
+        }
+        final navigator = _navigatorKey.currentState;
+        if (navigator == null) {
+          // 首帧还没建好导航栈：下一帧再试
+          WidgetsBinding.instance.addPostFrameCallback((_) => push());
+          return;
+        }
+        navigator.push(
+          MaterialPageRoute(
+            builder: (_) => const OutlineGenerationPage(fromNotification: true),
+          ),
+        );
+        _openingOutlinePage = false;
+      }
+
+      push();
+    });
+  }
+
+  @override
+  void dispose() {
+    _outlineTapSubscription?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {

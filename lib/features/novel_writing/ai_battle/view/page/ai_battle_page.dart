@@ -1,5 +1,6 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import '../../../../../core/config/route_names.dart';
 import '../../../shared/dialog_utils.dart';
 import '../../controller/battle_controller.dart';
 import '../../model/battle_model.dart';
@@ -203,7 +204,11 @@ class _AiBattlePageState extends State<AiBattlePage> {
             tooltip: '战斗设置',
             onPressed: () async {
               await Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const BattleSettingPage()),
+                MaterialPageRoute(
+                  // 命名路由：让全局悬浮球在战斗设置页隐藏（见 route_names.dart）
+                  settings: const RouteSettings(name: kBattleSettingsRouteName),
+                  builder: (_) => const BattleSettingPage(),
+                ),
               );
               // 返回后触发重建
               setState(() {});

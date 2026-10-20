@@ -3,6 +3,16 @@
     <!-- 自动找电脑 / 判断该走 USB 隧道还是局域网时需要看网络状态 -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <!-- 「一键生成大纲」的后台进度通知：Android 13+ 通知是运行时权限，
+         没有它前台服务的通知不会出现在通知栏（用户看不到进度，也点不回来） -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 前台服务本身：Android 9+ 必须声明 FOREGROUND_SERVICE，
+         Android 14+ 还必须按类型声明 FOREGROUND_SERVICE_DATA_SYNC，两者缺一都会在
+         startForeground 时抛 SecurityException（App 直接崩） -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- 生成期间持 PARTIAL_WAKE_LOCK：锁屏后 CPU 不休眠，流式请求不会被挂起 -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <application
         android:label="deepseekapp"
         android:name="${applicationName}"
@@ -29,6 +39,18 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- 「一键生成大纲」的后台生成前台服务：离开页面/切后台/锁屏后继续生成，
+             并把进度钉在通知栏，点通知回到 MainActivity 的大纲页。
+
+             foregroundServiceType 必须与 Java 侧 startForeground(..., DATA_SYNC) 以及
+             FOREGROUND_SERVICE_DATA_SYNC 权限三者一致，否则 Android 14+ 会拒绝启动。
+             stopWithTask=false：用户从最近任务划掉 App 时先回调 onTaskRemoved 把
+             「生成中」通知收尾（改成「已中断」），再自己 stopSelf，避免通知栏留假进度。 -->
+        <service
+            android:name=".OutlineGenerationService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync"
+            android:stopWithTask="false" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

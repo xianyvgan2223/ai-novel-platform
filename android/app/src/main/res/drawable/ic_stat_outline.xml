@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 「一键生成大纲」进度通知的小图标。
+     通知栏的小图标会被系统当成**纯透明蒙版**渲染（只取 alpha 通道，颜色由系统主题决定），
+     所以这里必须是白色单色、透明背景；不能带彩色/渐变/阴影，否则在状态栏上会糊成一团。
+     图形语义：一个清单外框 + 三行文字（Material 的 list_alt 风格），一眼能认出「大纲/清单」。
+     外框用 evenOdd 填充规则把内圈挖空（两个矩形方向无关，稳定得到空心边框）。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <!-- 空心外框：外圈 3..21，内圈 5..19，evenOdd 相减得到边框 -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M3,3h18v18H3z M5,5h14v14H5z" />
+
+    <!-- 三行「大纲条目」：前两行满宽，最后一行短一点，像一份有层级的提纲 -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M8,8h9v1.8H8z M8,11.1h9v1.8H8z M8,14.2h6v1.8H8z" />
+</vector>

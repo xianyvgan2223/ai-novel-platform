@@ -29,10 +29,6 @@ const double _kMinPanelHeight = 300;
 /// 悬浮面板“展开”进入完整聊天页的路由名（用于识别并隐藏悬浮球）
 const String _kFloatingChatRouteName = '/floating_chat';
 
-/// 这些「整页表单」路由上不显示悬浮球：球停在屏幕右侧固定位置，会压住
-/// 页面右上角的开关与输入框。新增同类页面时把路由名加进这个集合即可。
-const Set<String> _kHideBallRouteNames = {kSettingsRouteName};
-
 /// 在「事件回调 / 一次性读取」里取 MediaQuery，不建立依赖。
 ///
 /// `MediaQuery.of` 会把调用它的那个 Element 注册成依赖方；而悬浮层挂在
@@ -89,7 +85,7 @@ class FloatingChatRouteObserver extends NavigatorObserver {
     if (route.settings.name == _kFloatingChatRouteName) return false;
     // 设置页这类整页表单不显示：球固定停在屏幕右侧（top = 屏幕高 - 200dp），
     // 会压住页面右上角的开关、输入框和分组标题（真机实测每个滚动位置都被盖）。
-    if (_kHideBallRouteNames.contains(route.settings.name)) return false;
+    if (kHideBallRouteNames.contains(route.settings.name)) return false;
     return route is TransitionRoute && route.opaque;
   }
 }

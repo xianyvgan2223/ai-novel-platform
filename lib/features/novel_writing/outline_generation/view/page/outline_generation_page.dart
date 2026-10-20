@@ -1,6 +1,8 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
+import '../../../../../core/config/route_names.dart';
+import '../../background/outline_generation_session.dart';
 import '../../controller/outline_controller.dart';
 import '../../../shared/dialog_utils.dart';
 import '../../../shared/domain/outline_record.dart';
@@ -17,7 +19,24 @@ class OutlineGenerationPage extends StatefulWidget {
   /// 继续后仅重新生成对应下游内容，并另存为新大纲（不覆盖原记录）。
   final String? reeditKind;
 
-  const OutlineGenerationPage({super.key, this.initialRecord, this.reeditKind});
+  /// 是否由「通知栏生成进度」点击打开。
+  ///
+  /// 为 true 时优先挂回会话里「已生成完但还没看过」的那份结果；
+  /// 从菜单普通进入则不挂旧结果（生成中的会话仍会挂回，不允许并发出两份生成）。
+  final bool fromNotification;
+
+  const OutlineGenerationPage({
+    super.key,
+    this.initialRecord,
+    this.reeditKind,
+    this.fromNotification = false,
+  });
+
+  /// 当前打开的生成页实例数。
+  ///
+  /// 通知点击时 app 层据此判断「生成页是否已经在前台」：已在前台就只把 App
+  /// 拉到前面，不再 push 第二个页面；否则从任意页面点通知都能回到生成详情。
+  static int openInstanceCount = 0;
 
   @override
   State<OutlineGenerationPage> createState() => _OutlineGenerationPageState();
@@ -25,7 +44,14 @@ class OutlineGenerationPage extends StatefulWidget {
 
 class _OutlineGenerationPageState extends State<OutlineGenerationPage>
     with WidgetsBindingObserver {
-  final _controller = OutlineController();
+  /// 生成状态由进程级会话持有（见 [OutlineGenerationSession]）：
+  /// 页面关闭时不取消生成，重新进入 / 点通知回来都挂回同一份状态。
+  late OutlineController _controller;
+
+  /// 本页拿到的是已有会话（true）还是新建的（false）。
+  /// 已有会话时不能再用 initialRecord 覆盖输入，也不能重复触发局部重新生成。
+  late bool _attachedExisting;
+
   final _majorEventCountController = TextEditingController();
   final _minorEventCountController = TextEditingController();
   final _checkpointCtrl = TextEditingController();
@@ -73,11 +99,23 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    OutlineGenerationPage.openInstanceCount++;
+    // 历史大纲「重新生成 / 继续生成」必须用全新实例；普通进入优先复用现有
+    // 会话——生成中的会话无论从哪里进都要挂回（不允许并发两份生成），
+    // 已生成完的结果只在「点通知回来」时挂回。
+    final attach = OutlineGenerationSession.instance.acquireForPage(
+      preferExisting: widget.fromNotification,
+    );
+    _controller = attach.controller;
+    _attachedExisting = attach.attachedExisting;
     _controller.addListener(_onChanged);
-    _applyInitialRecord();
+    if (!_attachedExisting) _applyInitialRecord();
     _majorEventCountController.text = '${_controller.majorEventCount}';
     _minorEventCountController.text = '${_controller.minorEventCount}';
-    _isReedit = widget.initialRecord != null && widget.reeditKind != null;
+    _isReedit =
+        !_attachedExisting &&
+        widget.initialRecord != null &&
+        widget.reeditKind != null;
     _isContinue = _isReedit && widget.reeditKind == 'continue';
     if (_isReedit) {
       // 下一帧再启动历史大纲局部重新生成/继续生成，避免 initState 期间触发 setState
@@ -94,6 +132,19 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
       });
     }
     _refreshDraft();
+    _restoreScrollPosition();
+  }
+
+  /// 重新挂回已有会话时恢复离开前的滚动位置（点通知回来能直接看到刚才那段内容）。
+  void _restoreScrollPosition() {
+    final offset = _controller.detachedScrollOffset;
+    if (offset == null || offset <= 0) return;
+    _controller.detachedScrollOffset = null;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_controller.scrollController.hasClients) return;
+      final max = _controller.scrollController.position.maxScrollExtent;
+      _controller.scrollController.jumpTo(offset.clamp(0.0, max));
+    });
   }
 
   /// 将历史大纲的小说设定回填到输入区
@@ -120,7 +171,15 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
     _controller.removeListener(_onChanged);
     // 退出页面前把检查点编辑立即落盘，防止意外返回/退出丢失用户更改
     _controller.flushCheckpointSync();
-    _controller.dispose();
+    // 记录滚动位置后归还会话：生成中 / 检查点等待中会保留控制器（生成继续跑），
+    // 只有空闲（完成/取消/失败）才真正 dispose。
+    if (_controller.scrollController.hasClients) {
+      _controller.detachedScrollOffset = _controller.scrollController.offset;
+    }
+    OutlineGenerationSession.instance.detachFromPage(_controller);
+    if (OutlineGenerationPage.openInstanceCount > 0) {
+      OutlineGenerationPage.openInstanceCount--;
+    }
     _majorEventCountController.dispose();
     _minorEventCountController.dispose();
     _checkpointCtrl.dispose();
@@ -272,7 +331,11 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
             icon: const Icon(Icons.settings, color: Color(0xFF4D6BFE)),
             tooltip: '大纲生成设置',
             onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const OutlineSettingPage()),
+              MaterialPageRoute(
+                // 命名路由：让全局悬浮球在大纲生成设置页隐藏（见 route_names.dart）
+                settings: const RouteSettings(name: kOutlineSettingsRouteName),
+                builder: (_) => const OutlineSettingPage(),
+              ),
             ),
           ),
         ],

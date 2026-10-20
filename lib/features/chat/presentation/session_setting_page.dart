@@ -1,10 +1,25 @@
-/// lib/views/session_setting_page.dart
+/// lib/features/chat/presentation/session_setting_page.dart
 /// 会话设置页 — 每个会话独立的系统提示词配置
+///
+/// 视觉：与主设置页 v2 完全一致（浅灰页面 + 白色圆角卡片 + 卡外分区标题），
+/// 全部组件 / 色值 / 尺寸都从 core/widgets/settings_kit.dart 取，本文件只保留
+/// 「页面结构 + 业务逻辑」：
+/// - 系统提示词是一张焦点输入卡（填充输入框 + 放大编辑），输入时右上角
+///   「已填写 / 未填写」状态实时变化；
+/// - 说明区用 SettingsNote，把「只对当前会话生效」这类长句放进卡片，
+///   不再用页面顶部「大标题 + 说明」的旧式段落。
+///
+/// 行为与改造前一致：initState 从 chatProvider.currentSession 读 systemPrompt；
+/// 保存时 trim → updateSessionSystemPrompt（内存）→ 有 id 时写库；
+/// 失败红底 SnackBar『保存失败』且不 pop，成功主色 SnackBar『会话设置已保存』后 pop。
+library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../data/chat_session_service.dart';
+
+import '../../../core/widgets/settings_kit.dart';
 import '../application/chat_controller.dart'; // chatProvider
+import '../data/chat_session_service.dart';
 
 class SessionSettingsPage extends ConsumerStatefulWidget {
   const SessionSettingsPage({super.key});
@@ -50,7 +65,7 @@ class _SessionSettingsPageState extends ConsumerState<SessionSettingsPage> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text('保存失败'),
-              backgroundColor: Color(0xFFFF4D4F),
+              backgroundColor: kSettingsDanger,
               duration: Duration(seconds: 1),
             ),
           );
@@ -63,7 +78,7 @@ class _SessionSettingsPageState extends ConsumerState<SessionSettingsPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('会话设置已保存'),
-          backgroundColor: Color(0xFF4D6BFE),
+          backgroundColor: kSettingsPrimary,
           duration: Duration(seconds: 1),
         ),
       );
@@ -71,77 +86,69 @@ class _SessionSettingsPageState extends ConsumerState<SessionSettingsPage> {
     }
   }
 
+  /// 放大编辑：把提示词丢进 kit 的 v2 大编辑弹窗。
+  /// 语义与改造前一致：取消不变更，确定才写回 controller。
+  /// 弹窗是直接改 controller（不经过输入框 onChanged），返回后要主动刷一次
+  /// build，否则右上角「已填写 / 未填写」徽标会停在旧状态。
+  Future<void> _openEnlargeEditor() async {
+    await showSettingsPromptDialog(
+      context,
+      title: '编辑系统提示词',
+      controller: _controller,
+      hint: '设定 AI 的角色、语气、回复风格等，留空则无限制',
+    );
+    if (mounted) setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
+    final filled = _controller.text.trim().isNotEmpty;
     return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Color(0xFF333333)),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-        title: const Text(
-          '会话设置',
-          style: TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
-            color: Color(0xFF333333),
-          ),
-        ),
-        centerTitle: true,
-        actions: [
-          TextButton(
-            onPressed: _onSave,
-            child: const Text(
-              '保存',
-              style: TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
-                color: Color(0xFF4D6BFE),
-              ),
-            ),
-          ),
-        ],
-        bottom: const PreferredSize(
-          preferredSize: Size.fromHeight(1),
-          child: Divider(height: 1, color: Color(0xFFEEEEEE)),
-        ),
-      ),
+      backgroundColor: kSettingsPageBg,
+      appBar: SettingsAppBar(title: '会话设置', onSave: _onSave),
       body: ListView(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        padding: EdgeInsets.only(
+          top: 2,
+          left: kSettingsCardMarginH,
+          right: kSettingsCardMarginH,
+          bottom: 40 + MediaQuery.paddingOf(context).bottom,
+        ),
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
         children: [
-          const Text(
-            '系统提示词',
-            style: TextStyle(fontSize: 13, color: Color(0xFF666666)),
+          // ── 1. 会话系统提示（分区标题与卡内标题分开，避免同名重复）──
+          const SettingsSectionHeader(
+            icon: Icons.forum_outlined,
+            title: '会话系统提示',
+            subtitle: '设定 AI 在当前会话中的角色与语气',
+            isFirst: true,
           ),
-          const SizedBox(height: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-            decoration: BoxDecoration(
-              color: const Color(0xFFF5F5F5),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: TextField(
-              controller: _controller,
-              maxLines: 6,
-              minLines: 3,
-              style: const TextStyle(fontSize: 14, color: Color(0xFF333333)),
-              decoration: const InputDecoration(
+          SettingsCard(
+            children: [
+              SettingsPromptCard(
+                icon: Icons.forum_outlined,
+                title: '系统提示词',
+                controller: _controller,
                 hintText: '设定 AI 的角色、语气、回复风格等，留空则无限制',
-                hintStyle: TextStyle(fontSize: 13, color: Color(0xFFBBBBBB)),
-                border: InputBorder.none,
-                contentPadding: EdgeInsets.symmetric(vertical: 10),
-                isDense: true,
+                minLines: 5,
+                maxLines: 10,
+                statusText: filled ? '已填写' : '未填写',
+                statusColor: filled ? kSettingsSuccess : kSettingsValue,
+                statusBackground:
+                    filled ? kSettingsSuccessSoft : kSettingsChipBg,
+                onExpand: _openEnlargeEditor,
+                // 输入时刷新「已填写 / 未填写」徽标；保存仍从 controller 读。
+                onChanged: (_) => setState(() {}),
               ),
-            ),
+            ],
           ),
-          const SizedBox(height: 12),
-          const Text(
-            '每个会话可独立设置系统提示词，用于定制 AI 在当前对话中的行为。',
-            style: TextStyle(fontSize: 12, color: Color(0xFFBBBBBB)),
+
+          // ── 2. 说明 ──
+          const SettingsSectionHeader(
+            icon: Icons.info_outline_rounded,
+            title: '说明',
+          ),
+          const SettingsNote(
+            text: '系统提示词只对当前会话生效，切换会话不会互相影响；保存后下一条消息即生效。',
           ),
         ],
       ),

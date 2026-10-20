@@ -358,7 +358,11 @@ class _ChatPageState extends ConsumerState<ChatPage> {
         onTap: () {
           // 点击标题打开当前会话的设置页
           if (hasSession) {
-            _pushPage(const SessionSettingsPage());
+            // 命名路由：会话设置页右上角全是控件，全局悬浮球要在这页隐藏。
+            _pushPage(
+              const SessionSettingsPage(),
+              routeName: kSessionSettingsRouteName,
+            );
           }
         },
         child: Row(
