@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../shared/data/outline_chapter_db_helper.dart';
 import '../../shared/data/outline_record_db_helper.dart';
+import '../../shared/domain/character_profile.dart';
 import '../../shared/domain/outline_chapter.dart';
 import '../../shared/domain/outline_record.dart';
 import '../../shared/outline_text_sync.dart';
@@ -59,19 +60,30 @@ class OutlineListenController extends ChangeNotifier {
   /// 大纲正文（改标题 / 概要、批量改名都会合并写回其中并持久化）
   String outlineContent;
 
-  /// 落库后的**当前**主角 / 世界观设定。
+  /// 落库后的**当前**小说设定：类型 / 主题 / 主角简介 / 世界观 / 人物档案。
   ///
   /// 为什么单独存一份：[OutlineRecord] 的字段是 final（不可变），而本页的改名
   /// 可以改设定（面板上的「同时改小说设定」）。写回时一律用这里的最新值，
   /// 否则撤回改名时会把设定写回打开页面那一刻的旧值。
+  late String _appliedGenre = outline.genre;
+  late String _appliedTheme = outline.theme;
   late String _appliedProtagonist = outline.protagonist;
   late String _appliedWorldview = outline.worldview;
+
+  /// 人物档案 JSON（`outline_records.characters`）——改名时名字 / 描述 / 能力 /
+  /// 性格里的同名文字都要一起换，否则章节提示词注入的还是旧人设。
+  late String _appliedCharacters = outline.characters;
 
   /// 一个事件一张卡片（顺序与事件序号一致）
   List<OutlineListenSegment> segments = [];
 
   /// 伏笔清单（改名时一并替换，保证提示词注入的那份也跟着改）
-  String foreshadows = '';
+  ///
+  /// **必须从整条记录里取**：列表页传下来的是只含小字段的摘要（见
+  /// `OutlineRecordDbHelper.getAllSummaries`），`foreshadows` / `characters`
+  /// 这类大字段为空；页面读库拿到完整记录后通过 [init] 的 `record` 参数补上。
+  /// 不补的话保存 / 改名时 `_persistOutline` 会把这两列写成空串。
+  late String foreshadows = outline.foreshadows;
 
   /// 朗读与显示设置
   OutlineSpeechSettings settings = const OutlineSpeechSettings();
@@ -121,13 +133,34 @@ class OutlineListenController extends ChangeNotifier {
   /// [reload] 为 true 时还会在后台再读一次库：列表页传下来的章节可能是快照，
   /// 期间「大纲编辑」或章节生成可能已经改过。页面自己刚从库里读完时传 false，
   /// 免得同一个查询紧挨着跑两遍。
-  void init(List<OutlineChapter> chapters, {bool reload = true}) {
+  ///
+  /// [record] 是页面用 `latestOutlineRecord` 读到的**完整记录**（含正文 / 伏笔 /
+  /// 人物档案 / 设定）：列表页传下来的 `OutlineRecord` 只有小字段，
+  /// `content` / `foreshadows` / `characters` 都是空的，不补进来的话
+  /// 保存与改名会把这几列覆盖成空串。
+  void init(
+    List<OutlineChapter> chapters, {
+    bool reload = true,
+    OutlineRecord? record,
+  }) {
+    if (record != null) _adoptRecordFields(record);
     segments = _buildSegments(chapters);
     // 进页面时的状态就是「上一次提交状态」：第一次改动的撤回基线由它提供
     _lastCommitted = _takeSnapshot();
     _loading = false;
     notifyListeners();
     if (reload) unawaited(_reloadFromDb());
+  }
+
+  /// 采用读库拿到的最新记录字段（正文 / 小说设定 / 伏笔 / 人物档案）。
+  void _adoptRecordFields(OutlineRecord record) {
+    outlineContent = record.content;
+    _appliedGenre = record.genre;
+    _appliedTheme = record.theme;
+    _appliedProtagonist = record.protagonist;
+    _appliedWorldview = record.worldview;
+    _appliedCharacters = record.characters;
+    foreshadows = record.foreshadows;
   }
 
   /// 重读最新的章节与正文：进入页面时传入的可能是列表页的快照。
@@ -206,20 +239,36 @@ class OutlineListenController extends ChangeNotifier {
     final ordered = [...chapters]..sort(
       (a, b) => a.eventIndex.compareTo(b.eventIndex),
     );
+    // 卡片上的序号按**大纲正文的写法**算（与「大纲编辑」页同一套）：
+    // 大事件全篇只数大事件；小事件在所属大事件内部从 1 重新计数。不能直接用
+    // eventIndex：它是所有事件的连续序号，大事件也占号，小事件会跳号
+    // （大事件1 后面跟着小事件2、3……），与正文里的「○ 小事件1」对不上。
+    final majorNumbers = majorEventNumbers(ordered);
+    final minorNumbers = minorEventNumbers(ordered);
     final out = <OutlineListenSegment>[];
-    for (final c in ordered) {
-      final segment = _segmentForChapter(c);
+    for (var i = 0; i < ordered.length; i++) {
+      final segment = _segmentForChapter(
+        ordered[i],
+        majorNumber: majorNumbers[i],
+        minorNumber: minorNumbers[i],
+      );
       segment.onChanged = () => _onSegmentChanged(segment);
       out.add(segment);
     }
     return out;
   }
 
-  OutlineListenSegment _segmentForChapter(OutlineChapter c) =>
+  OutlineListenSegment _segmentForChapter(
+    OutlineChapter c, {
+    required int? majorNumber,
+    required int? minorNumber,
+  }) =>
       OutlineListenSegment(
         chapterId: c.id ?? 0,
         eventIndex: c.eventIndex,
         isMajor: c.isMajor,
+        majorNumber: majorNumber,
+        minorNumber: minorNumber,
         title: c.eventTitle,
         summary: c.eventSummary,
         content: c.content,
@@ -674,11 +723,16 @@ class OutlineListenController extends ChangeNotifier {
     _applyingHistory = true;
     try {
       _applySnapshot(toUndo ? entry.baseline : entry.after);
-      // 只有**撤回**才需要动库：改名是即时落库的，撤回它得按反向改名把库一起
-      // 改回去；而「取消撤回」回到的 [after] 正是当初已经写进库的状态，再写一次
-      // 反而会把刚撤回的结果又改回去。
+      // 改名是即时落库的：撤回要按**反向**映射把库（章节行 / 设定）改回去，
+      // 取消撤回则要按**正向**映射再把库改回新名字。两处都不能跳过——
+      // 页面上的文本由快照还原，但库里的行与小说设定不在整页快照里。
       final step = entry.step;
-      if (toUndo && step != null) await _writeRename(step, applyToText: false);
+      if (step != null) {
+        await _writeRename(
+          toUndo ? step : step.reversed(),
+          applyToText: false,
+        );
+      }
       _lastCommitted = _takeSnapshot();
       if (toUndo) {
         _redoEntries.add(entry);
@@ -784,40 +838,74 @@ class OutlineListenController extends ChangeNotifier {
     return saved;
   }
 
-  /// 落库大纲记录（正文 / 设定 / 伏笔清单），并同步「上一次提交状态」。
+  /// 落库大纲记录（正文 / 小说设定 / 伏笔清单 / 人物档案），并同步「上一次提交状态」。
   ///
   /// [_lastCommitted] 统一在这里跟上：正文可能被改名、保存、撤回三处改写，
   /// 任何一处漏掉都会让下一次改动的「改动前」快照错位（撤回退成空大纲）。
   /// **注意它在提前 return 之前就赋值**——章节行还没入库时（新大纲 / 测试环境）
   /// 不落库，但内存里的基线仍然要正确。
-  Future<void> _persistOutline({
-    String? protagonist,
-    String? worldview,
-  }) async {
-    _appliedProtagonist = protagonist ?? _appliedProtagonist;
-    _appliedWorldview = worldview ?? _appliedWorldview;
+  Future<void> _persistOutline() async {
     _lastCommitted = _takeSnapshot();
     final id = outline.id;
     if (id == null) return;
     await OutlineRecordDbHelper().update(id, <String, dynamic>{
       'content': outlineContent,
       'title': outline.title,
-      'genre': outline.genre,
-      'theme': outline.theme,
-      // 设定字段：改名勾了「同时改小说设定」时写新值，否则写当前值（原样回写）
+      // 小说设定：改名勾了「同时改小说设定」时是替换后的新值，否则是原值
+      // （一律写回当前内存值，避免把「打开页面时的快照」盖到用户刚改的设定上）
+      'genre': _appliedGenre,
+      'theme': _appliedTheme,
       'protagonist': _appliedProtagonist,
       'worldview': _appliedWorldview,
+      // 人物档案 / 伏笔清单是大字段：读页面时必须从完整记录补进来，
+      // 原样回写，不然只改个名就把它们清空了
+      'characters': _appliedCharacters,
       'foreshadows': foreshadows,
     });
   }
 
   // ---- 一键改名 ----
 
+  /// 小说设定的可搜索字段（类型 / 主题 / 主角简介 / 世界观 / 人物档案）
+  List<OutlineSettingText> _settingTexts() => outlineSettingTexts(
+    genre: _appliedGenre,
+    theme: _appliedTheme,
+    protagonist: _appliedProtagonist,
+    worldview: _appliedWorldview,
+    characters: _appliedCharacters,
+  );
+
+  /// 人物档案里的姓名（候选专名用：人物简介里的名字也要能出现在候选里）
+  List<String> get characterNames => [
+    for (final c
+        in tryParseCharacterProfiles(_appliedCharacters) ??
+            const <CharacterProfile>[])
+      if (c.name.trim().isNotEmpty) c.name.trim(),
+  ];
+
+  /// 人物档案的提示词文本（AI 识别专名时一并交给模型）
+  String get _charactersPromptText {
+    final buf = StringBuffer();
+    for (final c
+        in tryParseCharacterProfiles(_appliedCharacters) ??
+            const <CharacterProfile>[]) {
+      final name = c.name.trim();
+      if (name.isEmpty) continue;
+      final extras = <String>[
+        if (c.abilities.trim().isNotEmpty) '能力：${c.abilities.trim()}',
+        if (c.personality.trim().isNotEmpty) '性格：${c.personality.trim()}',
+      ];
+      buf.writeln('$name：${c.description.trim()}${extras.isEmpty ? "" : "（${extras.join("；")}）"}');
+    }
+    return buf.toString().trim();
+  }
+
   /// 重算候选专名（离线规则）
   void refreshNameCandidates() {
     nameCandidates = findOutlineNameCandidates(
       content: outlineContent,
       protagonist: _appliedProtagonist,
+      characterNames: characterNames,
     );
     notifyListeners();
   }
@@ -834,6 +922,7 @@ class OutlineListenController extends ChangeNotifier {
         title: outline.title,
         protagonist: _appliedProtagonist,
         worldview: _appliedWorldview,
+        characters: _charactersPromptText,
       );
       final known = nameCandidates.map((c) => c.text).toSet();
       final fresh = found.where((c) => known.add(c.text)).toList();
@@ -848,16 +937,24 @@ class OutlineListenController extends ChangeNotifier {
     return added;
   }
 
-  /// 查一个词在大纲里的命中（替换面板的实时预览用）
-  OutlineRenameResult checkName(String source) =>
-      findRenameHits(outlineContent, source);
+  /// 查一个词在大纲正文 **与小说设定**里的命中（替换面板的实时预览用）。
+  ///
+  /// 设定里的命中单独放在 [OutlineRenameResult.settingHits]：面板要如实显示
+  /// 「世界观 / 主题 / 主角简介 / 人物档案里也有几处」，并在用户勾选
+  /// 「同时改小说设定」后一起替换。
+  OutlineRenameResult checkName(String source) => findRenameHits(
+    outlineContent,
+    source,
+    settings: _settingTexts(),
+  );
 
   /// 一键改名：把 [rules]（原文 → 新文）应用到**大纲正文 + 所有章节行 +
   /// 伏笔清单 + 内存里的卡片**，并即时落库。
   ///
-  /// [updateSettings] 为 true 时连**小说设定**一起改（主角 / 世界观等字段里的
-  /// 同样的名字）。默认 false：设定是作者自己填的，只改大纲不改设定是一个
-  /// 合理的选择（例如设定里写的是笔名 / 别名），所以交给用户勾。
+  /// [updateSettings] 为 true 时连**小说设定**一起改（类型 / 主题 / 主角简介 /
+  /// 世界观 / 人物档案里的同样的名字）——这几处以前完全搜不到也改不了，
+  /// 改名后提示词里注入的还是旧名字。默认 false：设定是作者自己填的，
+  /// 只改大纲不改设定是一个合理的选择（例如设定里写的是笔名 / 别名）。
   ///
   /// 返回替换处数与「反向改名」（供撤回 / 取消撤回原样改回来）。
   Future<({int count, RenameStep reverse})> applyRenameRules(
@@ -884,10 +981,14 @@ class OutlineListenController extends ChangeNotifier {
     final baseline = _takeSnapshot();
     _flushHistory();
 
-    // 处数用改名前的正文统计
+    // 处数按**实际会被替换**的范围统计：勾了「同时改小说设定」才把设定算进来
     var count = 0;
     for (final s in mapping.keys) {
-      count += findRenameHits(outlineContent, s).totalCount;
+      count += findRenameHits(
+        outlineContent,
+        s,
+        settings: updateSettings ? _settingTexts() : const [],
+      ).totalCount;
     }
 
     final step = RenameStep(
@@ -914,8 +1015,9 @@ class OutlineListenController extends ChangeNotifier {
   /// 把 [step] 的改名真正落到「大纲正文 + 伏笔清单 + 设定 + 章节行 + 卡片」上，
   /// 并即时落库。返回它的**反向改名**（用于撤回 / 取消撤回）。
   ///
-  /// [applyToText] 为 false 时**不动内存里的文本**，只按映射重算设定与库：
-  /// 撤回时整页快照已经把文本还原过了，再改一次会让正文来回打转。
+  /// [applyToText] 为 false 时**不动内存里的正文 / 卡片文本**，只按映射重算
+  /// 设定、章节行与库：撤回 / 取消撤回时整页快照已经把这些文本还原过了，
+  /// 再改一次会让正文来回打转（伏笔清单同样已由快照还原，这里也不重复替换）。
   ///
   /// 章节行始终按行 id 改：撤回到的那份快照里卡片文本是对的，但库里的行还写着
   /// 改名后的名字，不写回去下次打开就变回来了。
@@ -942,18 +1044,24 @@ class OutlineListenController extends ChangeNotifier {
         s.renameAll((text) => _replaceAll(text, mapping));
         s.markSaved();
       }
-    } else {
-      foreshadows = renameInOutlineText(
-        foreshadows,
-        mapping,
-        fallbackToPlainText: true,
-      );
     }
 
-    // 设定字段：改了设定才动它，其余字段原样回写
+    // 小说设定：类型 / 主题 / 主角简介 / 世界观 / 人物档案
+    // （勾了「同时改小说设定」才动；撤回 / 取消撤回同样按反向 / 正向映射走这里）
     if (step.includeSettings) {
-      _appliedProtagonist = _replaceAll(_appliedProtagonist, mapping);
-      _appliedWorldview = _replaceAll(_appliedWorldview, mapping);
+      final next = renameSettingValues(
+        genre: _appliedGenre,
+        theme: _appliedTheme,
+        protagonist: _appliedProtagonist,
+        worldview: _appliedWorldview,
+        characters: _appliedCharacters,
+        mapping: mapping,
+      );
+      _appliedGenre = next.genre;
+      _appliedTheme = next.theme;
+      _appliedProtagonist = next.protagonist;
+      _appliedWorldview = next.worldview;
+      _appliedCharacters = next.characters;
     }
 
     // 章节行（改名不动结构，序号不变，按行 id 直接写回）
@@ -978,6 +1086,7 @@ class OutlineListenController extends ChangeNotifier {
     nameCandidates = findOutlineNameCandidates(
       content: outlineContent,
       protagonist: _appliedProtagonist,
+      characterNames: characterNames,
     );
     return RenameStep(
       mapping: reverse,

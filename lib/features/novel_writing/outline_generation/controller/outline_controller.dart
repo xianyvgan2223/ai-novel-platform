@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
 import '../service/outline_service.dart';
+import '../service/outline_meta_refs.dart';
+import '../service/outline_chunk_normalizer.dart';
 import '../../shared/domain/outline_setting.dart';
 import '../../shared/domain/outline_record.dart';
 import '../../shared/outline_event_syntax.dart';
@@ -29,6 +31,12 @@ class OutlineController extends ChangeNotifier {
   final themeController = TextEditingController();
   final protagonistController = TextEditingController();
   final worldViewController = TextEditingController();
+
+  /// 「要求提示词」：用户填写的额外生成要求（如节奏、禁忌、偏好）。
+  /// 各生成步骤（定调/粗骨架/精写/展开）都会注入，见
+  /// [OutlinePromptTemplate.extraRequirementSection]；也随进度草稿与 skeleton 落盘，
+  /// 续跑/局部重新生成时不丢。
+  final requirementController = TextEditingController();
   final scrollController = ScrollController();
   final OutlineService _outlineService;
 
@@ -69,6 +77,15 @@ class OutlineController extends ChangeNotifier {
   _Step1Result? _step1Json;
   _Step2Result? _step2Json;
   String? _coarseSkeletonSnapshot; // 粗骨架规划阶段的原始渲染文本（精写前的标题+定位），供「大事件返回上一步」展示
+
+  /// 粗骨架（结构化）：步骤 2a 生成、或用户在「粗骨检查点」编辑后的结果
+  /// （标题 + 一句话定位）。
+  ///
+  /// 精写（2b）只改 [_step2Json] 里每个大事件的概述，**不再碰这份粗骨**：
+  /// 保存时它与精写后的 step2 一起写进 `outline_records.skeleton` 的 `coarse`
+  /// 字段；「编辑粗骨 / 返回上一步」永远以它为准。用户明确要求后续生成不能
+  /// 改掉粗骨——在此之前这里没有单独留一份，2b 会用精写概述覆盖粗骨定位。
+  List<_Act>? _coarseActs;
   String _systemPrompt = ''; // 本次运行使用的系统提示词（重新展开步骤3时复用）
 
   // ─── 步骤 2 分批精写状态 ─────────────────────────────────────
@@ -232,9 +249,12 @@ class OutlineController extends ChangeNotifier {
           return;
         }
         _step2Json = parsed;
+        // 用户在粗骨检查点编辑的内容就是新的粗骨：单独留档，
+        // 后面精写只改 _step2Json 的概述，不会把它改掉
+        _coarseActs = _cloneActs(parsed.acts);
         _stepPreview = '${_step1Text ?? ''}\n\n${_renderSkeleton()}';
-        _coarseSkeletonSnapshot = _renderSkeleton(); // 编辑后快照同步，返回上一步时展示最新粗骨
-        _upsertBubble('三幕粗骨架', _renderSkeleton());
+        _coarseSkeletonSnapshot = _renderCoarseSkeleton(); // 编辑后快照同步，返回上一步时展示最新粗骨
+        _upsertBubble('三幕粗骨架', _renderCoarseSkeleton());
         _checkpointEdited = true;
       }
     }
@@ -407,7 +427,7 @@ class OutlineController extends ChangeNotifier {
         while (true) {
           final skAction = await _checkpointPause(
             'skeleton',
-            initialText: _coarseSkeletonSnapshot ?? _renderSkeleton(),
+            initialText: _renderCoarseSkeleton(),
             backSource: 'events',
           );
           if (skAction == _CheckpointAction.cancel) {
@@ -476,6 +496,7 @@ class OutlineController extends ChangeNotifier {
         theme: themeController.text,
         protagonist: protagonistController.text,
         worldview: worldViewController.text,
+        extraRequirement: requirementController.text,
       ),
       maxTokens: _outlineSetting.maxTokens,
       temperature: 0.3,
@@ -570,6 +591,7 @@ class OutlineController extends ChangeNotifier {
     themeController.dispose();
     protagonistController.dispose();
     worldViewController.dispose();
+    requirementController.dispose();
     scrollController.dispose();
     super.dispose();
   }
@@ -623,14 +645,17 @@ class OutlineController extends ChangeNotifier {
   }) async {
     _resetState();
     await _deleteProgress();
-    if (!_seedFromRecord(record)) {
+    if (!_seedFromRecord(record, kind: kind)) {
       error = '无法从该大纲解析出三幕结构，可能原大纲内容格式不完整';
       loading = false;
       notifyListeners();
       return;
     }
     _restoreCheckpointKind = kind;
-    _restoreCheckpointText = _renderSkeleton();
+    // 「编辑粗骨」展示粗骨原文；「编辑大事件」展示精写后的大事件
+    _restoreCheckpointText = kind == 'skeleton'
+        ? _renderCoarseSkeleton()
+        : _renderSkeleton();
     await _runAll();
   }
 
@@ -1093,7 +1118,10 @@ class OutlineController extends ChangeNotifier {
         final s = er['summary'] ?? er['position'];
         if (t is! String || t.trim().isEmpty) return null;
         if (s is! String || s.trim().isEmpty) return null;
-        events.add(_Event(title: t.trim(), summary: s.trim()));
+        events.add(_Event(
+          title: t.trim(),
+          summary: OutlineMetaRefCleaner.clean(s.trim()),
+        ));
         total++;
       }
       acts.add(_Act(name: name, events: events));
@@ -1141,10 +1169,16 @@ class OutlineController extends ChangeNotifier {
   }
 
   /// 把用户编辑后的三幕骨架文本解析回 [_Step2Result]。
-  /// 兼容「══ 第一幕：开端 ══」等幕标题与大事件N：标题 行格式，概要支持多行。
+  ///
+  /// **行识别统一走 [classifyOutlineLine]**（与 [_parseRecordActs] 一致）：
+  /// 兼容「══ 第一幕：开端 ══」等幕标题、`══ 大事件N：标题 ══` / 裸 `大事件N：标题` /
+  /// markdown 前缀 / 缩进；大事件概述支持多行，空行保留为段落分隔。
+  ///
+  /// 此前这里另写了一份手写正则（只认行首裸「大事件N：」），连本页检查点编辑器
+  /// 显示的标准写法 `══ 大事件N：标题 ══` 都识别不了——用户编辑粗骨/大事件后点
+  /// 「继续」会报「编辑内容无法解析为三幕结构」。改为统一规则后与生成落库、
+  /// 历史解析、大纲编辑看到的事件完全一致。
   _Step2Result? _parseSkeletonText(String text) {
-    final actRe = RegExp(r'^\s*[══=]+\s*(第一幕|第二幕|第三幕)');
-    final eventRe = RegExp(r'^大事件\s*\d+\s*[：:]\s*(.+)$');
     final acts = <_Act>[];
     _Act? curAct;
     String? curTitle;
@@ -1152,7 +1186,10 @@ class OutlineController extends ChangeNotifier {
     void flushEvent() {
       if (curAct != null && curTitle != null) {
         curAct.events.add(
-          _Event(title: curTitle!, summary: summaryBuf.toString().trim()),
+          _Event(
+            title: curTitle!,
+            summary: OutlineMetaRefCleaner.clean(summaryBuf.toString().trim()),
+          ),
         );
       }
       curTitle = null;
@@ -1160,23 +1197,21 @@ class OutlineController extends ChangeNotifier {
     }
 
     for (final raw in text.split('\n')) {
-      final line = raw.trimRight();
-      final actM = actRe.firstMatch(line);
-      if (actM != null) {
+      final line = classifyOutlineLine(raw);
+      if (line.isAct) {
         flushEvent();
-        curAct = _Act(name: actM.group(1)!, events: []);
+        curAct = _Act(name: line.title, events: []);
         acts.add(curAct);
         continue;
       }
-      final evM = eventRe.firstMatch(line.trim());
-      if (evM != null) {
+      if (line.isMajor) {
         flushEvent();
-        curTitle = evM.group(1)!.trim();
+        curTitle = line.title;
         continue;
       }
-      if (curTitle != null && line.trim().isNotEmpty) {
-        if (summaryBuf.isNotEmpty) summaryBuf.writeln();
-        summaryBuf.write(line.trim());
+      if (curTitle != null) {
+        // 逐行原样累积（含空行）：多段概述 / 段落之间的空行不丢
+        summaryBuf.writeln(raw.trim());
       }
     }
     flushEvent();
@@ -1190,47 +1225,93 @@ class OutlineController extends ChangeNotifier {
   // ─── 历史记录解析（局部重新生成用） ──────────────────────────
 
   /// 从历史大纲记录重建状态：回填设定，解析书名/概念与三幕骨架。
-  /// 优先使用记录中持久化的骨架 JSON（兼容内容不完整的部分保存），
-  /// 旧记录无骨架字段时退回从 content 文本解析。
+  ///
+  /// [kind]：`'skeleton'`（编辑粗骨）/ `'events'`（编辑大事件）；
+  /// - **编辑粗骨**：优先使用记录里单独保存的 `coarse` 粗骨（2a 原文/上次编辑结果），
+  ///   没有 `coarse` 的旧记录才回退正文解析；精写批次清零，继续后按粗骨重新精写；
+  /// - **编辑大事件**：优先从最新 content 解析（「大纲转章节-修改大纲」会就地更新
+  ///   正文，而 Skeleton JSON 是生成时快照），拿不到再用精写后的 step2；
+  ///   有 `coarse` 时也恢复出来，供「返回上一步」展示真正的粗骨。
+  ///
   /// 成功返回 true；格式不完整返回 false（调用方提示错误）。
-  bool _seedFromRecord(OutlineRecord record) {
+  bool _seedFromRecord(OutlineRecord record, {required String kind}) {
     genreController.text = record.genre;
     themeController.text = record.theme;
     protagonistController.text = record.protagonist;
     worldViewController.text = record.worldview;
     _fallbackForeshadows = record.foreshadows;
 
-    // 优先从最新 content 解析三幕骨架：「大纲转章节」的「修改大纲」等操作会就地
-    // 更新记录 content（标题/概要），而持久化的 skeleton JSON 是生成时的快照，
-    // 可能已过期——若继续优先用骨架 JSON，编辑粗骨/大事件时展示与重生成的
-    // 仍是旧的大事件。仅当 content 不完整（如小事件中断后保存、缺少后幕）
-    // 无法解析出完整三幕时，才回退到持久化骨架 JSON。
+    final skeletonMap = _decodeSkeleton(record.skeleton);
+    // 「要求提示词」随 skeleton 保存：局部重新生成时回填，避免用户重新输入
+    final savedRequirement = skeletonMap?['requirement'];
+    requirementController.text = savedRequirement is String
+        ? savedRequirement.trim()
+        : '';
     final titleConcept = _parseRecordTitleConcept(record);
-    final acts = titleConcept == null ? null : _parseRecordActs(record.content);
-    if (titleConcept == null || acts == null || acts.length != 3) {
-      if (!_restoreSkeletonFromRecord(record.skeleton)) return false;
+    final contentActs = titleConcept == null
+        ? null
+        : _parseRecordActs(record.content);
+
+    // 1) 书名/概念：正文优先（可能被编辑过），缺失时用骨架 JSON
+    _step1Json = titleConcept;
+    if (_step1Json == null) {
+      final s1 = skeletonMap?['step1'];
+      if (s1 is Map<String, dynamic>) {
+        final parsed = _Step1Result.fromMap(s1);
+        if (parsed.title.trim().isNotEmpty &&
+            parsed.concept.trim().isNotEmpty) {
+          _step1Json = parsed;
+        }
+      }
+    }
+    if (_step1Json == null) return false;
+
+    // 2) 三幕结构：编辑粗骨优先 coarse；其他情况优先正文解析
+    List<_Act>? acts;
+    if (kind == 'skeleton') {
+      acts = _coarseActsFromSkeletonMap(skeletonMap);
+    }
+    if (acts == null &&
+        contentActs != null &&
+        _isValidSkeletonActs(contentActs)) {
+      acts = contentActs;
+    }
+    if (acts == null) {
+      final s2 = skeletonMap?['step2'];
+      if (s2 is Map<String, dynamic>) {
+        final parsed = _Step2Result.fromMap(s2);
+        if (_isValidSkeletonActs(parsed.acts)) acts = parsed.acts;
+      }
+    }
+    if (acts == null) return false;
+
+    _step2Json = _Step2Result(acts: acts);
+    final coarseActs = _coarseActsFromSkeletonMap(skeletonMap);
+    if (kind == 'skeleton') {
+      // 没有 coarse 的旧记录：把解析出的三幕当作粗骨回退（至少结构一致）
+      _coarseActs = _cloneActs(coarseActs ?? acts);
+      _coarseSkeletonSnapshot = _renderCoarseSkeleton();
+      _refinedBatchCount = 0; // 编辑粗骨后必须重新精写
     } else {
-      _step1Json = titleConcept;
-      _step2Json = _Step2Result(acts: acts);
+      _coarseActs = coarseActs == null ? null : _cloneActs(coarseActs);
+      _coarseSkeletonSnapshot = _coarseActs == null
+          ? null
+          : _renderCoarseSkeleton();
+      _refinedBatchCount = _estimateRefinedBatchCount(acts); // 视为全部精写完成
     }
 
     _step1Text = '书名：《${_step1Json!.title}》\n\n${_step1Json!.concept}';
-    _stepPreview = _step1Text!;
     title = _step1Json!.title;
     majorEventCount = _step2Json!.acts.fold<int>(
       0,
       (s, a) => s + a.events.length,
     );
-    _coarseSkeletonSnapshot = null; // 记录内容无粗骨架原始快照
-    _refinedBatchCount = _estimateRefinedBatchCount(
-      _step2Json!.acts,
-    ); // 视为全部精写完成
     _stepPreview = '${_step1Text ?? ''}\n\n${_renderSkeleton()}';
     _upsertBubble('三幕粗骨架', _renderSkeleton());
     return true;
   }
 
-  /// 从记录持久化的骨架 JSON 重建书名/概念与三幕骨架。
+  /// 从记录持久化的骨架 JSON 重建书名/概念、精写后骨架与粗骨。
   /// 成功返回 true；字段缺失或解析失败返回 false（调用方回退到文本解析）。
   bool _restoreSkeletonFromRecord(String skeleton) {
     final map = _decodeSkeleton(skeleton);
@@ -1244,14 +1325,34 @@ class OutlineController extends ChangeNotifier {
     final step2 = _Step2Result.fromMap(s2);
     if (step1.title.trim().isEmpty ||
         step1.concept.trim().isEmpty ||
-        step2.acts.length != 3 ||
-        step2.acts.any((a) => a.events.isEmpty)) {
+        !_isValidSkeletonActs(step2.acts)) {
       return false;
     }
     _step1Json = step1;
     _step2Json = step2;
+    final coarse = _coarseActsFromSkeletonMap(map);
+    _coarseActs = coarse == null ? null : _cloneActs(coarse);
+    _coarseSkeletonSnapshot = _coarseActs == null
+        ? null
+        : _renderCoarseSkeleton();
+    // 老记录没有 requirement 字段时保持空（不覆盖调用方已设置的值）
+    final savedRequirement = map['requirement'];
+    if (savedRequirement is String && savedRequirement.trim().isNotEmpty) {
+      requirementController.text = savedRequirement.trim();
+    }
     return true;
   }
+
+  /// 记录里单独保存的粗骨（`skeleton.coarse`）；旧记录没有该字段时返回 null。
+  List<_Act>? _coarseActsFromSkeletonMap(Map<String, dynamic>? map) {
+    final c = map?['coarse'];
+    if (c is! Map<String, dynamic>) return null;
+    final coarse = _Step2Result.fromMap(c);
+    return _isValidSkeletonActs(coarse.acts) ? coarse.acts : null;
+  }
+
+  static bool _isValidSkeletonActs(List<_Act> acts) =>
+      acts.length == 3 && acts.every((a) => a.events.isNotEmpty);
 
   /// 解析记录持久化的骨架 JSON；为空或非法时返回 null。
   Map<String, dynamic>? _decodeSkeleton(String skeleton) {
@@ -1275,6 +1376,11 @@ class OutlineController extends ChangeNotifier {
     _fallbackForeshadows = record.foreshadows;
 
     final map = _decodeSkeleton(record.skeleton);
+    // 「要求提示词」随 skeleton 保存，继续生成时回填
+    final savedRequirement = map?['requirement'];
+    requirementController.text = savedRequirement is String
+        ? savedRequirement.trim()
+        : '';
     if (!_restoreSkeletonFromRecord(record.skeleton)) {
       // 旧记录未持久化骨架：退回从 content 文本解析（需内容完整）
       final titleConcept = _parseRecordTitleConcept(record);
@@ -1301,7 +1407,11 @@ class OutlineController extends ChangeNotifier {
       if (minor is int && minor > 0) minorEventCount = minor;
     }
 
-    _coarseSkeletonSnapshot = null;
+    // 粗骨：新记录从 skeleton.coarse 恢复（_restoreSkeletonFromRecord 已处理）；
+    // 旧记录没有粗骨，快照留空，不能拿精写后的骨架冒充
+    _coarseSkeletonSnapshot = _coarseActs == null
+        ? null
+        : _renderCoarseSkeleton();
     _refinedBatchCount = _estimateRefinedBatchCount(acts); // 视为全部精写完成
 
     // 续写状态：已生成的小事件内容与展开块进度
@@ -1314,19 +1424,38 @@ class OutlineController extends ChangeNotifier {
         _ledgerForeshadows
           ..clear()
           ..addAll(
-            (ledger['foreshadows'] as List?)
-                    ?.whereType<Map<String, dynamic>>() ??
-                const [],
+            ((ledger['foreshadows'] as List?)
+                        ?.whereType<Map<String, dynamic>>() ??
+                    const <Map<String, dynamic>>[])
+                .map(
+                  (f) => <String, dynamic>{
+                    ...f,
+                    if (f['content'] is String)
+                      'content': OutlineMetaRefCleaner.clean(
+                        f['content'] as String,
+                      ),
+                    if (f['status'] is String)
+                      'status': OutlineMetaRefCleaner.clean(
+                        f['status'] as String,
+                      ),
+                    if (f['plan'] is String)
+                      'plan': OutlineMetaRefCleaner.clean(
+                        f['plan'] as String,
+                      ),
+                  },
+                ),
           );
         _ledgerCharacters
           ..clear()
           ..addAll(
-            (ledger['characters'] as List?)?.whereType<String>() ?? const [],
+            ((ledger['characters'] as List?)?.whereType<String>() ?? const [])
+                .map(OutlineMetaRefCleaner.clean),
           );
         _ledgerUnresolved
           ..clear()
           ..addAll(
-            (ledger['unresolved'] as List?)?.whereType<String>() ?? const [],
+            ((ledger['unresolved'] as List?)?.whereType<String>() ?? const [])
+                .map(OutlineMetaRefCleaner.clean),
           );
       }
     }
@@ -1387,7 +1516,10 @@ class OutlineController extends ChangeNotifier {
     void flushEvent() {
       if (curAct != null && curTitle != null) {
         curAct.events.add(
-          _Event(title: curTitle!, summary: summaryBuf.toString().trim()),
+          _Event(
+            title: curTitle!,
+            summary: OutlineMetaRefCleaner.clean(summaryBuf.toString().trim()),
+          ),
         );
       }
       curTitle = null;
@@ -1411,9 +1543,10 @@ class OutlineController extends ChangeNotifier {
         minorStarted = false;
         continue;
       }
-      if (line.isMinor ||
-          trimmed.startsWith('○') ||
-          trimmed.startsWith('小事件')) {
+      // 只有被统一规则识别为小事件的行才截断概述：
+      // 概述里以 `-` / `○` 开头的普通行（列表项、说明）属于概况内容，
+      // 与 parseOutlineEvents / 写回逻辑保持同一套边界
+      if (line.isMinor) {
         minorStarted = true; // 进入小事件块，概述收集结束
         continue;
       }
@@ -1449,7 +1582,8 @@ class OutlineController extends ChangeNotifier {
     final r = await _runStructuredStep<_LedgerResult>(
       systemPrompt: OutlinePromptTemplate.jsonSystemPrompt,
       userPrompt: OutlinePromptTemplate.buildLedgerPrompt(
-        batchContent: _renderSkeleton(),
+        // 不带编号：账本条目里一旦写进「第几个事件」，后续每次注入都会传染
+        batchContent: _renderSkeleton(withNumbers: false),
         prevLedgerText: '（基于编辑后的大事件全新提炼）',
       ),
       maxTokens: _outlineSetting.maxTokens,
@@ -1487,12 +1621,15 @@ class OutlineController extends ChangeNotifier {
   }) async {
     if (forceSkeleton) {
       _step2Json = null;
+      _coarseActs = null;
+      _coarseSkeletonSnapshot = null;
       _refinedBatchCount = 0;
       _ledgerForeshadows.clear();
       _ledgerCharacters.clear();
       _ledgerUnresolved.clear();
     }
     if (forceRefine) {
+      // 保留粗骨（_coarseActs）：只重跑精写与账本，粗骨不能被这次重跑改掉
       _refinedBatchCount = 0;
       _ledgerForeshadows.clear();
       _ledgerCharacters.clear();
@@ -1516,6 +1653,7 @@ class OutlineController extends ChangeNotifier {
           majorEventCount: majorEventCount,
           minorEventCount: minorEventCount,
           titleAndConcept: _step1Text!,
+          extraRequirement: requirementController.text,
         ),
         maxTokens: _outlineSetting.maxTokens,
         temperature: 0.3,
@@ -1528,16 +1666,19 @@ class OutlineController extends ChangeNotifier {
         notifyListeners();
         return false;
       }
-      _step2Json = r;
+      final step2 = r!;
+      _step2Json = step2;
       skeletonGenerated = true;
-      final totalEvents = r!.acts.fold<int>(
+      // 粗骨单独留一份（结构化）：精写只改 _step2Json，不能把粗骨定位覆盖掉
+      _coarseActs = _cloneActs(step2.acts);
+      final totalEvents = step2.acts.fold<int>(
         0,
         (sum, a) => sum + a.events.length,
       );
       if (totalEvents != majorEventCount) {
         warning = '生成的大事件数为 $totalEvents，与设定 $majorEventCount 略有差异，已按实际数量继续生成';
       }
-      final totalChars = r.acts.fold<int>(
+      final totalChars = step2.acts.fold<int>(
         0,
         (sum, a) => sum + a.events.fold<int>(0, (s, e) => s + e.summary.length),
       );
@@ -1549,8 +1690,8 @@ class OutlineController extends ChangeNotifier {
         ),
       );
       _stepPreview = '${_step1Text ?? ''}\n\n${_renderSkeleton()}';
-      _coarseSkeletonSnapshot = _renderSkeleton(); // 保存粗骨架原始快照（精写前的标题+定位）
-      _upsertBubble('三幕粗骨架', _renderSkeleton());
+      _coarseSkeletonSnapshot = _renderCoarseSkeleton(); // 保存粗骨架原始快照（精写前的标题+定位）
+      _upsertBubble('三幕粗骨架', _renderCoarseSkeleton());
       await _persistProgress(phase: 2);
       notifyListeners();
     }
@@ -1570,11 +1711,12 @@ class OutlineController extends ChangeNotifier {
       while (true) {
         final action = await _checkpointPause(
           'skeleton',
+          // 粗骨检查点展示的是**粗骨原文**（用户编辑后的标题+定位），不是精写后的版本
           initialText:
-              restoreText ?? _coarseSkeletonSnapshot ?? _renderSkeleton(),
+              restoreText ?? _coarseSkeletonSnapshot ?? _renderCoarseSkeleton(),
           backSource: backSource,
           originalText: (isRestore && restoreText != null)
-              ? (_coarseSkeletonSnapshot ?? _renderSkeleton())
+              ? (_coarseSkeletonSnapshot ?? _renderCoarseSkeleton())
               : null,
           keepEdited: isRestore && restoreText != null,
         );
@@ -1667,10 +1809,11 @@ class OutlineController extends ChangeNotifier {
           worldview: worldViewController.text,
           title: title,
           concept: _step1Json?.concept ?? '',
-          coarseSkeletonText: _renderSkeleton(),
+          coarseSkeletonText: _renderSkeleton(withNumbers: false),
           batchContent: _renderBatchContent(batch),
           ledgerText: _renderLedgerText(),
           prevRefinedContent: prevRefined,
+          extraRequirement: requirementController.text,
         ),
         maxTokens: _outlineSetting.maxTokens,
         temperature: _outlineSetting.temperature,
@@ -1817,24 +1960,45 @@ class OutlineController extends ChangeNotifier {
       final s = er['summary'];
       if (t is! String || t.trim().isEmpty) return null;
       if (s is! String || s.trim().isEmpty) return null;
-      events.add(_Event(title: t.trim(), summary: s.trim()));
+      events.add(
+        _Event(
+          title: t.trim(),
+          summary: OutlineMetaRefCleaner.clean(s.trim()),
+        ),
+      );
     }
     return events;
   }
 
-  /// 解析伏笔账本 JSON
+  /// 解析伏笔账本 JSON。
+  ///
+  /// 每个字段都过一遍编号引用清理：账本会注入后续批次与展开块提示词，
+  /// 「第54章埋的…」一旦留在账本里，会被后面每一块反复继承。
   _LedgerResult? _parseLedger(Map<String, dynamic> map) {
     final fs = map['foreshadows'];
     if (fs is! List) return null;
     final items = <Map<String, dynamic>>[];
     for (final f in fs) {
-      if (f is Map<String, dynamic>) items.add(f);
+      if (f is! Map<String, dynamic>) continue;
+      items.add({
+        ...f,
+        if (f['content'] is String)
+          'content': OutlineMetaRefCleaner.clean(f['content'] as String),
+        if (f['status'] is String)
+          'status': OutlineMetaRefCleaner.clean(f['status'] as String),
+        if (f['plan'] is String)
+          'plan': OutlineMetaRefCleaner.clean(f['plan'] as String),
+      });
     }
     final chars =
-        (map['character_states'] as List?)?.whereType<String>().toList() ??
+        (map['character_states'] as List?)?.whereType<String>().map(
+          OutlineMetaRefCleaner.clean,
+        ).toList() ??
         const <String>[];
     final unres =
-        (map['unresolved'] as List?)?.whereType<String>().toList() ??
+        (map['unresolved'] as List?)?.whereType<String>().map(
+          OutlineMetaRefCleaner.clean,
+        ).toList() ??
         const <String>[];
     return _LedgerResult(
       foreshadows: items,
@@ -1843,32 +2007,41 @@ class OutlineController extends ChangeNotifier {
     );
   }
 
-  /// 渲染某批的粗骨架内容（标题+定位），供精写提示词使用
+  /// 渲染某批的粗骨架内容（标题+定位），供精写提示词使用。
+  ///
+  /// **故意不带「大事件N」编号**：模型看到编号就会把它写进概述（「54与70埋的…」），
+  /// 进而污染后续批次与展开块。批内事件用标题定位即可（标题必须与骨架一致），
+  /// 顺序就是列表顺序。
   String _renderBatchContent(_Step2Batch batch) {
     final buf = StringBuffer();
-    for (int k = 0; k < batch.coarseEvents.length; k++) {
-      final e = batch.coarseEvents[k];
-      buf.writeln('大事件${batch.globalStartIndex + k}：${e.title}');
-      buf.writeln(e.summary);
+    for (final e in batch.coarseEvents) {
+      buf.writeln('标题：${e.title}');
+      buf.writeln('定位：${OutlineMetaRefCleaner.clean(e.summary)}');
       buf.writeln();
     }
     return buf.toString().trim();
   }
 
-  /// 渲染某批精写后的完整内容（标题+概述），供账本抽取提示词使用
+  /// 渲染某批精写后的完整内容（标题+概述），供账本抽取提示词使用。
+  ///
+  /// 同样不带编号（理由见 [_renderBatchContent]）：账本抽取只需要读内容，
+  /// 编号会诱导模型把「第几个事件」写进伏笔条目。
   String _renderRefinedBatchContent(_Step2Batch batch) {
     final events = _step2Json!.acts[batch.actIndex].events;
     final buf = StringBuffer();
     for (int k = 0; k < batch.coarseEvents.length; k++) {
       final e = events[batch.startInAct + k];
-      buf.writeln('大事件${batch.globalStartIndex + k}：${e.title}');
-      buf.writeln(e.summary);
+      buf.writeln('标题：${e.title}');
+      buf.writeln('概述：${OutlineMetaRefCleaner.clean(e.summary)}');
       buf.writeln();
     }
     return buf.toString().trim();
   }
 
-  /// 渲染已积累的伏笔账本文本，供后续批次提示词注入
+  /// 渲染已积累的伏笔账本文本，供后续批次与展开提示词注入。
+  ///
+  /// 渲染前再清一遍编号引用（[OutlineMetaRefCleaner]）：续跑恢复的旧账本 /
+  /// 旧记录里可能带着「第54章」这类历史数据，不能让它重新进入提示词。
   String _renderLedgerText() {
     if (_ledgerForeshadows.isEmpty &&
         _ledgerCharacters.isEmpty &&
@@ -1880,20 +2053,22 @@ class OutlineController extends ChangeNotifier {
       buf.writeln('伏笔：');
       for (final f in _ledgerForeshadows) {
         buf.writeln(
-          '- ${f['content']}（状态：${f['status'] ?? '已埋'} / 计划：${f['plan'] ?? '未定'}）',
+          '- ${OutlineMetaRefCleaner.clean('${f['content'] ?? ''}')}'
+          '（状态：${OutlineMetaRefCleaner.clean('${f['status'] ?? '已埋'}')}'
+          ' / 计划：${OutlineMetaRefCleaner.clean('${f['plan'] ?? '未定'}')}）',
         );
       }
     }
     if (_ledgerCharacters.isNotEmpty) {
       buf.writeln('角色状态：');
       for (final c in _ledgerCharacters) {
-        buf.writeln('- $c');
+        buf.writeln('- ${OutlineMetaRefCleaner.clean(c)}');
       }
     }
     if (_ledgerUnresolved.isNotEmpty) {
       buf.writeln('未解决悬念：');
       for (final u in _ledgerUnresolved) {
-        buf.writeln('- $u');
+        buf.writeln('- ${OutlineMetaRefCleaner.clean(u)}');
       }
     }
     return buf.toString().trim();
@@ -2052,6 +2227,7 @@ class OutlineController extends ChangeNotifier {
                   nextChunk.globalStartIndex,
                   nextChunk.globalEndIndex,
                 ),
+          extraRequirement: requirementController.text,
         ),
         maxTokens: _outlineSetting.maxTokens,
         temperature: _outlineSetting.temperature,
@@ -2283,82 +2459,47 @@ class OutlineController extends ChangeNotifier {
     return newText;
   }
 
-  /// 归一化单个展开块：解析模型输出中的「大事件」块，
-  /// 丢弃跨块回显/块内重复的事件，按骨架标题匹配到正确位置（容忍乱序/轻微改写），
-  /// 最后把标题行统一重写为「══ 大事件N：标题 ══」，编号为全局正确序号。
-  /// 这是 App 侧的最后一道防线：无论模型如何跳号/重复，最终大纲编号始终连续且唯一。
+  /// 归一化单个展开块：以**骨架**为准合成最终内容。
+  ///
+  /// 之前的做法是「模型输出什么就落什么」：模型会把步骤 3 的概述重写/压缩，
+  /// 少写一个块时后续编号还会错位、整条大事件消失（用户报的「没有把大事件的
+  /// 东西全部的内容包括到」）。现在：
+  /// - 标题、大事件概述一律来自骨架（精写后 / 用户编辑后的版本），原样完整输出；
+  /// - 只采用模型输出里的小事件部分（从「○ 小事件N」开始），它写的大事件概述、
+  ///   开场白、markdown 残留都不进正文；
+  /// - 按骨架位置编号：缺块也补上概述，编号连续、每条大事件都在。
   void _normalizeChunkBuffer(_ExpandChunk chunk) {
-    final expected = _chunkExpectedTitles(chunk);
+    // 先清「第N章 / 大事件N / N与M埋的」这类编号引用（标题行跳过）：
+    // 放在最前面，后面即便因格式不完整放弃归一化，正文也已经是干净的，
+    // 不会再作为「前一块已展开内容」注入下一块提示词。
+    chunk.buffer = OutlineMetaRefCleaner.cleanBodyText(chunk.buffer);
+    final expected = _chunkExpectedEvents(chunk);
     if (expected.isEmpty) return;
-    final blocks = _splitEventBlocks(chunk.buffer);
-    if (blocks.isEmpty) return;
-    // 存在无标题的块（模型未按格式输出标题行）时不归一化，原样保留避免破坏内容
-    if (blocks.any((b) => b.title.trim().isEmpty)) return;
-
-    // 第一遍：丢弃标题重复的块。规则：
-    // - 跨块回显（标题不在本块预期标题中，且此前已输出过）→ 丢弃
-    // - 块内重复（本块内已输出过相同标题）→ 丢弃
-    // - 骨架自身存在重复标题时（AI 粗骨架的合法输出），标题属于本块预期 → 保留
-    final unique = <_EventBlock>[];
-    final seen = <String>{..._seenEventTitles};
-    final expectedKeys = {for (final t in expected) _normalizeTitleKey(t)};
-    for (final b in blocks) {
-      final key = _normalizeTitleKey(b.title);
-      if (key.isEmpty) continue;
-      if (seen.contains(key) && !expectedKeys.contains(key)) continue;
-      if (unique.any((u) => _normalizeTitleKey(u.title) == key)) continue;
-      seen.add(key);
-      unique.add(b);
-    }
-    if (unique.isEmpty) {
-      // 极端情况：全部被判为重复，保留第一个块避免内容完全丢失
-      unique.add(blocks.first);
-    }
-
-    // 第二遍：按骨架标题匹配正确位置；未匹配的块按顺序填充剩余空位，
-    // 超出预期数量的块（模型多输出的）自然丢弃
-    final used = <int>{};
-    final placed = <(int, _EventBlock)>[];
-    final unmatched = <_EventBlock>[];
-    for (final b in unique) {
-      final key = _normalizeTitleKey(b.title);
-      int? pos;
-      for (int i = 0; i < expected.length; i++) {
-        if (!used.contains(i) && _normalizeTitleKey(expected[i]) == key) {
-          pos = i;
-          break;
-        }
-      }
-      if (pos != null) {
-        used.add(pos);
-        placed.add((pos, b));
-      } else {
-        unmatched.add(b);
-      }
-    }
-    for (final b in unmatched) {
-      for (int i = 0; i < expected.length; i++) {
-        if (!used.contains(i)) {
-          used.add(i);
-          placed.add((i, b));
-          break;
-        }
-      }
-    }
-    placed.sort((a, b) => a.$1.compareTo(b.$1));
-
-    // 记录本次实际输出的标题，供后续块去重回显
-    for (final (_, b) in placed) {
-      _seenEventTitles.add(_normalizeTitleKey(b.title));
-    }
+    final normalized = OutlineChunkNormalizer.normalize(
+      expected: expected,
+      modelText: chunk.buffer,
+      alreadySeenTitles: _seenEventTitles,
+    );
+    // 模型输出完全切不出大事件块（格式不可用）：保留原文，避免整块内容丢失
+    if (normalized == null) return;
 
     final buf = StringBuffer();
-    for (int k = 0; k < placed.length; k++) {
-      final (_, b) = placed[k];
-      buf.writeln(formatMajorHeader(chunk.globalStartIndex + k, b.title));
-      final body = b.body.trim();
-      if (body.isNotEmpty) buf.writeln(body);
+    for (final ev in normalized) {
+      buf.writeln(
+        formatMajorHeader(chunk.globalStartIndex + ev.position, ev.title),
+      );
+      if (ev.summary.isNotEmpty) {
+        buf.writeln(OutlineMetaRefCleaner.cleanBodyText(ev.summary));
+      }
+      if (ev.minorsBody.isNotEmpty) {
+        buf.writeln();
+        buf.writeln(ev.minorsBody);
+      }
       buf.writeln();
+    }
+    // 记录本块实际输出的标题，供后续块去重回显
+    for (final ev in normalized) {
+      _seenEventTitles.add(OutlineChunkNormalizer.titleKey(ev.title));
     }
     // 块内小事件写法也在这里统一：本块文本会作为「前一块已展开的详细内容」
     // 注入下一块提示词，模型看到粗体/异常写法会照抄（自增强），
@@ -2366,50 +2507,22 @@ class OutlineController extends ChangeNotifier {
     chunk.buffer = normalizeMinorHeaders(buf.toString().trim());
   }
 
-  /// 解析模型输出文本中的事件块：大事件标题行开始，正文到下一个大事件标题行结束。
-  ///
-  /// 只按「大事件」切块（小事件行属于块内正文），识别走统一规则——此前这里只认
-  /// ══/裸标题，模型写成 markdown 时整块切不出来，_normalizeChunkBuffer 便直接
-  /// 放弃归一化、把 markdown 原样落库，这正是格式分叉保留到最终大纲的原因。
-  List<_EventBlock> _splitEventBlocks(String text) {
-    final blocks = <_EventBlock>[];
-    String? curTitle;
-    final bodyBuf = StringBuffer();
-    void flush() {
-      if (curTitle != null) {
-        blocks.add(_EventBlock(curTitle!, bodyBuf.toString().trim()));
-      }
-      curTitle = null;
-      bodyBuf.clear();
-    }
-
-    for (final raw in text.split('\n')) {
-      final head = classifyOutlineLine(raw);
-      if (head.isMajor) {
-        flush();
-        curTitle = stripNestedEventPrefix(head.title);
-        continue;
-      }
-      if (curTitle != null) bodyBuf.writeln(raw.trimRight());
-    }
-    flush();
-    return blocks;
+  /// 本块骨架中的预期大事件（标题 + 概述，按全局序号顺序），
+  /// 供 [_normalizeChunkBuffer] 以骨架为准合成内容。
+  List<({String title, String summary})> _chunkExpectedEvents(
+    _ExpandChunk chunk,
+  ) {
+    final acts = _step2Json?.acts;
+    if (acts == null) return const [];
+    final all = <_Event>[for (final a in acts) ...a.events];
+    final start = chunk.globalStartIndex - 1;
+    if (start < 0 || start >= all.length) return const [];
+    final end = chunk.globalEndIndex.clamp(start, all.length);
+    return [
+      for (final e in all.sublist(start, end))
+        (title: e.title, summary: OutlineMetaRefCleaner.clean(e.summary)),
+    ];
   }
-
-  /// 本块骨架中的预期事件标题（按顺序），来源：_buildChunks 生成的块内容
-  List<String> _chunkExpectedTitles(_ExpandChunk chunk) {
-    final titles = <String>[];
-    for (final line in chunk.content.split('\n')) {
-      final head = classifyOutlineLine(line);
-      if (head.isMajor) titles.add(stripNestedEventPrefix(head.title));
-    }
-    return titles;
-  }
-
-  /// 标题归一化键：去空白、去结尾标点，用于标题比对
-  String _normalizeTitleKey(String title) => title
-      .replaceAll(RegExp(r'\s+'), '')
-      .replaceAll(RegExp(r'[。．.！？!?，,、；;：:…~～]+$'), '');
 
   /// 断点续跑恢复时，把 rawText 中已刷入内容的大事件标题预置进去重集合，
   /// 防止后续块回显续跑前已生成的事件。
@@ -2418,7 +2531,7 @@ class OutlineController extends ChangeNotifier {
     for (final line in rawText.split('\n')) {
       final head = classifyOutlineLine(line);
       if (head.isMajor) {
-        _seenEventTitles.add(_normalizeTitleKey(head.title));
+        _seenEventTitles.add(OutlineChunkNormalizer.titleKey(head.title));
       }
     }
   }
@@ -2457,8 +2570,24 @@ class OutlineController extends ChangeNotifier {
     return '${_step1Text ?? ''}\n\n完整三幕骨架：\n${_renderSkeleton()}$ledgerPart';
   }
 
-  String _renderSkeleton() {
-    final acts = _step2Json?.acts ?? const <_Act>[];
+  /// 渲染三幕骨架（标题 + 概述）。
+  ///
+  /// [withNumbers] 为 false 时**不带「大事件N」编号**（精写批次提示词用）：
+  /// 模型看到编号就会在概述里写「54与70埋的…」，进而污染后续批次。
+  /// 展开（步骤 3）与界面展示仍需要编号（标题行格式 / 用户定位），默认带。
+  String _renderSkeleton({bool withNumbers = true}) =>
+      _renderActs(_step2Json?.acts ?? const <_Act>[], withNumbers: withNumbers);
+
+  /// 渲染**粗骨架**（2a 原始/用户编辑后的标题 + 一句话定位）。
+  ///
+  /// 精写后的 [_renderSkeleton] 会显示精写概述；「粗骨检查点 / 返回上一步 /
+  /// 编辑粗骨」要用这一份，别拿精写版本冒充粗骨。
+  /// 旧草稿/旧记录没有保存粗骨时退回精写骨架，避免检查点出现空白文本。
+  String _renderCoarseSkeleton() => _coarseActs == null
+      ? _renderSkeleton()
+      : _renderActs(_coarseActs!);
+
+  String _renderActs(List<_Act> acts, {bool withNumbers = true}) {
     const headers = ['══ 第一幕：开端 ══', '══ 第二幕：发展 ══', '══ 第三幕：高潮&结局 ══'];
     final buf = StringBuffer();
     var idx = 0;
@@ -2466,13 +2595,25 @@ class OutlineController extends ChangeNotifier {
       buf.writeln(i < headers.length ? headers[i] : '══ 第${i + 1}幕 ══');
       for (final e in acts[i].events) {
         idx++;
-        buf.writeln(formatMajorHeader(idx, e.title));
-        buf.writeln(e.summary);
+        buf.writeln(withNumbers ? formatMajorHeader(idx, e.title) : e.title);
+        buf.writeln(OutlineMetaRefCleaner.clean(e.summary));
         buf.writeln();
       }
     }
     return buf.toString().trim();
   }
+
+  /// 复制一组幕/事件：精写会用新的 `_Event` 替换 `_step2Json` 里的事件，
+  /// 粗骨必须持有自己的副本，否则会被一起改掉。
+  static List<_Act> _cloneActs(List<_Act> acts) => [
+    for (final a in acts)
+      _Act(
+        name: a.name,
+        events: [
+          for (final e in a.events) _Event(title: e.title, summary: e.summary),
+        ],
+      ),
+  ];
 
   /// 渲染指定全局序号范围内的大事件粗骨架（标题+定位），
   /// 当前只渲染「紧接着的下一块」，供展开提示词做「向后铺垫、平滑过渡」。
@@ -2485,7 +2626,7 @@ class OutlineController extends ChangeNotifier {
         idx++;
         if (idx < fromGlobalIndex || idx > toGlobalIndex) continue;
         buf.writeln(formatMajorHeader(idx, e.title));
-        buf.writeln(e.summary);
+        buf.writeln(OutlineMetaRefCleaner.clean(e.summary));
         buf.writeln();
       }
     }
@@ -2529,6 +2670,9 @@ class OutlineController extends ChangeNotifier {
     // 编号并统一写法；只重写标题行，概要与正文逐字节保留。赋值回 rawText，
     // 保证同一次会话里「续跑 / 继续生成」看到的前文也是规范格式。
     rawText = normalizeOutlineText(rawText);
+    // 最后一道保险：正文里绝不允许留下「第N章 / 大事件N / N与M埋的」这类编号引用
+    // （提示词已明令禁止 + 各生成环节已清理，这里兜底保证落库内容干净）
+    rawText = OutlineMetaRefCleaner.cleanBodyText(rawText);
     final ledger = _renderLedgerText();
     return OutlineRecord(
       title: title,
@@ -2542,12 +2686,19 @@ class OutlineController extends ChangeNotifier {
       foreshadows: ledger == '（暂无）' && _fallbackForeshadows.isNotEmpty
           ? _fallbackForeshadows
           : ledger,
-      // 持久化三幕骨架（书名/概念 + 精写后大事件 + 续写所需进度信息），
-      // 供小事件未生成完就保存的历史大纲也能重新编辑粗骨/大事件，或继续生成
+      // 持久化三幕骨架（书名/概念 + 精写后大事件 + 粗骨 + 续写所需进度信息），
+      // 供小事件未生成完就保存的历史大纲也能重新编辑粗骨/大事件，或继续生成。
+      // `coarse` 是 2a 生成/用户编辑后的粗骨原文：2b 精写会覆盖 `step2`，
+      // 但绝不能把粗骨一起改掉（「编辑粗骨」/「返回上一步」都以它为准）。
       skeleton: _step1Json != null && _step2Json != null
           ? jsonEncode({
               'step1': _step1Json!.toJson(),
               'step2': _step2Json!.toJson(),
+              if (_coarseActs != null)
+                'coarse': _Step2Result(acts: _coarseActs!).toJson(),
+              // 「要求提示词」随记录保存，局部重新生成时自动回填输入框
+              if (requirementController.text.trim().isNotEmpty)
+                'requirement': requirementController.text.trim(),
               'minorEventCount': minorEventCount,
               'majorEventCount': majorEventCount,
               'completedChunks': _completedChunkCount,
@@ -2576,6 +2727,40 @@ class OutlineController extends ChangeNotifier {
     return groups;
   }
 
+  // ─── 测试辅助（@visibleForTesting） ─────────────────────────
+
+  /// 直接注入步骤 1/2/粗骨状态，用于单测「skeleton 落库是否保留粗骨」
+  @visibleForTesting
+  void debugSeedSkeletonForTest({
+    required Map<String, dynamic> step1,
+    required Map<String, dynamic> step2,
+    Map<String, dynamic>? coarse,
+  }) {
+    _step1Json = _Step1Result.fromMap(step1);
+    _step2Json = _Step2Result.fromMap(step2);
+    _coarseActs = coarse == null ? null : _Step2Result.fromMap(coarse).acts;
+  }
+
+  @visibleForTesting
+  String debugSkeletonJsonForTest() => _buildRecord().skeleton;
+
+  /// 检查点编辑文本 → 三幕骨架 JSON（null 表示解析失败）
+  @visibleForTesting
+  Map<String, dynamic>? debugParseSkeletonTextForTest(String text) =>
+      _parseSkeletonText(text)?.toJson();
+
+  @visibleForTesting
+  String debugRenderCoarseSkeletonForTest() => _renderCoarseSkeleton();
+
+  @visibleForTesting
+  bool debugSeedFromRecordForTest(
+    OutlineRecord record, {
+    required String kind,
+  }) => _seedFromRecord(record, kind: kind);
+
+  @visibleForTesting
+  String get debugStepPreviewForTest => _stepPreview;
+
   void _resetState() {
     _checkpointSyncTimer?.cancel();
     _checkpointSyncTimer = null;
@@ -2595,6 +2780,7 @@ class OutlineController extends ChangeNotifier {
     _step1Text = null;
     _step1Json = null;
     _step2Json = null;
+    _coarseActs = null;
     _coarseSkeletonSnapshot = null;
     _systemPrompt = '';
     _stepPreview = '';
@@ -2672,6 +2858,7 @@ class OutlineController extends ChangeNotifier {
         'theme': themeController.text,
         'protagonist': protagonistController.text,
         'worldview': worldViewController.text,
+        'requirement': requirementController.text,
         'majorEventCount': majorEventCount,
         'minorEventCount': minorEventCount,
         'phase': phase ?? _currentPhase(),
@@ -2680,6 +2867,10 @@ class OutlineController extends ChangeNotifier {
         'step1Text': _step1Text ?? '',
         'step1Json': _step1Json?.toJson(),
         'step2Json': _step2Json?.toJson(),
+        // 结构化粗骨（2a 原始/用户编辑后）：续跑后「返回上一步 / 编辑粗骨」用它，
+        // 不再用经过精写的 step2Json 冒充粗骨
+        if (_coarseActs != null)
+          'coarseJson': _Step2Result(acts: _coarseActs!).toJson(),
         'coarseSkeletonSnapshot': _coarseSkeletonSnapshot ?? '',
         'refinedBatchCount': _refinedBatchCount,
         'ledger': {
@@ -2737,6 +2928,8 @@ class OutlineController extends ChangeNotifier {
         data['protagonist'] as String? ?? protagonistController.text;
     worldViewController.text =
         data['worldview'] as String? ?? worldViewController.text;
+    requirementController.text =
+        data['requirement'] as String? ?? requirementController.text;
     majorEventCount = data['majorEventCount'] as int? ?? majorEventCount;
     minorEventCount = data['minorEventCount'] as int? ?? minorEventCount;
     title = data['title'] as String? ?? '';
@@ -2754,6 +2947,21 @@ class OutlineController extends ChangeNotifier {
           (data['coarseSkeletonSnapshot'] as String?)?.trim().isNotEmpty == true
           ? data['coarseSkeletonSnapshot'] as String
           : null;
+      // 结构化粗骨：优先用草稿里单独存的 coarseJson；旧草稿没有该字段时，
+      // 用粗骨渲染快照文本反解（两者都没有就只能退回精写后的 step2Json）
+      final cj = data['coarseJson'];
+      if (cj is Map<String, dynamic>) {
+        final coarse = _Step2Result.fromMap(cj);
+        if (_isValidSkeletonActs(coarse.acts)) {
+          _coarseActs = coarse.acts;
+        }
+      }
+      if (_coarseActs == null && _coarseSkeletonSnapshot != null) {
+        final parsed = _parseSkeletonText(_coarseSkeletonSnapshot!);
+        if (parsed != null && _isValidSkeletonActs(parsed.acts)) {
+          _coarseActs = parsed.acts;
+        }
+      }
       _refinedBatchCount = data['refinedBatchCount'] as int? ?? 0;
       final ledger = data['ledger'];
       if (ledger is Map<String, dynamic>) {
@@ -2892,7 +3100,9 @@ class _Event {
 
   factory _Event.fromMap(Map<String, dynamic> m) => _Event(
     title: m['title'] as String? ?? '',
-    summary: m['summary'] as String? ?? '',
+    // 旧记录 / 旧进度里的概述可能带着「第N章」这类编号引用：恢复时先清掉，
+    // 避免重新生成时又被注入提示词、继续传染到新内容
+    summary: OutlineMetaRefCleaner.clean(m['summary'] as String? ?? ''),
   );
 }
 
@@ -2925,13 +3135,6 @@ class _ExpandChunk {
     required this.globalStartIndex,
     required this.globalEndIndex,
   });
-}
-
-/// 模型输出中解析出的事件块：标题 + 正文（含小事件展开等后续内容）
-class _EventBlock {
-  final String title;
-  final String body;
-  _EventBlock(this.title, this.body);
 }
 
 /// 步骤 2 的一个精写批次：某幕内连续的一段大事件（粗骨架定位）

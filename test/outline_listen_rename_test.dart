@@ -1,6 +1,9 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:deepseekapp/features/novel_writing/outline_listening/service/outline_rename.dart';
+import 'package:deepseekapp/features/novel_writing/shared/domain/character_profile.dart';
 
 /// 「一键改名」的核心：在大纲正文里定位 + 替换。
 ///
@@ -30,13 +33,13 @@ void main() {
     test('标题与概要都命中，并说清是哪个事件的哪一处', () {
       final result = findRenameHits(sample, '李云飞');
 
-      // 大事件1 概要 1 处；小事件2（全篇第 2 个事件）概要 1 处；
-      // 小事件3 概要 1 处
+      // 大事件1 概要 1 处；小事件1（大事件1 名下第 1 个）概要 1 处；
+      // 小事件2（大事件1 名下第 2 个）概要 1 处
       expect(result.totalCount, 3);
       expect(result.eventCount, 3);
       expect(
         result.hits.map((h) => h.where).toSet(),
-        {'大事件1 · 概要', '小事件2 · 概要', '小事件3 · 概要'},
+        {'大事件1 · 概要', '小事件1 · 概要', '小事件2 · 概要'},
       );
       // 事件之外的说明文字不算（它不属于任何事件，改了也说不清改在哪儿）
       expect(
@@ -44,6 +47,41 @@ void main() {
         isFalse,
         reason: '事件之外的正文不该被改名命中',
       );
+    });
+
+    test('序号与大纲正文同一套：大事件只数大事件、小事件每个大事件内从 1 起', () {
+      final result = findRenameHits(
+        '''
+══ 大事件1：李云飞传 ══
+  概要有李云飞。
+
+○ 小事件1：李云飞拜师
+  概要有李云飞。
+
+○ 小事件2：下山
+  概要有李云飞。
+
+══ 大事件2：李云飞归来 ══
+  概要有李云飞。
+
+○ 小事件1：重逢
+  概要有李云飞。
+''',
+        '李云飞',
+      );
+
+      // 不能拿「所有事件的连续序号」当定位：那样大事件2 会显示成「大事件4」、
+      // 小事件会显示成「小事件2 / 小事件3 / 小事件5」，用户在大纲里找不到对应那条。
+      expect(result.hits.map((h) => h.where).toList(), [
+        '大事件1 · 标题',
+        '大事件1 · 概要',
+        '小事件1 · 标题',
+        '小事件1 · 概要',
+        '小事件2 · 概要',
+        '大事件2 · 标题',
+        '大事件2 · 概要',
+        '小事件1 · 概要',
+      ]);
     });
 
     test('标题里的命中单独标出来', () {
@@ -207,6 +245,19 @@ void main() {
       expect(index.events.map((e) => e.title), ['初入江湖', '拜师', '下山']);
     });
 
+    test('同时带「大纲正文写法」的序号：大事件只数大事件、小事件每个大事件内从 1 起', () {
+      final index = OutlineTextIndex.of('''
+══ 大事件1：甲 ══
+○ 小事件1：乙
+○ 小事件2：丙
+══ 大事件2：丁 ══
+○ 小事件1：戊
+''');
+      expect(index.events.map((e) => e.index), [1, 2, 3, 4, 5]); // 全篇连续
+      expect(index.events.map((e) => e.majorNumber), [1, null, null, 2, null]);
+      expect(index.events.map((e) => e.minorNumber), [null, 1, 2, null, 1]);
+    });
+
     test('概要区到下一个事件 / 幕标题为止', () {
       final index = OutlineTextIndex.of(sample);
       final major = index.events.first;
@@ -215,6 +266,128 @@ void main() {
       expect(body, contains('他遇到了师父玄机子'));
       // 事件之外的说明文字不在概要区里
       expect(body, isNot(contains('设定')));
+    });
+  });
+
+  group('小说设定（类型 / 主题 / 主角简介 / 世界观 / 人物档案）', () {
+    String charactersJson() => jsonEncode([
+      const CharacterProfile(
+        name: '顾泽',
+        description: '顾泽在H市醒来，失去了记忆',
+        abilities: '低武世界第一的内力',
+        personality: '冷静',
+        isProtagonist: true,
+      ).toJson(),
+      const CharacterProfile(
+        name: '白小飞',
+        description: '白小飞是顾泽的同伴',
+        personality: '热血',
+      ).toJson(),
+    ]);
+
+    List<OutlineSettingText> settingFields() => outlineSettingTexts(
+      genre: '都市异能',
+      theme: '失去记忆的剑客寻找身世',
+      protagonist: '顾泽，低武世界天下第一',
+      worldview: 'H市被尸兄占据，顾泽来自低武世界',
+      characters: charactersJson(),
+    );
+
+    test('字段清单覆盖五个设定项，人物档案按人物、按字段展开', () {
+      final fields = settingFields();
+      expect(
+        fields.map((f) => f.label),
+        containsAll(<String>[
+          '类型',
+          '主题',
+          '主角简介',
+          '世界观',
+          '人物档案 · 顾泽 · 姓名',
+          '人物档案 · 顾泽 · 描述',
+          '人物档案 · 顾泽 · 能力',
+          '人物档案 · 顾泽 · 性格',
+          '人物档案 · 白小飞 · 描述',
+        ]),
+      );
+      // 空字段不列（白小飞没有能力）
+      expect(fields.any((f) => f.label == '人物档案 · 白小飞 · 能力'), isFalse);
+    });
+
+    test('搜设定里的词：主题 / 主角简介 / 世界观 / 人物简介都能命中', () {
+      final fields = settingFields();
+      expect(findSettingHits(fields, '身世').map((h) => h.label), ['主题']);
+      expect(findSettingHits(fields, '尸兄').map((h) => h.label), ['世界观']);
+      expect(findSettingHits(fields, '醒来').map((h) => h.label), [
+        '人物档案 · 顾泽 · 描述',
+      ]);
+      expect(findSettingHits(fields, '低武世界第一').map((h) => h.label), [
+        '人物档案 · 顾泽 · 能力',
+      ]);
+    });
+
+    test('findRenameHits 同时给出正文与设定命中（以前设定里的词完全搜不到）', () {
+      final result = findRenameHits(
+        '══ 大事件1：甲 ══\n  顾泽在H市醒来。',
+        '顾泽',
+        settings: settingFields(),
+      );
+      expect(result.outlineCount, 1);
+      expect(result.eventCount, 1);
+      // 主角简介 1 + 世界观 1 + 人物档案·顾泽·姓名 1 +
+      // 人物档案·顾泽·描述 1 + 人物档案·白小飞·描述 1 = 5
+      expect(result.settingCount, 5);
+      expect(result.totalCount, 6);
+      expect(result.hasSettingHits, isTrue);
+    });
+
+    test('替换设定：类型 / 主题 / 主角简介 / 世界观与人物档案一起改', () {
+      final next = renameSettingValues(
+        genre: '都市异能',
+        theme: '顾泽寻找身世',
+        protagonist: '顾泽，低武世界天下第一',
+        worldview: 'H市被尸兄占据，顾泽来自低武世界',
+        characters: charactersJson(),
+        mapping: const {'顾泽': '苏哲'},
+      );
+      expect(next.genre, '都市异能');
+      expect(next.theme, '苏哲寻找身世');
+      expect(next.protagonist, '苏哲，低武世界天下第一');
+      expect(next.worldview, 'H市被尸兄占据，苏哲来自低武世界');
+
+      final profiles = tryParseCharacterProfiles(next.characters)!;
+      expect(profiles.map((c) => c.name), ['苏哲', '白小飞']);
+      expect(profiles.first.description, contains('苏哲'));
+      expect(profiles.first.isProtagonist, isTrue); // 主角标记不能被替换弄丢
+      expect(profiles[1].description, contains('苏哲')); // 别的角色简介里也一起换
+    });
+
+    test('人物档案 JSON 坏掉时原样返回，绝不拿空档案覆盖', () {
+      const broken = '{这不是合法 JSON';
+      expect(tryParseCharacterProfiles(broken), isNull);
+      expect(outlineSettingTexts(characters: broken), isEmpty);
+
+      final next = renameSettingValues(
+        genre: '',
+        theme: '',
+        protagonist: '',
+        worldview: '',
+        characters: broken,
+        mapping: const {'顾泽': '苏哲'},
+      );
+      expect(next.characters, broken);
+    });
+
+    test('没有人物档案（空串）时也能正常替换设定字段', () {
+      final next = renameSettingValues(
+        genre: '',
+        theme: '顾泽寻找身世',
+        protagonist: '',
+        worldview: '',
+        characters: '',
+        mapping: const {'顾泽': '苏哲'},
+      );
+      expect(next.theme, '苏哲寻找身世');
+      expect(next.characters, '');
     });
   });
 }

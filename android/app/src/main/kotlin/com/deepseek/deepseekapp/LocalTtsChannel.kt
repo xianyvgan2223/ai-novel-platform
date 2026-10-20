@@ -246,7 +246,7 @@ class LocalTtsChannel(private val context: Context) {
                     try {
                         for ((index, chunk) in chunks.withIndex()) {
                             if (activeSeq != seq) break
-                            val audio = engine.generate(chunk, SPEAKER_ID, speed.coerceIn(0.5f, 3.0f))
+                            val audio = engine.generate(chunk, SPEAKER_ID, speed.coerceIn(0.5f, 4.0f))
                             val samples = audio.samples
                             if (samples == null || samples.isEmpty()) continue
                             if (index == 0) {

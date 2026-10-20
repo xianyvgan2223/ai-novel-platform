@@ -12,8 +12,11 @@ import '../../service/outline_rename.dart';
 /// 1. 打开就按离线规则列出**候选专名**（人物设定里的名字 + 姓氏 / 地名后缀规则）；
 /// 2. 点候选即加入替换表，也可以手填任何词（不限于人名地名）；
 /// 3. 每一条都实时显示「会影响多少个事件、替换多少处」，并列出具体位置
-///    （大事件3 · 标题 / 小事件5 · 概要 + 上下文），确认后才真的改；
-/// 4. 点「一键替换」后**大纲正文、章节行、伏笔清单、当前页面**一起改完并即时落库。
+///    （大事件3 · 标题 / 小事件1 · 概要 + 上下文）；**小说设定**（类型 / 主题 /
+///    主角简介 / 世界观 / 人物档案）里的命中也一起列出——勾上「同时改小说设定」
+///    才一起替换，没勾时给一条可点的提示，不让用户以为「改不了」；
+/// 4. 点「一键替换」后**大纲正文、章节行、伏笔清单、小说设定、当前页面**一起
+///    改完并即时落库。
 ///
 /// 替换规则是**纯文本替换**（中文没有词的边界），所以面板上如实显示
 /// 「实际替换掉的文字」，让用户自己判断会不会误伤（例如「李云」也会命中
@@ -60,10 +63,12 @@ class _OutlineRenameSheetState extends State<OutlineRenameSheet> {
   /// 是否正在替换（替换期间按钮置灰，避免连点两次）
   bool _replacing = false;
 
-  /// 是否连**小说设定**一起改（主角 / 世界观等字段里的同名文字）。
+  /// 是否连**小说设定**一起改（类型 / 主题 / 主角简介 / 世界观 / 人物档案）。
   ///
   /// 为什么默认关：设定是作者自己填的，只改大纲不改设定是合理选择
   /// （设定里可能写的是笔名 / 别名）；而默认开着会顺手改掉用户没打算动的设定。
+  /// 搜索时**设定里的命中照常显示**（并给「点这里一起改」的入口），
+  /// 用户不会因为开关是关的就以为「设定里的词搜不到 / 改不了」。
   bool _renameSettings = false;
 
   OutlineListenController get _controller => widget.controller;
@@ -156,24 +161,44 @@ class _OutlineRenameSheetState extends State<OutlineRenameSheet> {
       return;
     }
     final previews = _previews;
-    final total = previews.values.fold(0, (sum, p) => sum + p.totalCount);
+    final outlineTotal = previews.values.fold(
+      0,
+      (sum, p) => sum + p.outlineCount,
+    );
+    final settingTotal = previews.values.fold(
+      0,
+      (sum, p) => sum + p.settingCount,
+    );
+    // 实际会替换的处数：勾了「同时改小说设定」才把设定算进来
+    final total = outlineTotal + (_renameSettings ? settingTotal : 0);
     if (total == 0) {
-      _toast('这些名字在当前大纲里没有找到，无需替换');
+      _toast(
+        settingTotal > 0
+            ? '大纲正文里没有找到，小说设定里有 $settingTotal 处；勾选「同时改小说设定」后才会一起替换'
+            : '这些名字在当前大纲与小说设定里都没有找到，无需替换',
+      );
       return;
     }
     final events = <int>{};
     for (final p in previews.values) {
       events.addAll(p.hits.map((h) => h.event.index));
     }
+    // 逐项说清会改哪里：正文 / 设定分开列，避免用户在确认框里看不出影响面
+    final scope = <String>[
+      if (outlineTotal > 0)
+        '大纲正文与事件卡片：替换 $outlineTotal 处（涉及 ${events.length} 个事件）',
+      if (_renameSettings && settingTotal > 0)
+        '小说设定：替换 $settingTotal 处（类型 / 主题 / 主角简介 / 世界观 / 人物档案）',
+      '伏笔清单：同步替换其中的同名文字',
+    ];
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('确认一键改名'),
         content: Text(
-          '将在 ${events.length} 个事件里替换 $total 处文字：\n\n'
+          '${scope.join('\n')}\n\n'
           '${rules.map((r) => '「${r.source}」→「${r.target}」').join('\n')}\n\n'
-          '大纲正文、事件标题与概要、伏笔清单${_renameSettings ? "、小说设定（主角 / 世界观）" : ""}'
-          '会一起改掉，改完立即保存，不能再撤销。',
+          '改完立即保存，不能再撤销。',
         ),
         actions: [
           TextButton(
@@ -236,9 +261,13 @@ class _OutlineRenameSheetState extends State<OutlineRenameSheet> {
 
   Widget _sheet(Map<String, OutlineRenameResult> previews) {
     final valid = _validRules;
-    final total = valid.fold(
+    final outlineTotal = valid.fold(
       0,
-      (sum, r) => sum + (previews[r.source]?.totalCount ?? 0),
+      (sum, r) => sum + (previews[r.source]?.outlineCount ?? 0),
+    );
+    final settingTotal = valid.fold(
+      0,
+      (sum, r) => sum + (previews[r.source]?.settingCount ?? 0),
     );
     final events = <int>{};
     for (final r in valid) {
@@ -270,7 +299,7 @@ class _OutlineRenameSheetState extends State<OutlineRenameSheet> {
               ],
             ),
           ),
-          _footer(valid, total, events.length),
+          _footer(valid, outlineTotal, settingTotal, events.length),
         ],
       ),
     );
@@ -294,7 +323,7 @@ class _OutlineRenameSheetState extends State<OutlineRenameSheet> {
           const SizedBox(width: 8),
           const Expanded(
             child: Text(
-              '人名 / 地名 / 门派名，整篇一起换',
+              '人名 / 地名 / 门派名，正文与小说设定一起换',
               style: TextStyle(fontSize: 11, color: Color(0xFF999999)),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
@@ -429,10 +458,7 @@ class _OutlineRenameSheetState extends State<OutlineRenameSheet> {
                     const SizedBox(width: 4),
                     Expanded(
                       child: Text(
-                        preview == null || preview.isEmpty
-                            ? '大纲里没有找到「${rule.source}」'
-                            : '会影响 ${preview.eventCount} 个事件、替换 ${preview.totalCount} 处'
-                                  '${expanded ? "（点一下收起）" : "（点一下看是哪儿）"}',
+                        _previewText(rule.source, preview, expanded: expanded),
                         style: TextStyle(
                           fontSize: 10.5,
                           color: preview == null || preview.isEmpty
@@ -453,10 +479,67 @@ class _OutlineRenameSheetState extends State<OutlineRenameSheet> {
                 ),
               ),
             ),
+            // 设定里命中了、但开关还没勾：给一条可点的提示，别让用户以为「改不了」
+            if (preview != null &&
+                preview.settingCount > 0 &&
+                !_renameSettings)
+              _settingsHint(preview),
             if (expanded && preview != null && !preview.isEmpty)
               _hitList(preview),
           ],
         ],
+      ),
+    );
+  }
+
+  /// 影响预览文案：正文命中按事件算；小说设定里的命中单独说明
+  /// （勾了「同时改小说设定」才会一起替换）。
+  String _previewText(
+    String source,
+    OutlineRenameResult? preview, {
+    required bool expanded,
+  }) {
+    if (preview == null || preview.isEmpty) {
+      return '大纲与小说设定里都没有找到「$source」';
+    }
+    final parts = <String>[];
+    if (preview.outlineCount > 0) {
+      parts.add(
+        '会影响 ${preview.eventCount} 个事件、替换 ${preview.outlineCount} 处',
+      );
+    }
+    if (preview.settingCount > 0) {
+      parts.add(
+        _renameSettings
+            ? '小说设定 ${preview.settingCount} 处一起改'
+            : '小说设定另有 ${preview.settingCount} 处',
+      );
+    }
+    return '${parts.join('；')}${expanded ? "（点一下收起）" : "（点一下看是哪儿）"}';
+  }
+
+  /// 设定里命中、但「同时改小说设定」没勾时的提示：点一下直接勾上
+  Widget _settingsHint(OutlineRenameResult preview) {
+    return InkWell(
+      onTap: () => setState(() => _renameSettings = true),
+      child: Padding(
+        padding: const EdgeInsets.only(left: 17, top: 1, bottom: 2),
+        child: Row(
+          children: [
+            const Icon(Icons.tune, size: 12, color: Color(0xFF4D6BFE)),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Text(
+                '小说设定里也命中 ${preview.settingCount} 处（点这里勾选「同时改小说设定」一起改）',
+                style: const TextStyle(
+                  fontSize: 10,
+                  height: 1.35,
+                  color: Color(0xFF4D6BFE),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -507,6 +590,52 @@ class _OutlineRenameSheetState extends State<OutlineRenameSheet> {
             Text(
               '还有 ${preview.hits.length - shown.length} 处未列出',
               style: const TextStyle(fontSize: 10, color: Color(0xFF999999)),
+            ),
+          // 小说设定里的命中（类型 / 主题 / 主角简介 / 世界观 / 人物档案）
+          for (final hit in preview.settingHits)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 3),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // 标签可能很长（人物档案 · 某某某 · 描述）：窄屏上省略而不是溢出
+                  Flexible(
+                    child: Text(
+                      hit.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF4D6BFE),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      '${hit.context}（${hit.count} 处）',
+                      style: const TextStyle(
+                        fontSize: 10.5,
+                        height: 1.35,
+                        color: Color(0xFF666666),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          if (preview.hasSettingHits && !_renameSettings)
+            const Padding(
+              padding: EdgeInsets.only(top: 2),
+              child: Text(
+                '小说设定里的命中要勾选下方「同时改小说设定」才会替换',
+                style: TextStyle(
+                  fontSize: 10,
+                  height: 1.35,
+                  color: Color(0xFFBBBBBB),
+                ),
+              ),
             ),
         ],
       ),
@@ -629,9 +758,27 @@ class _OutlineRenameSheetState extends State<OutlineRenameSheet> {
 
   Widget _footer(
     List<({String source, String target})> rules,
-    int total,
+    int outlineTotal,
+    int settingTotal,
     int eventCount,
   ) {
+    // 实际会替换的处数：勾了「同时改小说设定」才把设定算进来
+    final replaceable = outlineTotal + (_renameSettings ? settingTotal : 0);
+    final String status;
+    if (rules.isEmpty) {
+      status = '填写「原名称 → 新名称」后即可一键替换';
+    } else if (replaceable == 0) {
+      status = settingTotal > 0
+          ? '小说设定里有 $settingTotal 处；勾选下方「同时改小说设定」后一起替换'
+          : '当前没有可替换的内容';
+    } else {
+      final parts = <String>[
+        if (outlineTotal > 0) '大纲 $outlineTotal 处（$eventCount 个事件）',
+        if (_renameSettings && settingTotal > 0) '设定 $settingTotal 处',
+      ];
+      status = '将替换 ${parts.join(" + ")}；改完立即保存'
+          '${!_renameSettings && settingTotal > 0 ? "（设定另有 $settingTotal 处未包含）" : ""}';
+    }
     return SafeArea(
       top: false,
       child: Container(
@@ -643,19 +790,18 @@ class _OutlineRenameSheetState extends State<OutlineRenameSheet> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              rules.isEmpty
-                  ? '填写「原名称 → 新名称」后即可一键替换'
-                  : '将替换 $total 处，涉及 $eventCount 个事件；改完立即保存',
+              status,
               style: TextStyle(
                 fontSize: 11.5,
-                color: total > 0
+                color: replaceable > 0
                     ? const Color(0xFF666666)
                     : const Color(0xFF999999),
               ),
             ),
             // 设定字段里的同名文字要不要一起改，交给用户定：
             // 候选里「人物设定里的主角」无视出现次数一直在榜上，
-            // 改名后它还挂着旧名字，往往就是因为设定没跟着改
+            // 改名后它还挂着旧名字，往往就是因为设定没跟着改。
+            // V4.9.3 起覆盖范围扩到类型 / 主题 / 主角简介 / 世界观 / 人物档案。
             InkWell(
               onTap: () => setState(() => _renameSettings = !_renameSettings),
               child: Padding(
@@ -677,13 +823,12 @@ class _OutlineRenameSheetState extends State<OutlineRenameSheet> {
                     const SizedBox(width: 4),
                     const Expanded(
                       child: Text(
-                        '同时改小说设定（主角 / 世界观里的同名文字）',
+                        '同时改小说设定（类型 / 主题 / 主角简介 / 世界观 / 人物档案）',
                         style: TextStyle(
-                          fontSize: 11.5,
+                          fontSize: 11,
+                          height: 1.35,
                           color: Color(0xFF666666),
                         ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
                   ],
@@ -711,7 +856,7 @@ class _OutlineRenameSheetState extends State<OutlineRenameSheet> {
                 Expanded(
                   flex: 2,
                   child: ElevatedButton.icon(
-                    onPressed: (_replacing || rules.isEmpty || total == 0)
+                    onPressed: (_replacing || rules.isEmpty || replaceable == 0)
                         ? null
                         : _apply,
                     icon: _replacing

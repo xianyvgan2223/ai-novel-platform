@@ -599,4 +599,104 @@ void main() {
       c.dispose();
     });
   });
+
+  group('小事件序号：与大纲正文的「○ 小事件N」同一套', () {
+    /// 全篇：大事件1 甲 / 小事件1 乙 / 小事件2 丙 / 大事件2 丁 / 小事件1 戊
+    final whole = [
+      '══ 大事件1：甲 ══',
+      '甲的概要',
+      '',
+      '○ 小事件1：乙',
+      '乙的概要',
+      '',
+      '○ 小事件2：丙',
+      '丙的概要',
+      '',
+      '══ 大事件2：丁 ══',
+      '丁的概要',
+      '',
+      '○ 小事件1：戊',
+      '戊的概要',
+    ].join('\n');
+
+    OutlineChapter ch(int id, int index, String type, String title) =>
+        OutlineChapter(
+          id: id,
+          outlineId: 7,
+          eventIndex: index,
+          eventType: type,
+          eventTitle: title,
+          eventSummary: '$title的概要',
+        );
+
+    test('全篇五个事件：小事件在大事件名下从 1 起，大事件没有小事件序号', () {
+      final c = OutlineEditController(OutlineRecord(title: 'T', content: whole));
+      c.init([
+        ch(1, 1, 'major', '甲'),
+        ch(2, 2, 'minor', '乙'),
+        ch(3, 3, 'minor', '丙'),
+        ch(4, 4, 'major', '丁'),
+        ch(5, 5, 'minor', '戊'),
+      ]);
+      addTearDown(c.dispose);
+
+      expect(c.minorNumberOfDraft(c.drafts[0]), isNull); // 大事件没有小事件序号
+      expect(c.minorNumberOfDraft(c.drafts[1]), 1);
+      expect(c.minorNumberOfDraft(c.drafts[2]), 2);
+      expect(c.minorNumberOfDraft(c.drafts[4]), 1); // 大事件2 名下的第 1 个
+    });
+
+    test('只勾选一章时，序号仍按全篇算（不是「本页第 1 张」）', () {
+      // 只把「戊」交给编辑页（章节列表页的「编辑」按钮就是只传一章）
+      final c = OutlineEditController(OutlineRecord(title: 'T', content: whole));
+      c.init([ch(5, 5, 'minor', '戊')]);
+      addTearDown(c.dispose);
+
+      expect(c.drafts.length, 1);
+      // 它是大事件2 名下的第 1 个小事件——不能因为页面上只有这一张就显示「第 1 节」
+      // 的巧合值；关键是它不能变成大事件1 名下的编号，也不能拿 eventIndex(5)
+      expect(c.minorNumberOfDraft(c.drafts[0]), 1);
+    });
+
+    test('新增小事件后，后面小事件的序号当场顺延；跨大事件重新从 1 起', () {
+      final c = OutlineEditController(OutlineRecord(title: 'T', content: whole));
+      c.init([
+        ch(1, 1, 'major', '甲'),
+        ch(2, 2, 'minor', '乙'),
+        ch(3, 3, 'minor', '丙'),
+        ch(4, 4, 'major', '丁'),
+        ch(5, 5, 'minor', '戊'),
+      ]);
+      addTearDown(c.dispose);
+
+      // 在「乙」上方插入一个小事件（默认它落在「甲」名下）
+      c.addEvent(index: 1, isMajor: false, title: '新小事件');
+
+      expect(
+        c.drafts.map((d) => d.title).toList(),
+        ['甲', '新小事件', '乙', '丙', '丁', '戊'],
+      );
+      expect(c.minorNumberOfDraft(c.drafts[1]), 1);
+      expect(c.minorNumberOfDraft(c.drafts[2]), 2);
+      expect(c.minorNumberOfDraft(c.drafts[3]), 3);
+      expect(c.minorNumberOfDraft(c.drafts[5]), 1); // 大事件2 名下仍是第 1 个
+    });
+
+    test('删掉大事件后，名下小事件并入上一个大事件并重新编号', () {
+      final c = OutlineEditController(OutlineRecord(title: 'T', content: whole));
+      c.init([
+        ch(1, 1, 'major', '甲'),
+        ch(2, 2, 'minor', '乙'),
+        ch(3, 3, 'minor', '丙'),
+        ch(4, 4, 'major', '丁'),
+        ch(5, 5, 'minor', '戊'),
+      ]);
+      addTearDown(c.dispose);
+
+      c.deleteEvent(c.drafts[3]); // 删掉大事件「丁」（名下戊不跟着删）
+      expect(c.drafts.map((d) => d.title).toList(), ['甲', '乙', '丙', '戊']);
+      // 戊现在归到「甲」名下，成为第 3 个小事件（正文里也是这么解析的）
+      expect(c.minorNumberOfDraft(c.drafts[3]), 3);
+    });
+  });
 }

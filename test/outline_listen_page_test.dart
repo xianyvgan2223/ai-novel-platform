@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -5,6 +7,7 @@ import 'package:deepseekapp/features/novel_writing/outline_listening/controller/
 import 'package:deepseekapp/features/novel_writing/outline_listening/service/tts_engine.dart';
 import 'package:deepseekapp/features/novel_writing/outline_listening/service/tts_engine_fake.dart';
 import 'package:deepseekapp/features/novel_writing/outline_listening/view/page/outline_listen_page.dart';
+import 'package:deepseekapp/features/novel_writing/shared/domain/character_profile.dart';
 import 'package:deepseekapp/features/novel_writing/shared/domain/outline_chapter.dart';
 import 'package:deepseekapp/features/novel_writing/shared/domain/outline_record.dart';
 
@@ -28,13 +31,21 @@ void main() {
     WidgetTester tester, {
     String content = '',
     String protagonist = '李云飞',
+    String genre = '',
+    String theme = '',
+    String worldview = '',
+    String characters = '',
   }) async {
     final engine = FakeTtsEngine();
     final ctrl = OutlineListenController(
       OutlineRecord(
         title: '测试小说',
         content: content,
+        genre: genre,
+        theme: theme,
         protagonist: protagonist,
+        worldview: worldview,
+        characters: characters,
         foreshadows: '',
       ),
       engine: engine,
@@ -82,6 +93,10 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('拜师'), findsOneWidget);
     expect(find.text('李云飞拜入青云宗。'), findsOneWidget);
+    // 卡片上的小事件序号是「所属大事件内部第几个」，不是全篇事件序号：
+    // 这是大事件1 名下的第 1 个小事件，必须显示小事件1（不能是 2）
+    expect(find.text('小事件1'), findsOneWidget);
+    expect(find.text('小事件2'), findsNothing);
   });
 
   testWidgets('点某张卡片的播放按钮从这一个事件开始读', (tester) async {
@@ -91,7 +106,7 @@ void main() {
     await tester.tap(cardPlay(1));
     await tester.pumpAndSettle();
 
-    expect(env.engine.spoken.single, startsWith('小事件2，拜师'));
+    expect(env.engine.spoken.single, startsWith('小事件1，拜师'));
     expect(find.text('2/2'), findsOneWidget);
     expect(find.text('朗读中'), findsOneWidget);
   });
@@ -115,7 +130,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('下一个事件'));
     await tester.pumpAndSettle();
-    expect(env.engine.spoken.last, startsWith('小事件2，拜师'));
+    expect(env.engine.spoken.last, startsWith('小事件1，拜师'));
 
     await tester.tap(find.byTooltip('上一个事件'));
     await tester.pumpAndSettle();
@@ -651,7 +666,119 @@ void main() {
       // 展开后逐处列出「事件定位 + 上下文 + 命中处数」
       // 两行概要各命中一次，因此是同一定位下的两条命中
       expect(find.text('大事件1 · 概要'), findsNWidgets(2));
-      expect(find.textContaining('（1 处）'), findsNWidgets(2));
+      // 2 条正文命中 + 1 条设定命中
+      expect(find.textContaining('（1 处）'), findsNWidgets(3));
+      // 小说设定里的命中也会列出来（默认主角简介就是「李云飞」），
+      // 并给一条「点这里勾选一起改」的提示——以前这里完全搜不到设定里的词
+      expect(find.text('主角简介'), findsOneWidget);
+      expect(find.textContaining('小说设定里也命中 1 处'), findsOneWidget);
+      expect(find.textContaining('小说设定另有 1 处'), findsOneWidget);
+    });
+
+    testWidgets('小说设定里的词也能搜到并替换（以前世界观 / 主题 / 人物简介改不了）', (
+      tester,
+    ) async {
+      final env = await pumpPage(
+        tester,
+        // 正文里没有「身世」，只在主题里有；「尸潮」只在世界观；
+        // 「醒来」只在人物档案（人物简介）的描述里
+        content: '''
+══ 大事件1：初入江湖 ══
+  李云飞在青阳城醒来。
+''',
+        theme: '寻找身世之谜',
+        worldview: 'H市被尸潮占据',
+        characters: jsonEncode([
+          const CharacterProfile(
+            name: '顾泽',
+            description: '顾泽在H市醒来，失去了记忆',
+            isProtagonist: true,
+          ).toJson(),
+        ]),
+      );
+
+      await tester.tap(find.text('改名'));
+      await tester.pumpAndSettle();
+      await tester.enterText(sheetField(0), '身世');
+      await tester.pumpAndSettle();
+
+      // 以前这里显示「大纲里没有找到」，按钮是灰的；现在设定命中要如实显示
+      expect(find.textContaining('大纲与小说设定里都没有找到'), findsNothing);
+      expect(find.textContaining('小说设定另有 1 处'), findsOneWidget);
+      expect(find.textContaining('小说设定里也命中 1 处'), findsOneWidget);
+      expect(
+        tester
+            .widget<ElevatedButton>(
+              find.widgetWithText(ElevatedButton, '一键替换'),
+            )
+            .onPressed,
+        isNull,
+        reason: '没勾「同时改小说设定」时设定命中不算可替换',
+      );
+
+      // 点提示勾上「同时改小说设定」→ 按钮可用，底部显示设定处数
+      await tester.tap(find.textContaining('小说设定里也命中 1 处'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('设定 1 处'), findsOneWidget);
+
+      await tester.enterText(sheetField(1), '宿命');
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<ElevatedButton>(
+              find.widgetWithText(ElevatedButton, '一键替换'),
+            )
+            .onPressed,
+        isNotNull,
+      );
+
+      await tester.tap(find.widgetWithText(ElevatedButton, '一键替换'));
+      await tester.pumpAndSettle();
+      expect(find.text('确认一键改名'), findsOneWidget);
+      expect(find.textContaining('小说设定：替换 1 处'), findsOneWidget);
+      await tester.tap(find.widgetWithText(ElevatedButton, '确认替换'));
+      await tester.pumpAndSettle();
+
+      // 主题里的名字换掉了：旧词在设定里搜不到、新词搜得到
+      expect(env.ctrl.checkName('身世').settingCount, 0);
+      expect(env.ctrl.checkName('宿命').settingCount, 1);
+    });
+
+    testWidgets('人物简介（人物档案）里的词同样能搜到并替换', (tester) async {
+      final env = await pumpPage(
+        tester,
+        content: '''
+══ 大事件1：初入江湖 ══
+  正文里没有顾泽。
+''',
+        protagonist: '',
+        characters: jsonEncode([
+          const CharacterProfile(
+            name: '顾泽',
+            description: '顾泽在H市醒来，失去了记忆',
+            abilities: '低武世界第一的内力',
+            isProtagonist: true,
+          ).toJson(),
+        ]),
+      );
+
+      await tester.tap(find.text('改名'));
+      await tester.pumpAndSettle();
+      await tester.enterText(sheetField(0), '醒来');
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('小说设定另有 1 处'), findsOneWidget);
+      await tester.tap(find.textContaining('小说设定里也命中 1 处'));
+      await tester.pumpAndSettle();
+      await tester.enterText(sheetField(1), '苏醒');
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(ElevatedButton, '一键替换'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(ElevatedButton, '确认替换'));
+      await tester.pumpAndSettle();
+
+      expect(env.ctrl.checkName('醒来').settingCount, 0);
+      expect(env.ctrl.checkName('苏醒').settingCount, 1);
     });
   });
 }

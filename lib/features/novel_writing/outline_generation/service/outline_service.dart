@@ -37,12 +37,27 @@ class OutlinePromptTemplate {
         : defaultSystemPrompt;
   }
 
+  /// 「要求提示词」段：一键生成大纲页面里用户填写的额外要求。
+  ///
+  /// 各步骤（定调 / 粗骨架 / 精写 / 展开）都会注入这段文本；为空时不出现，
+  /// 保持原有提示词不变。与设定/默认规则冲突时以用户要求为准。
+  static String extraRequirementSection(String extraRequirement) {
+    final r = extraRequirement.trim();
+    if (r.isEmpty) return '';
+    return '''
+=== 额外要求（必须严格遵守；与上述设定或规则冲突时以本要求为准） ===
+$r
+
+''';
+  }
+
   /// 步骤 1：定调 — 生成书名 + 核心概念（JSON 输出）
   static String buildStep1Prompt({
     required String genre,
     required String theme,
     required String protagonist,
     required String worldview,
+    String extraRequirement = '',
   }) {
     return '''
 根据以下小说设定，生成书名和核心概念简介，并以严格的 JSON 格式输出（不要输出任何额外文字、解释或 markdown 代码块）。
@@ -52,7 +67,7 @@ class OutlinePromptTemplate {
 主角完整人设：$protagonist
 完整世界观：$worldview
 
-要求：
+${extraRequirementSection(extraRequirement)}要求：
 - 书名务必贴合类型、主题、主角核心宿命，简洁有记忆点
 - 核心概念简介概括世界观、主角核心困境、故事最终落点
 - 输出 JSON 格式为：{"title": "书名", "concept": "核心概念简介"}''';
@@ -70,6 +85,7 @@ class OutlinePromptTemplate {
     required int majorEventCount,
     required int minorEventCount,
     required String titleAndConcept, // 步骤1的输出：书名+核心概念
+    String extraRequirement = '',
   }) {
     return '''
 请根据以下小说设定，规划全篇三幕结构的粗骨架，并以严格的 JSON 格式输出（不要输出任何额外文字、解释或 markdown 代码块）。
@@ -79,7 +95,7 @@ class OutlinePromptTemplate {
 主角完整人设：$protagonist
 完整世界观：$worldview
 
-已有书名和核心概念：
+${extraRequirementSection(extraRequirement)}已有书名和核心概念：
 $titleAndConcept
 
 全篇主事件总数量：$majorEventCount（三个 act 中 events 事件总数必须严格等于 $majorEventCount）
@@ -94,6 +110,8 @@ $titleAndConcept
 4. 人物成长：每一幕结尾主角有阶段性性格变化，全篇完成「缺陷暴露→挣扎蜕变→闭环」
 5. 至少预留 3 处长线伏笔的埋设点，并在定位中标注（如「埋长线伏笔：xxx」）
 6. 第三幕需覆盖前文主要伏笔的回收点
+7. 定位里严禁写章节 / 事件编号：不要出现「第54章」「第54个事件」「大事件54」这类引用；
+   伏笔提示直接写内容本身（人物、物件、原话、场景），不要写「第几章埋的伏笔」
 
 输出 JSON 格式为：
 {"acts": [{"act": "第一幕：开端", "events": [{"title": "事件标题", "position": "一句话定位（含在故事中的位置与伏笔提示）"}]}]}
@@ -120,6 +138,7 @@ $titleAndConcept
     required String batchContent, // 本批大事件（标题+定位）
     required String ledgerText, // 已积累的伏笔账本
     String prevRefinedContent = '', // 上一批已精写的完整概述（无则留空）
+    String extraRequirement = '',
   }) {
     final prevSection = prevRefinedContent.trim().isEmpty
         ? ''
@@ -139,7 +158,7 @@ $prevRefinedContent
 书名：$title
 核心概念：$concept
 
-=== 全局粗骨架（全部大事件，仅标题与定位） ===
+${extraRequirementSection(extraRequirement)}=== 全局粗骨架（全部大事件，仅标题与定位） ===
 $coarseSkeletonText
 
 === 本批需要精写的大事件（标题必须与粗骨架完全一致，按顺序输出） ===
@@ -160,6 +179,14 @@ $prevSection大事件粒度定义（严格遵守）：
 4. 承接上一批：本批首个大事件须延续上一批最后大事件的结局状态（人物处境、关系变化、已获得的信息、在场角色），已发生的情节与已出现的冲突不得重复（若未提供「上一批已精写的大事件」则忽略此条）
 5. 篇幅由你根据该事件在全局中的重要程度自行把握，写透核心冲突，宁实勿空
 6. 避免逻辑漏洞、人物动机割裂、强行降智
+7. 严禁编号引用（硬性要求）：概述正文里**不得出现任何章节号 / 事件编号**，包括
+   「第54章」「第54个事件」「大事件54」「小事件12」「54与70埋的」「第3幕」……
+   伏笔照应必须**直接写出内容本身**（人物、旧物件、原话、场景），让只读这一段的人
+   也能看懂指的是什么；不要写「第几章埋的伏笔」。
+   - 反例（禁止）：54与70埋的"只学会一种接受方式"在此第一次被真正掰开
+   - 正例（照此写）：他从前只学会一种接受方式——被人护着；这一次他第一次学着自己
+     接下别人的好意，也第一次肯让一个人替他挡在门前
+   编号只允许出现在输出 JSON 的 title 字段所对应的骨架定位里，summary 正文一律不带编号
 
 输出 JSON 格式为：
 {"events": [{"title": "与粗骨架完全一致的事件标题", "summary": "完整概述"}]}
@@ -186,10 +213,13 @@ $batchContent
 $prevLedgerText
 
 要求：
-1. 列出所有未回收/新埋的长线伏笔，每条注明计划回收时机（第几幕）
+1. 列出所有未回收/新埋的长线伏笔，每条注明计划回收时机（只写「第一幕 / 第二幕 / 第三幕 / 终章」这类叙事阶段）
 2. 更新各主要角色的当前处境与变化
 3. 列出尚未解决的悬念
 4. 已在批内回收的伏笔标注「已回收」
+5. **严禁编号引用**：foreshadows / character_states / unresolved 的文本里不得出现
+   章节号或事件编号（「第54章」「第54个事件」「大事件54」「54与70埋的」等）；
+   伏笔内容直接写情节本身（人物/物件/原话/场景），不要写「第几章埋的伏笔」
 
 输出 JSON 格式为：
 {"foreshadows": [{"content": "伏笔内容", "status": "已埋/已回收", "plan": "计划回收时机"}], "character_states": ["角色状态1"], "unresolved": ["悬念1"]}''';
@@ -215,6 +245,7 @@ $prevLedgerText
     required String globalSummary, // 全局摘要（书名+概念+完整三幕骨架）
     String previousContent = '', // 前文已展开的详细内容（本块必须严格承接）
     String laterContent = '', // 后文待展开的大事件（本块须为其做好铺垫过渡）
+    String extraRequirement = '',
   }) {
     final actNames = ['开端', '发展', '高潮&结局'];
     final actName = actIndex >= 1 && actIndex <= 3
@@ -254,7 +285,7 @@ $laterContent
     final formatExample =
         '''
 ══ 大事件$exampleNo：大事件标题 ══
-大事件概述（写清本阶段核心危机、主角行动、埋下的长线伏笔，篇幅按重要程度自行把握）
+大事件概述（原样完整保留上面框架里该大事件给出的概述，不要重写/压缩/删减）
 ○ 小事件1：小标题
 小事件概要
 ○ 小事件2：小标题
@@ -272,7 +303,7 @@ $laterContent
 完整世界观：$worldview
 书名：$title
 
-=== 全局框架（保证与全局设定、其他幕保持一致） ===
+${extraRequirementSection(extraRequirement)}=== 全局框架（保证与全局设定、其他幕保持一致） ===
 $globalSummary
 
 $previousSection$laterSection=== 当前幕已有的大事件框架 ===
@@ -284,6 +315,8 @@ $formatExample
 
 格式硬性要求（违反会直接导致大纲解析失败）：
 - 大事件标题行必须写成「══ 大事件N：标题 ══」，N 用本块框架里的具体数字，禁止写成「大事件X」或省略编号
+- **大事件概述必须原样完整保留**「当前幕已有的大事件框架」里给出的该大事件概述：
+  只允许微调标点使语句通顺，**不得删减信息、不得压缩、不得重写**——你的任务只是为它补写小事件
 - 小事件标题行必须写成「○ 小事件N：标题」，N 在每个大事件内部从 1 开始连续编号
 - 禁止使用 markdown 标题（#、##、###）、加粗（**）、分隔线（---、===）和任何列表符号
 - 事件标题必须独立成行，标题内不得再嵌套「大事件N：」这类前缀
@@ -293,13 +326,19 @@ $formatExample
 2. 禁止将单个事件拆成时序步骤（例如“前往→发现→战斗→撤退”这种只算1个小事件）
 3. 每个小事件应引入新的角色、地点、冲突或转折，而不是单纯推进上一个事件
 4. 好小事件 = 场景 + 冲突 + 变化，差小事件 = 下一个动作步骤
+5. **小事件组合起来必须完整覆盖该大事件概述里的全部关键情节、转折、场面、人物与伏笔**，
+   不得跳过或省略概述中明确写到的事；不能只写概述的开头几段就收尾
 
 注意：
 - 只输出当前这一幕的内容，不要输出其他幕
 - $numberHint，每个大事件只允许输出一次，编号必须与「当前幕已有的大事件框架」完全一致
+- **编号只允许出现在标题行**：大事件概述、小事件概要等正文里严禁出现任何章节号 /
+  事件编号引用（「第54章」「第54个事件」「大事件54」「小事件12」「54与70埋的」等）。
+  写伏笔照应时**直接写出内容本身**（人物、旧物件、原话、场景），不要写「第几章埋的伏笔」；
+  只读这一段的人也应当看得懂指的是什么
 - 严禁重复或回显任何已出现的大事件（包括全局框架中其他事件、前一块已展开的详细内容），
   如发现与本块重复的事件请直接省略，宁缺毋滥
-- 保持大事件标题和概述与已有框架一致
+- 保持大事件标题和概述与已有框架完全一致，不得自行改写、压缩或合并大事件
 - 小事件要有递进关系，禁止平铺流水账
 - 参照全局框架中其他幕的人物状态与伏笔，避免前后矛盾
 - 承接前文：若提供了「前一块已展开的详细内容」，本块开头必须紧接其最后一场戏的结尾状态

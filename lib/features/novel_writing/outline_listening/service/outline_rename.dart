@@ -1,3 +1,6 @@
+import 'dart:convert';
+
+import '../../shared/domain/character_profile.dart';
 import '../../shared/outline_event_syntax.dart';
 
 /// 大纲正文里一处命中。
@@ -38,6 +41,14 @@ class OutlineEventText {
   /// 是否大事件
   final bool isMajor;
 
+  /// 大事件序号：全篇只数大事件，从 1 连续（与正文里的「大事件N」一致）；
+  /// 小事件为 null
+  final int? majorNumber;
+
+  /// 小事件序号：在所属大事件内部从 1 重新计数（与正文里的「○ 小事件N」一致）；
+  /// 大事件为 null
+  final int? minorNumber;
+
   /// 事件标题（已剥掉「大事件N：」前缀与装饰）
   final String title;
 
@@ -55,6 +66,8 @@ class OutlineEventText {
   const OutlineEventText({
     required this.index,
     required this.isMajor,
+    this.majorNumber,
+    this.minorNumber,
     required this.title,
     required this.headerLine,
     required this.titleStart,
@@ -86,7 +99,11 @@ class OutlineTextIndex {
     final headerLines = <int>[];
     final headerTitles = <String>[];
     final headerMajors = <bool>[];
+    final majorNumbers = <int?>[];
+    final minorNumbers = <int?>[];
     final titleRanges = <(int, int)>[];
+    var majorSeq = 0;
+    var minorSeq = 0;
 
     for (var i = 0; i < lines.length; i++) {
       final line = classifyOutlineLine(lines[i]);
@@ -98,6 +115,18 @@ class OutlineTextIndex {
       headerLines.add(i);
       headerTitles.add(line.title);
       headerMajors.add(line.isMajor);
+      // 显示序号按正文的规范编号口径算：大事件只数大事件、小事件在每个大事件
+      // 内部从 1 重新开始（与 normalizeOutlineText / 大纲编辑页一致）
+      if (line.isMajor) {
+        majorSeq++;
+        minorSeq = 0;
+        majorNumbers.add(majorSeq);
+        minorNumbers.add(null);
+      } else {
+        minorSeq++;
+        majorNumbers.add(null);
+        minorNumbers.add(minorSeq);
+      }
       titleRanges.add((at, at + line.title.length));
     }
 
@@ -112,6 +141,8 @@ class OutlineTextIndex {
         OutlineEventText(
           index: k + 1,
           isMajor: headerMajors[k],
+          majorNumber: majorNumbers[k],
+          minorNumber: minorNumbers[k],
           title: headerTitles[k],
           headerLine: header,
           titleStart: titleRanges[k].$1,
@@ -161,9 +192,208 @@ class OutlineRenameHit {
 
   int get count => occurrences.length;
 
-  /// 事件在大纲正文里的定位文案，如「大事件3 · 标题」「小事件5 · 概要」
-  String get where =>
-      '${event.isMajor ? "大事件" : "小事件"}${event.index} · ${inTitle ? "标题" : "概要"}';
+  /// 事件在大纲正文里的定位文案，如「大事件3 · 标题」「小事件1 · 概要」。
+  ///
+  /// 序号与**大纲正文 / 大纲编辑页卡片**一致：大事件全篇只数大事件，
+  /// 小事件在所属大事件内部从 1 重新计数——不能拿 [OutlineEventText.index]
+  /// （所有事件的连续序号）顶上：大事件会跳号（大事件1、大事件5……），
+  /// 小事件也会显示成 2、3、5……，用户按它在大纲里找不到对应那条。
+  String get where {
+    final label = event.isMajor
+        ? '大事件${event.majorNumber ?? event.index}'
+        : '小事件${event.minorNumber ?? event.index}';
+    return '$label · ${inTitle ? "标题" : "概要"}';
+  }
+}
+
+/// 小说设定里的一类**可改名文本**（字段说明 + 当前值）。
+///
+/// 类型 / 主题 / 主角简介 / 世界观各一条；人物档案（`outline_records.characters`
+/// 的 JSON）按人物、按字段展开成多条。搜索预览与替换共用同一套字段定义，
+/// 不会出现「预览里看得到、替换时不生效」。
+class OutlineSettingText {
+  /// 字段说明，如「主题」「主角简介」「世界观」「人物档案 · 顾泽 · 描述」
+  final String label;
+
+  /// 当前值
+  final String value;
+
+  const OutlineSettingText(this.label, this.value);
+}
+
+/// 小说设定里一处命中的预览条目（[label] 是哪个字段、[count] 命中几处）
+class OutlineSettingHit {
+  final String label;
+  final int count;
+  final String context;
+
+  const OutlineSettingHit({
+    required this.label,
+    required this.count,
+    required this.context,
+  });
+}
+
+/// 解析 `outline_records.characters` 里的人物档案 JSON。
+///
+/// - 空串 → 空列表（还没提炼过人物档案）
+/// - 解析失败 / 结构不对 → null：**调用方必须原样保留原文本**，不能拿空列表
+///   覆盖，否则改一次名就把人物的描述 / 能力 / 性格整段丢了。
+List<CharacterProfile>? tryParseCharacterProfiles(String json) {
+  final text = json.trim();
+  if (text.isEmpty) return const [];
+  try {
+    final data = jsonDecode(text);
+    if (data is! List) return null;
+    return [
+      for (final item in data)
+        if (item is Map)
+          CharacterProfile.fromJson(Map<String, dynamic>.from(item)),
+    ];
+  } catch (_) {
+    return null;
+  }
+}
+
+/// 把小说设定整理成可搜索 / 可替换的文本字段。
+///
+/// 与 [renameSettingValues] 一一对应：预览里能看到的字段，替换时一定覆盖到。
+/// 空字段不列（0 处命中，列出来只会让面板变长）。
+List<OutlineSettingText> outlineSettingTexts({
+  String genre = '',
+  String theme = '',
+  String protagonist = '',
+  String worldview = '',
+  String characters = '',
+}) {
+  final out = <OutlineSettingText>[
+    if (genre.trim().isNotEmpty) OutlineSettingText('类型', genre),
+    if (theme.trim().isNotEmpty) OutlineSettingText('主题', theme),
+    if (protagonist.trim().isNotEmpty) OutlineSettingText('主角简介', protagonist),
+    if (worldview.trim().isNotEmpty) OutlineSettingText('世界观', worldview),
+  ];
+  for (final c in tryParseCharacterProfiles(characters) ??
+      const <CharacterProfile>[]) {
+    final who = c.name.trim().isEmpty ? '未命名人物' : c.name.trim();
+    if (c.name.trim().isNotEmpty) {
+      out.add(OutlineSettingText('人物档案 · $who · 姓名', c.name));
+    }
+    if (c.description.trim().isNotEmpty) {
+      out.add(OutlineSettingText('人物档案 · $who · 描述', c.description));
+    }
+    if (c.abilities.trim().isNotEmpty) {
+      out.add(OutlineSettingText('人物档案 · $who · 能力', c.abilities));
+    }
+    if (c.personality.trim().isNotEmpty) {
+      out.add(OutlineSettingText('人物档案 · $who · 性格', c.personality));
+    }
+  }
+  return out;
+}
+
+/// 在小说设定字段里查 [source] 的命中（每个字段最多一条，便于面板展示）。
+List<OutlineSettingHit> findSettingHits(
+  List<OutlineSettingText> fields,
+  String source,
+) {
+  final key = source.trim();
+  if (key.isEmpty) return const [];
+  final hits = <OutlineSettingHit>[];
+  for (final field in fields) {
+    if (field.value.isEmpty) continue;
+    var count = 0;
+    var at = field.value.indexOf(key);
+    final first = at;
+    while (at >= 0) {
+      count++;
+      at = field.value.indexOf(key, at + key.length);
+    }
+    if (count == 0) continue;
+    hits.add(
+      OutlineSettingHit(
+        label: field.label,
+        count: count,
+        context: _settingContext(field.value, first, first + key.length),
+      ),
+    );
+  }
+  return hits;
+}
+
+/// 替换后的小说设定值（与 [outlineSettingTexts] 的字段一一对应）。
+class OutlineSettingValues {
+  final String genre;
+  final String theme;
+  final String protagonist;
+  final String worldview;
+
+  /// 人物档案 JSON（解析失败时原样返回，绝不覆盖坏数据）
+  final String characters;
+
+  const OutlineSettingValues({
+    required this.genre,
+    required this.theme,
+    required this.protagonist,
+    required this.worldview,
+    required this.characters,
+  });
+}
+
+/// 把 [mapping]（原文 → 新文）应用到小说设定上。
+///
+/// - 类型 / 主题 / 主角简介 / 世界观：纯文本替换（与正文的替换规则一致）；
+/// - 人物档案：解析 JSON 后逐人物、逐字段替换再编码；**解析失败原样返回**。
+OutlineSettingValues renameSettingValues({
+  required String genre,
+  required String theme,
+  required String protagonist,
+  required String worldview,
+  required String characters,
+  required Map<String, String> mapping,
+}) {
+  final profiles = tryParseCharacterProfiles(characters);
+  var nextCharacters = characters;
+  if (profiles != null && profiles.isNotEmpty) {
+    nextCharacters = jsonEncode([
+      for (final c in profiles)
+        CharacterProfile(
+          name: _replaceMapping(c.name, mapping),
+          description: _replaceMapping(c.description, mapping),
+          abilities: _replaceMapping(c.abilities, mapping),
+          personality: _replaceMapping(c.personality, mapping),
+          isProtagonist: c.isProtagonist,
+        ).toJson(),
+    ]);
+  }
+  return OutlineSettingValues(
+    genre: _replaceMapping(genre, mapping),
+    theme: _replaceMapping(theme, mapping),
+    protagonist: _replaceMapping(protagonist, mapping),
+    worldview: _replaceMapping(worldview, mapping),
+    characters: nextCharacters,
+  );
+}
+
+/// 按 [mapping] 逐条替换（顺序应用；与控制器里卡片的替换规则一致）
+String _replaceMapping(String text, Map<String, String> mapping) {
+  var out = text;
+  for (final entry in mapping.entries) {
+    if (entry.key.isEmpty || !out.contains(entry.key)) continue;
+    out = out.replaceAll(entry.key, entry.value);
+  }
+  return out;
+}
+
+/// 设定命中处左右各最多 10 字的上下文（换行压成空格，面板里显示成一行）
+String _settingContext(String text, int start, int end) {
+  const span = 10;
+  final left = start - span < 0 ? 0 : start - span;
+  final right = end + span > text.length ? text.length : end + span;
+  final body = text
+      .substring(left, right)
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+  return '${left > 0 ? '…' : ''}$body${right < text.length ? '…' : ''}';
 }
 
 /// 一次改名在**大纲正文**上的完整结果：命中清单 + 替换后的新正文。
@@ -171,18 +401,39 @@ class OutlineRenameResult {
   /// 按事件顺序排列的命中（同一事件可能有多条：标题一处、概要多处）
   final List<OutlineRenameHit> hits;
 
+  /// 小说设定里（类型 / 主题 / 主角简介 / 世界观 / 人物档案）的命中
+  final List<OutlineSettingHit> settingHits;
+
   /// 应用改名后的新正文
   final String newContent;
 
-  const OutlineRenameResult({required this.hits, required this.newContent});
+  const OutlineRenameResult({
+    required this.hits,
+    this.settingHits = const [],
+    required this.newContent,
+  });
 
-  /// 共替换了多少处
-  int get totalCount => hits.fold(0, (sum, hit) => sum + hit.occurrences.length);
+  /// 大纲正文里共命中多少处
+  int get outlineCount =>
+      hits.fold(0, (sum, hit) => sum + hit.occurrences.length);
+
+  /// 小说设定里共命中多少处
+  int get settingCount => settingHits.fold(0, (sum, hit) => sum + hit.count);
+
+  /// 共命中多少处（正文 + 设定）
+  int get totalCount => outlineCount + settingCount;
 
   /// 涉及多少个事件（事件是「改动的可见单位」，用户按它判断影响面）
   int get eventCount => hits.map((h) => h.event.index).toSet().length;
 
-  bool get isEmpty => hits.isEmpty;
+  /// 正文与设定都没有命中
+  bool get isEmpty => hits.isEmpty && settingHits.isEmpty;
+
+  /// 大纲正文里有命中
+  bool get hasOutlineHits => hits.isNotEmpty;
+
+  /// 小说设定里有命中
+  bool get hasSettingHits => settingHits.isNotEmpty;
 
   /// 列表上最多展示的命中条数（剩下的用条数概括）
   static const int previewLimit = 30;
@@ -198,11 +449,16 @@ class OutlineRenameResult {
 ///   改名本来就要连名带姓一起换；列表里会显示**实际替换掉的文字**与上下文，
 ///   用户自己确认。
 ///
+/// [settings] 是「小说设定」的可搜索字段（见 [outlineSettingTexts]）：
+/// 传了之后命中会一并算进 [OutlineRenameResult.settingHits]，面板才能显示
+/// 「世界观 / 主题 / 主角简介 / 人物档案里也有几处」并让用户确认要不要一起改。
+///
 /// [maxPerLine] 限制同一行的命中数，避免某个高频短词把结果撑爆。
 OutlineRenameResult findRenameHits(
   String content,
   String source, {
   int maxPerLine = 20,
+  List<OutlineSettingText> settings = const [],
 }) {
   final key = source.trim();
   if (key.isEmpty) {
@@ -257,6 +513,7 @@ OutlineRenameResult findRenameHits(
 
   return OutlineRenameResult(
     hits: hits,
+    settingHits: findSettingHits(settings, key),
     newContent: replaceOccurrences(content, _flatten(hits), key),
   );
 }

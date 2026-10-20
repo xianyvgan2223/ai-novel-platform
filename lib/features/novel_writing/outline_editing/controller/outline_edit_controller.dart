@@ -66,10 +66,22 @@ class OutlineEditController extends ChangeNotifier {
   /// 单看 [drafts] 会把大事件编成 1、2……，和正文对不上。
   Map<int, int?> majorNumbersById = const {};
 
+  /// 小事件序号表（chapter.id → 序号，**在所属大事件内部从 1 重新计数**），
+  /// 与正文里的「○ 小事件N」一致。同样必须按全篇章节算：编辑页只勾选了几章时，
+  /// 单看 [drafts] 会把小事件编成 1、2……，与正文里的编号对不上。
+  Map<int, int?> minorNumbersById = const {};
+
   /// 某章的大事件序号；小事件 / 尚未读出全篇章节时为 null
   int? majorNumberOf(OutlineChapter chapter) {
     final id = chapter.id;
     return id == null ? null : majorNumbersById[id];
+  }
+
+  /// 某章的小事件序号（所属大事件内部从 1 开始）；大事件 / 尚未读出全篇章节时
+  /// 为 null
+  int? minorNumberOf(OutlineChapter chapter) {
+    final id = chapter.id;
+    return id == null ? null : minorNumbersById[id];
   }
 
   /// 某张草稿卡片的大事件序号。
@@ -89,32 +101,68 @@ class OutlineEditController extends ChangeNotifier {
     return id == 0 ? null : majorNumbersById[id];
   }
 
-  /// 正文统计缓存：扫一遍正文，记下「第 i 个事件（含）之前有几个大事件」。
-  /// 卡片每次重建都会问一遍编号，正文又可能很大，所以按正文引用缓存一份。
-  String? _majorCountSource;
-  List<int> _majorCounts = const [];
+  /// 某张草稿卡片的小事件序号（所属大事件内部从 1 开始）。
+  ///
+  /// 与 [majorNumberOfDraft] 同一套取法：先按**大纲正文**现算（正文里每个大事件
+  /// 名下的小事件就是从 1 连续编号的），算不到再回退按行 id 查全篇表。
+  /// 不能拿「本页第几张卡片 + 1」：编辑页只勾选了几章时，那个位置与正文里的
+  /// 「○ 小事件N」毫无关系。
+  int? minorNumberOfDraft(OutlineEditDraft draft) {
+    if (draft.isMajor) return null;
+    final fromText = _minorNumberAt(draft.eventIndex);
+    if (fromText != null) return fromText;
+    final id = draft.chapterId;
+    return id == 0 ? null : minorNumbersById[id];
+  }
 
-  void _ensureMajorCounts() {
-    if (identical(_majorCountSource, outlineContent)) return;
-    final counts = <int>[];
-    var seq = 0;
+  /// 正文事件序号缓存：扫一遍正文，记下「第 i 个事件（含）之前」的大事件序号与
+  /// 小事件序号（小事件在每个大事件内部从 1 重新计数；大事件位置记为 0）。
+  /// 卡片每次重建都会问一遍编号，正文又可能很大，所以按正文引用缓存一份。
+  String? _eventNumberSource;
+  List<int> _majorCounts = const [];
+  List<int> _minorCounts = const [];
+
+  void _ensureEventNumbers() {
+    if (identical(_eventNumberSource, outlineContent)) return;
+    final majors = <int>[];
+    final minors = <int>[];
+    var majorSeq = 0;
+    var minorSeq = 0;
     for (final e in parseOutlineEvents(
       outlineContent,
       outlineId: outline.id ?? 0,
     )) {
-      if (e.isMajor) seq++;
-      counts.add(seq);
+      if (e.isMajor) {
+        majorSeq++;
+        minorSeq = 0;
+        majors.add(majorSeq);
+        minors.add(0);
+      } else {
+        minorSeq++;
+        majors.add(0);
+        minors.add(minorSeq);
+      }
     }
-    _majorCountSource = outlineContent;
-    _majorCounts = counts;
+    _eventNumberSource = outlineContent;
+    _majorCounts = majors;
+    _minorCounts = minors;
   }
 
   /// 第 [eventIndex] 个事件是大事件时的序号（只数大事件）；不是大事件 /
   /// 序号越界时返回 null
   int? _majorNumberAt(int eventIndex) {
-    _ensureMajorCounts();
+    _ensureEventNumbers();
     if (eventIndex < 1 || eventIndex > _majorCounts.length) return null;
     final n = _majorCounts[eventIndex - 1];
+    return n == 0 ? null : n;
+  }
+
+  /// 第 [eventIndex] 个事件是小事件时的序号（所属大事件内部从 1 开始）；
+  /// 不是小事件 / 序号越界时返回 null
+  int? _minorNumberAt(int eventIndex) {
+    _ensureEventNumbers();
+    if (eventIndex < 1 || eventIndex > _minorCounts.length) return null;
+    final n = _minorCounts[eventIndex - 1];
     return n == 0 ? null : n;
   }
 
@@ -246,8 +294,10 @@ class OutlineEditController extends ChangeNotifier {
       final rows = await OutlineChapterDbHelper().getByOutlineId(outline.id!);
       if (rows.isNotEmpty) {
         allChapters = rows.map((m) => OutlineChapter.fromMap(m)).toList();
-        // 大事件序号跟着全篇章节一起刷新（顺序与 outline_chapters.event_index 一致）
+        // 大 / 小事件序号跟着全篇章节一起刷新
+        // （顺序与 outline_chapters.event_index 一致）
         majorNumbersById = majorEventNumbersById(allChapters);
+        minorNumbersById = minorEventNumbersById(allChapters);
       }
       final row = await OutlineRecordDbHelper().getById(outline.id!);
       if (row != null) {
@@ -838,6 +888,7 @@ class OutlineEditController extends ChangeNotifier {
       _syncAllChaptersOrder();
     }
     majorNumbersById = majorEventNumbersById(allChapters);
+    minorNumbersById = minorEventNumbersById(allChapters);
   }
 
   /// 让 [allChapters] 的序号与本次编辑后的结构一致。
@@ -861,6 +912,7 @@ class OutlineEditController extends ChangeNotifier {
     ]..sort((a, b) => a.eventIndex.compareTo(b.eventIndex));
     allChapters = ordered;
     majorNumbersById = majorEventNumbersById(allChapters);
+    minorNumbersById = minorEventNumbersById(allChapters);
   }
 
   /// 把合并后的大纲正文写回记录（其余设定字段原样回写，避免列被清空）。

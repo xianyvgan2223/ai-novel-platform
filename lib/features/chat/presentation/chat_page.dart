@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../core/config/route_names.dart';
 import '../application/chat_controller.dart';
 import '../domain/chat_message.dart';
 import 'history_page.dart';
@@ -218,11 +219,16 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   /// 现在等待去掉了：目标页自身改成可滚动布局（见 novel_writing_page.dart），
   /// 输入法收起动画与新页面入场动画同时进行也不会有布局溢出，于是切页回到
   /// 「立即响应」。unfocus 仍然保留，否则键盘会挂在新页面上不收。
-  Future<void> _pushPage(Widget page) {
+  /// [routeName] 会写进 MaterialPageRoute.settings，供全局悬浮层判断
+  /// 「这个页面上该不该显示悬浮聊天球」（见 chat_floating_ball.dart）。
+  Future<void> _pushPage(Widget page, {String? routeName}) {
     FocusManager.instance.primaryFocus?.unfocus();
-    return Navigator.of(
-      context,
-    ).push(MaterialPageRoute<void>(builder: (_) => page));
+    return Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        settings: RouteSettings(name: routeName),
+        builder: (_) => page,
+      ),
+    );
   }
 
   // ── 发送消息 ──
@@ -401,7 +407,8 @@ class _ChatPageState extends ConsumerState<ChatPage> {
           onSelected: (value) {
             switch (value) {
               case 'settings':
-                _pushPage(const SettingsPage());
+                // 带名字推入：设置页右上角全是控件，全局悬浮球要在这页隐藏。
+                _pushPage(const SettingsPage(), routeName: kSettingsRouteName);
               case 'game':
                 _pushPage(const GameHubPage());
             }

@@ -65,8 +65,10 @@ class OutlineSpeechSettings {
 
   /// 可选的语速档位（界面用一排按钮呈现，不做连续滑块：朗读语速用整数档更好挑）
   ///
-  /// 3.0x 是本地离线合成（VITS）还听得清的上限，也够用来快速过一遍大纲。
-  static const List<double> rateOptions = [0.75, 1.0, 1.25, 1.5, 2.0, 3.0];
+  /// 3.0x / 4.0x 是「快速过一遍大纲」用的高档位：本地离线合成（VITS）在 4.0x
+  /// 下会明显发紧、个别字可能糊，但内容能听懂；系统引擎能接受多快取决于引擎本身
+  /// （有的引擎上限就是 3.0，传更大值会被它自己夹住）。
+  static const List<double> rateOptions = [0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0];
 
   OutlineSpeechSettings copyWith({
     double? rate,
@@ -123,6 +125,14 @@ class OutlineListenSegment {
   /// 是否大事件（大事件是结构节点，卡片上要能一眼分开）
   final bool isMajor;
 
+  /// 大事件序号：**全篇只数大事件**，从 1 连续（与大纲正文里的「大事件N」一致）；
+  /// 小事件为 null
+  final int? majorNumber;
+
+  /// 小事件序号：**在所属大事件内部从 1 重新计数**（与大纲正文里的「○ 小事件N」
+  /// 一致）；大事件为 null
+  final int? minorNumber;
+
   /// 事件标题
   final TextEditingController titleCtrl;
 
@@ -140,6 +150,8 @@ class OutlineListenSegment {
     required this.chapterId,
     required this.eventIndex,
     required this.isMajor,
+    this.majorNumber,
+    this.minorNumber,
     required String title,
     required String summary,
     required this.content,
@@ -174,8 +186,19 @@ class OutlineListenSegment {
   /// 可写回数据库（章节行已入库）
   bool get canPersist => chapterId != 0;
 
-  /// 卡片上的类型文案，如「大事件3」
-  String get typeLabel => isMajor ? '大事件$eventIndex' : '小事件$eventIndex';
+  /// 卡片上的类型文案，如「大事件3」「小事件2」。
+  ///
+  /// 序号就是**大纲正文里的写法**：大事件全篇连续（`══ 大事件N：`，只数大事件），
+  /// 小事件在所属大事件内部从 1 重新开始（`○ 小事件N：`）——与「大纲编辑」页
+  /// 卡片上的序号是同一套。不能退回去用 [eventIndex]：它是**所有**事件
+  /// （含大事件）的连续序号，小事件会跳号（大事件1 后面跟着小事件2、3……），
+  /// 正文里却是「○ 小事件1」。
+  ///
+  /// 序号没传时（旧调用方 / 单测直接构造）退回 eventIndex，只作兜底。
+  String get typeLabel {
+    if (isMajor) return '大事件${majorNumber ?? eventIndex}';
+    return '小事件${minorNumber ?? eventIndex}';
+  }
 
   /// 这一个事件读出来的文本。
   ///

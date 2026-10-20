@@ -206,10 +206,14 @@ void main() {
         freshness: 'pw',
       );
       final query = adapter.requests.single['query'] as String;
-      expect(query.endsWith(' after:2026-10-10'), isTrue);
+      // 服务内部用的是**当前时间**算「过去一周」，这里按同一口径现算期望值：
+      // 写死成某个日期的话，第二天跑测试就会红（日期敏感的用例不该钉死时钟）
+      final expectedSuffix = DeepSeekSearchService.freshnessToQuerySyntax('pw');
+      expect(expectedSuffix, isNotEmpty);
+      expect(query.endsWith(' $expectedSuffix'), isTrue);
       expect(query.runes.length, lessThanOrEqualTo(128));
       // 关键：日期没被截断成残句
-      expect(query.contains('after:2026-10-'), isTrue);
+      expect(query.contains(expectedSuffix), isTrue);
     });
   });
 

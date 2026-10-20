@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:deepseekapp/features/novel_writing/outline_listening/controller/outline_listen_controller.dart';
@@ -5,6 +7,7 @@ import 'package:deepseekapp/features/novel_writing/outline_listening/model/liste
 import 'package:deepseekapp/features/novel_writing/outline_listening/service/name_finder.dart';
 import 'package:deepseekapp/features/novel_writing/outline_listening/service/tts_engine.dart';
 import 'package:deepseekapp/features/novel_writing/outline_listening/service/tts_engine_fake.dart';
+import 'package:deepseekapp/features/novel_writing/shared/domain/character_profile.dart';
 import 'package:deepseekapp/features/novel_writing/shared/domain/outline_chapter.dart';
 import 'package:deepseekapp/features/novel_writing/shared/domain/outline_record.dart';
 import 'package:deepseekapp/features/novel_writing/shared/outline_chapter_sync.dart';
@@ -91,7 +94,8 @@ void main() {
       expect(ctrl.segments[0].title, '初入江湖');
       // 多行概要在**同一张卡片**里（上一版是逐行拆成多张）
       expect(ctrl.segments[0].summary, '李云飞在青阳城醒来。\n他失去了记忆。');
-      expect(ctrl.segments[1].typeLabel, '小事件2');
+      // 小事件序号是「所属大事件内部第几个」，不是全篇事件序号（不能显示成 2）
+      expect(ctrl.segments[1].typeLabel, '小事件1');
       expect(ctrl.segments[1].title, '拜师');
       expect(ctrl.segments[1].hasContent, isTrue);
     });
@@ -119,7 +123,7 @@ void main() {
         '大事件1，初入江湖。李云飞在青阳城醒来。\n他失去了记忆。',
       );
       final full = ctrl.segments[1].speechText(OutlineListenMode.full);
-      expect(full, contains('小事件2，拜师'));
+      expect(full, contains('小事件1，拜师'));
       expect(full, contains('李云飞拜入青云宗。'));
       expect(full, contains('正文：正文一段。'));
     });
@@ -137,6 +141,65 @@ void main() {
       ctrl.updateSettings(ctrl.settings.copyWith(mode: OutlineListenMode.full));
       expect(ctrl.segments.length, 2);
       expect(ctrl.segments[1].hasContent, isTrue);
+    });
+  });
+
+  group('序号：与大纲正文的 大事件N / 小事件N 同一套', () {
+    /// 事件列表 → 卡片上的类型文案
+    List<String> labels(List<OutlineChapter> chapters) {
+      final ctrl = OutlineListenController(
+        OutlineRecord(title: 'T', content: ''),
+        engine: FakeTtsEngine(),
+      );
+      addTearDown(ctrl.dispose);
+      ctrl.init(chapters, reload: false);
+      return ctrl.segments.map((s) => s.typeLabel).toList();
+    }
+
+    test('大事件只数大事件；小事件在每个大事件内部从 1 重新计数', () {
+      // 正文写法：══ 大事件1 / ○ 小事件1 / ○ 小事件2 / ══ 大事件2 / ○ 小事件1 …
+      expect(
+        labels([
+          ch(1, 'major', '甲', ''),
+          ch(2, 'minor', '乙', ''),
+          ch(3, 'minor', '丙', ''),
+          ch(4, 'major', '丁', ''),
+          ch(5, 'minor', '戊', ''),
+          ch(6, 'major', '己', ''),
+        ]),
+        ['大事件1', '小事件1', '小事件2', '大事件2', '小事件1', '大事件3'],
+      );
+    });
+
+    test('不能拿全篇事件序号当卡片序号（会跳号）', () {
+      final ctrl = OutlineListenController(
+        OutlineRecord(title: 'T', content: ''),
+        engine: FakeTtsEngine(),
+      );
+      addTearDown(ctrl.dispose);
+      ctrl.init([
+        ch(1, 'major', '甲', ''),
+        ch(2, 'minor', '乙', ''),
+        ch(3, 'major', '丙', ''),
+        ch(4, 'minor', '丁', ''),
+      ], reload: false);
+
+      // 第 3 个事件是第 2 个大事件、第 4 个事件是第 2 个大事件名下第 1 个小事件
+      expect(ctrl.segments[2].typeLabel, '大事件2');
+      expect(ctrl.segments[3].typeLabel, '小事件1');
+      expect(ctrl.segments[3].speechText(OutlineListenMode.titleOnly), '小事件1，丁');
+    });
+
+    test('开头没有大事件时小事件从 1 起（与正文规范化同一口径）', () {
+      expect(
+        labels([
+          ch(1, 'minor', '序章一', ''),
+          ch(2, 'minor', '序章二', ''),
+          ch(3, 'major', '甲', ''),
+          ch(4, 'minor', '乙', ''),
+        ]),
+        ['小事件1', '小事件2', '大事件1', '小事件1'],
+      );
     });
   });
 
@@ -168,7 +231,7 @@ void main() {
 
       expect(ctrl.activeIndex, 1);
       expect(engine.spoken.length, 2);
-      expect(engine.spoken.last, startsWith('小事件2，拜师'));
+      expect(engine.spoken.last, startsWith('小事件1，拜师'));
       expect(ctrl.spokenCount, 1);
     });
 
@@ -236,7 +299,7 @@ void main() {
       await ctrl.playFrom(1);
 
       expect(ctrl.activeIndex, 1);
-      expect(engine.spoken.single, startsWith('小事件2，拜师'));
+      expect(engine.spoken.single, startsWith('小事件1，拜师'));
     });
 
     test('设备没有语音引擎时如实提示，不假装在播', () async {
@@ -318,9 +381,15 @@ void main() {
       expect(engine.spoken.length, spokenBefore);
     });
 
-    test('语速档位含 3.0x（本地离线合成也支持到 3.0）', () {
+    test('语速档位最高 4.0x（含 3.0x，本地离线合成上限也放到了 4.0）', () {
       expect(OutlineSpeechSettings.rateOptions, contains(3.0));
-      expect(OutlineSpeechSettings.rateOptions.last, 3.0);
+      expect(OutlineSpeechSettings.rateOptions, contains(4.0));
+      expect(OutlineSpeechSettings.rateOptions.last, 4.0);
+      // 档位必须递增，UI 上才好按速度从慢到快排
+      final rates = OutlineSpeechSettings.rateOptions;
+      for (var i = 1; i < rates.length; i++) {
+        expect(rates[i], greaterThan(rates[i - 1]));
+      }
     });
 
     test('重试会先把引擎丢掉重建再读（真机上「重试」无效就是栽在这里）', () async {
@@ -741,7 +810,10 @@ void main() {
       ctrl.foreshadows = '李云飞身上的玉佩';
 
       final result = ctrl.checkName('李云飞');
-      expect(result.totalCount, 2);
+      // 正文 2 处（两行概要）；设定里主角简介也有 1 处——V4.9.3 起一并参与搜索与预览
+      expect(result.outlineCount, 2);
+      expect(result.settingCount, 1);
+      expect(result.totalCount, 3);
       expect(result.eventCount, 2);
 
       final outcome = await ctrl.applyRenameRules([
@@ -845,6 +917,150 @@ void main() {
       expect(ctrl.nameCandidates.first.text, '李云飞');
       // 地名候选（带「城 / 宗」后缀且出现两次以上）
       expect(ctrl.nameCandidates.map((c) => c.text), contains('青阳城'));
+    });
+  });
+
+  group('小说设定也参与改名（类型 / 主题 / 主角简介 / 世界观 / 人物档案）', () {
+    String charactersJson() => jsonEncode([
+      const CharacterProfile(
+        name: '顾泽',
+        description: '顾泽在H市醒来，失去了记忆',
+        abilities: '低武世界第一的内力',
+        personality: '冷静',
+        isProtagonist: true,
+      ).toJson(),
+      const CharacterProfile(
+        name: '白小飞',
+        description: '白小飞是顾泽的同伴',
+        personality: '热血',
+      ).toJson(),
+    ]);
+
+    OutlineListenController buildWithSettings() {
+      final ctrl = OutlineListenController(
+        OutlineRecord(
+          title: '测试小说',
+          content: '',
+          // 类型 / 主题 / 主角简介 / 世界观 / 人物档案 / 伏笔都给上
+          genre: '都市异能',
+          theme: '顾泽寻找身世之谜',
+          protagonist: '顾泽，低武世界天下第一',
+          worldview: 'H市被尸兄占据，顾泽来自低武世界',
+          characters: charactersJson(),
+          foreshadows: '顾泽身上的玉佩',
+        ),
+        engine: FakeTtsEngine(),
+      );
+      ctrl.init(chapters(), reload: false);
+      return ctrl;
+    }
+
+    test('搜得到设定里的词（以前这些词搜不到，替换按钮直接是灰的）', () {
+      final ctrl = buildWithSettings();
+      addTearDown(ctrl.dispose);
+      ctrl.outlineContent = '══ 大事件1：甲 ══\n  正文里没有目标词。';
+
+      final theme = ctrl.checkName('身世');
+      expect(theme.outlineCount, 0);
+      expect(theme.settingCount, 1);
+      expect(theme.settingHits.single.label, '主题');
+
+      expect(ctrl.checkName('尸兄').settingCount, 1); // 世界观
+      expect(ctrl.checkName('醒来').settingCount, 1); // 人物简介（描述）
+      expect(ctrl.checkName('热血').settingCount, 1); // 人物档案·性格
+      // 伏笔清单不属于「小说设定」字段（替换时仍按原行为纯文本换掉）
+      expect(ctrl.checkName('玉佩').settingCount, 0);
+    });
+
+    test('勾「同时改小说设定」后：设定五项一起换，人物档案逐字段换', () async {
+      final ctrl = buildWithSettings();
+      addTearDown(ctrl.dispose);
+      ctrl.outlineContent = '══ 大事件1：甲 ══\n  顾泽出场。';
+
+      final outcome = await ctrl.applyRenameRules(
+        [(source: '顾泽', target: '苏哲')],
+        updateSettings: true,
+      );
+      // 正文 1 处；设定里：主角简介 1 + 主题 1 + 世界观 1 +
+      // 顾泽·姓名 1 + 顾泽·描述 1 + 白小飞·描述 1 = 6 处
+      expect(outcome.count, 7);
+
+      expect(ctrl.checkName('顾泽').outlineCount, 0);
+      expect(ctrl.checkName('顾泽').settingCount, 0);
+      expect(ctrl.checkName('苏哲').settingCount, 6);
+      expect(ctrl.characterNames, contains('苏哲'));
+      expect(ctrl.characterNames, isNot(contains('顾泽')));
+      // 伏笔清单一并替换（原有行为）
+      expect(ctrl.foreshadows, '苏哲身上的玉佩');
+    });
+
+    test('改名后撤回 / 取消撤回：设定也跟着改回来、再改回去', () async {
+      final ctrl = buildWithSettings();
+      addTearDown(ctrl.dispose);
+      ctrl.outlineContent = '══ 大事件1：甲 ══\n  顾泽出场。';
+
+      await ctrl.applyRenameRules(
+        [(source: '顾泽', target: '苏哲')],
+        updateSettings: true,
+      );
+      await ctrl.undo();
+      expect(ctrl.checkName('顾泽').settingCount, 6);
+      expect(ctrl.characterNames, contains('顾泽'));
+      expect(ctrl.checkName('苏哲').settingCount, 0);
+
+      await ctrl.redo();
+      expect(ctrl.checkName('苏哲').settingCount, 6);
+      expect(ctrl.characterNames, contains('苏哲'));
+      expect(ctrl.checkName('顾泽').settingCount, 0);
+    });
+
+    test('不勾时设定保持原样（原有「只改大纲」语义不变）', () async {
+      final ctrl = buildWithSettings();
+      addTearDown(ctrl.dispose);
+      ctrl.outlineContent = '══ 大事件1：甲 ══\n  顾泽出场。';
+
+      await ctrl.applyRenameRules([(source: '顾泽', target: '苏哲')]);
+      expect(ctrl.checkName('顾泽').settingCount, 6);
+      expect(ctrl.characterNames, contains('顾泽'));
+    });
+
+    test('init(record:) 采用完整记录：伏笔 / 人物档案不再被摘要覆盖成空', () {
+      // 列表页传下来的是「小字段摘要」：content / characters / foreshadows 都没有
+      final ctrl = OutlineListenController(
+        OutlineRecord(title: '测试小说'),
+        engine: FakeTtsEngine(),
+      );
+      addTearDown(ctrl.dispose);
+      final full = OutlineRecord(
+        id: 7,
+        title: '测试小说',
+        content: '══ 大事件1：甲 ══\n  正文',
+        genre: '都市异能',
+        theme: '主题词',
+        protagonist: '顾泽',
+        worldview: '世界观词',
+        characters: charactersJson(),
+        foreshadows: '伏笔清单',
+      );
+      ctrl.init(chapters(), reload: false, record: full);
+
+      expect(ctrl.outlineContent, contains('正文'));
+      expect(ctrl.foreshadows, '伏笔清单'); // 以前是空串，保存时会把库里的清掉
+      expect(ctrl.characterNames, containsAll(['顾泽', '白小飞']));
+      expect(ctrl.checkName('主题词').settingCount, 1);
+      expect(ctrl.checkName('世界观词').settingCount, 1);
+    });
+
+    test('候选专名包含人物档案里的名字（人物简介里的角色也能被改名）', () {
+      final ctrl = buildWithSettings();
+      addTearDown(ctrl.dispose);
+      ctrl.outlineContent = '══ 大事件1：甲 ══\n  正文。';
+      ctrl.refreshNameCandidates();
+
+      expect(
+        ctrl.nameCandidates.map((c) => c.text),
+        containsAll(<String>['顾泽', '白小飞']),
+      );
     });
   });
 

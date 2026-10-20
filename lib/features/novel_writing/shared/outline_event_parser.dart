@@ -11,7 +11,12 @@ import 'outline_event_syntax.dart';
 /// - 大事件：`══...══` 包裹行，或「大事件N：标题」
 /// - 小事件：`○ / - / • / * / ·` 前缀行，或「小事件N：标题」
 /// - 事件标题之后的非标题行累积为该事件的概要（模型输出的事件概述常为多行）
-/// - 幕标题（如「第一幕：开端」）会被跳过，避免污染上一事件的概要
+/// - 幕标题（如「第一幕：开端」）与纯装饰行会被跳过，避免污染上一事件的概要
+///
+/// 边界只认**被 [classifyOutlineLine] 识别出来的事件行 / 幕标题 / 装饰行**：
+/// 概述里以 `-` 开头的列表项（如「- 旧铁条」）属于概要内容，不再被排除——
+/// 否则「大纲转章节 / 大纲编辑」看到的概述会比正文少几行（与局部重新生成的
+/// `_parseRecordActs` 规则也不一致：那边一直把 `-` 行算进概述）。
 ///
 /// 未解析到任何事件时返回单个「正文」大事件，保证调用方始终有可编辑项。
 /// 返回的章节均未入库（[OutlineChapter.id] 为 null），由调用方批量插入。
@@ -42,13 +47,9 @@ List<OutlineChapter> parseOutlineEvents(
     // 幕标题与纯 ══ 装饰行：既不作为事件，也不并入上一事件的概要
     if (line.isAct || line.kind == OutlineLineKind.decoration) continue;
 
-    if (result.isNotEmpty &&
-        trimmed.isNotEmpty &&
-        !trimmed.startsWith('══') &&
-        !trimmed.startsWith('○') &&
-        !trimmed.startsWith('-')) {
+    if (result.isNotEmpty && trimmed.isNotEmpty) {
       final last = result.last;
-      // 累积多行概要（模型输出的事件概述常为多行）
+      // 累积多行概要（模型输出的事件概述常为多行；含 `-` 列表项）
       final summary = last.eventSummary.isEmpty
           ? trimmed
           : '${last.eventSummary}\n$trimmed';

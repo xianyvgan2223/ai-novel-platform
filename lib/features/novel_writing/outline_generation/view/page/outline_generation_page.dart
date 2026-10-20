@@ -566,10 +566,29 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
             style: const TextStyle(fontSize: 14),
           ),
           const SizedBox(height: 10),
-          TextField(
-            controller: c.themeController,
-            decoration: _inputDecoration('主题（如：废土世界中的 AI 觉醒）'),
-            style: const TextStyle(fontSize: 14),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: c.themeController,
+                  decoration: _inputDecoration('主题（如：废土世界中的 AI 觉醒）'),
+                  style: const TextStyle(fontSize: 14),
+                ),
+              ),
+              const SizedBox(width: 4),
+              IconButton(
+                icon: const Icon(
+                  Icons.fullscreen,
+                  size: 20,
+                  color: Color(0xFF4D6BFE),
+                ),
+                tooltip: '放大编辑',
+                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                padding: EdgeInsets.zero,
+                onPressed: () =>
+                    _showLargeEditor(context, c.themeController, '主题'),
+              ),
+            ],
           ),
           const SizedBox(height: 10),
           Row(
@@ -620,6 +639,33 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
                 padding: EdgeInsets.zero,
                 onPressed: () =>
                     _showLargeEditor(context, c.worldViewController, '世界观'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: c.requirementController,
+                  decoration: _inputDecoration(
+                    '要求提示词（如：节奏快、不要后宫、每个大事件都要有爽点）',
+                  ),
+                  style: const TextStyle(fontSize: 14),
+                ),
+              ),
+              const SizedBox(width: 4),
+              IconButton(
+                icon: const Icon(
+                  Icons.fullscreen,
+                  size: 20,
+                  color: Color(0xFF4D6BFE),
+                ),
+                tooltip: '放大编辑',
+                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                padding: EdgeInsets.zero,
+                onPressed: () =>
+                    _showLargeEditor(context, c.requirementController, '要求提示词'),
               ),
             ],
           ),
@@ -730,10 +776,29 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
             },
           ),
           const SizedBox(height: 10),
-          TextField(
-            controller: c.themeController,
-            decoration: _inputDecoration('主题（如：废土世界中的 AI 觉醒）'),
-            style: const TextStyle(fontSize: 14),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: c.themeController,
+                  decoration: _inputDecoration('主题（如：废土世界中的 AI 觉醒）'),
+                  style: const TextStyle(fontSize: 14),
+                ),
+              ),
+              const SizedBox(width: 4),
+              IconButton(
+                icon: const Icon(
+                  Icons.fullscreen,
+                  size: 20,
+                  color: Color(0xFF4D6BFE),
+                ),
+                tooltip: '放大编辑',
+                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                padding: EdgeInsets.zero,
+                onPressed: () =>
+                    _showLargeEditor(context, c.themeController, '主题'),
+              ),
+            ],
           ),
           const SizedBox(height: 10),
           Row(
@@ -784,6 +849,38 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
                     _showLargeEditor(context, c.worldViewController, '世界观'),
               ),
             ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: c.requirementController,
+                  decoration: _inputDecoration(
+                    '要求提示词（如：节奏快、不要后宫、每个大事件都要有爽点）',
+                  ),
+                  style: const TextStyle(fontSize: 14),
+                ),
+              ),
+              const SizedBox(width: 4),
+              IconButton(
+                icon: const Icon(
+                  Icons.fullscreen,
+                  size: 20,
+                  color: Color(0xFF4D6BFE),
+                ),
+                tooltip: '放大编辑',
+                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                padding: EdgeInsets.zero,
+                onPressed: () =>
+                    _showLargeEditor(context, c.requirementController, '要求提示词'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '要求提示词会注入到定调、粗骨架、精写大事件、展开小事件的每一步',
+            style: TextStyle(fontSize: 11, color: Colors.grey[500]),
           ),
           const SizedBox(height: 10),
           _buildCountRow(
@@ -1199,10 +1296,15 @@ class _LargeEditorDialogState extends State<_LargeEditorDialog> {
 
   String _hintFor(String title) {
     switch (title) {
+      case '主题':
+        return '描述故事的核心主题、想表达的东西，例如：一个杀神学着做一个普通人...';
       case '主角设定':
         return '详细设定主角的姓名、外貌、性格、背景故事...';
       case '世界观':
         return '描述世界的规则、势力分布、力量体系、历史背景...';
+      case '要求提示词':
+        return '写下对大纲生成的具体要求，例如：节奏快、不要后宫、每个大事件都要有爽点、'
+            '避免烂俗桥段、伏笔要提前埋好并在第三幕回收...';
       default:
         return '请输入详细内容...';
     }

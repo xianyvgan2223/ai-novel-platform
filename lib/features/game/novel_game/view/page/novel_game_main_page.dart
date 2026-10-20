@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:deepseekapp/core/config/route_names.dart';
 import 'package:deepseekapp/features/chat/presentation/settings_page.dart';
 import 'package:deepseekapp/features/game/novel_game/model/entity/character_entity.dart';
 import 'package:deepseekapp/features/game/novel_game/model/entity/copy_entity.dart';
@@ -156,9 +157,13 @@ class _NovelGameMainPageState extends State<NovelGameMainPage> {
           const SizedBox(width: 4),
           _ActionButton(
             label: '设置',
-            onTap: () => Navigator.of(
-              context,
-            ).push(MaterialPageRoute(builder: (_) => const SettingsPage())),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                // 命名路由：全局悬浮球据此在设置页隐藏（该页右上角全是控件）。
+                settings: const RouteSettings(name: kSettingsRouteName),
+                builder: (_) => const SettingsPage(),
+              ),
+            ),
           ),
         ],
       ),

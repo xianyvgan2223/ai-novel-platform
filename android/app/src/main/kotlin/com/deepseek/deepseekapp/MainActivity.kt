@@ -397,7 +397,10 @@ class MainActivity : FlutterActivity() {
             result.error("TTS_NOT_INIT", "语音引擎未就绪", null)
             return
         }
-        engine.setSpeechRate(if (rate in 0.1f..3.0f) rate else 1.0f)
+        // 语速上限放到 4.0，与设置面板档位对齐。
+        // 注意：Android 官方建议的正常范围是 0.5–3.0，传 4.0 给系统引擎时
+        // 有的引擎会自己夹到上限（那也正常，至少不是被我们这边悄悄改回 1.0）。
+        engine.setSpeechRate(if (rate in 0.1f..4.0f) rate else 1.0f)
         engine.setPitch(if (pitch in 0.1f..2.0f) pitch else 1.0f)
 
         // 语言不可用（设备没装对应语音包）时退回设备默认语言，而不是不读。

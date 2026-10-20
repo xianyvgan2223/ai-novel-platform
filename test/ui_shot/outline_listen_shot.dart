@@ -67,10 +67,14 @@ Future<void> _pumpPage(WidgetTester tester, {bool collapsed = false}) async {
     OutlineRecord(title: '测试小说', content: '', protagonist: '李云飞'),
     engine: FakeTtsEngine(),
   );
+  // 两张卡片的序号口径要看得出结论：大事件只数大事件（第二个大事件显示「大事件2」），
+  // 小事件在每个大事件内部从 1 重新计数（大事件2 名下的第一个小事件显示「小事件1」）
   ctrl.init([
     ch(1, 'major', '初入江湖', '李云飞在青阳城醒来，发现自己失去了记忆。\n他遇到了师父玄机子，得知自己是青云宗弟子。'),
     ch(2, 'minor', '拜师', '李云飞拜入青云宗，成了玄机子的记名弟子。'),
     ch(3, 'minor', '下山', '他第一次下山，路过青阳城时遇见了旧识。'),
+    ch(4, 'major', '公园兔潮', '城中惊现变异兔群，李云飞第一次直面尸兄潮。'),
+    ch(5, 'minor', '初战', '他凭一根铁棍挡住了兔潮的第一波冲击。'),
   ], reload: false);
   if (collapsed) ctrl.setPlayerCollapsed(true);
   // 控制器交给页面接管：页面 dispose 时会一起释放

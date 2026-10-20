@@ -164,17 +164,22 @@ OutlineLine classifyOutlineLine(String raw) {
 /// 是否为事件标题行（大事件 / 小事件）
 bool isOutlineEventHeader(String raw) => classifyOutlineLine(raw).isEvent;
 
-/// 写回概要时的**概要区边界**：事件标题、幕标题、装饰行、以及
-/// `○` / `-` 开头的条目行都视为边界（原样保留，绝不并入概要）。
+/// 写回概要时的**概要区边界**：事件标题、幕标题、装饰行视为边界
+/// （原样保留，绝不并入概要）。
 ///
 /// 边界漏判会直接删数据：改上一条概要时，把下一行事件标题当成概要内容替换掉。
+///
+/// 注意：普通以 `-` / `○` 开头的行**不算**边界——它们可能是概述里的列表项
+/// （如「- 旧铁条」）。只有被 [classifyOutlineLine] 识别为小事件（`- 小事件3：x`、
+/// `○ 小事件1：x`）或幕标题/装饰行时才截断概要；此前把任何 `-` 行都当边界，
+/// 会把概述里的列表行留在概要区外，改概要时漏改、删事件时漏删。
 bool isOutlineBoundaryLine(String raw) {
   final trimmed = raw.trim();
   if (trimmed.isEmpty) return false;
   final line = classifyOutlineLine(raw);
   if (line.isEvent || line.isAct) return true;
+  if (line.kind == OutlineLineKind.decoration) return true;
   if (trimmed.startsWith('══') && trimmed.endsWith('══')) return true;
-  if (trimmed.startsWith('○') || trimmed.startsWith('-')) return true;
   return false;
 }
 

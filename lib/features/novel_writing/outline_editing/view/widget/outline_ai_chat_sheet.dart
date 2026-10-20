@@ -155,10 +155,14 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
     final String label;
     if (draft == null) {
       label = '';
+    } else if (draft.isMajor) {
+      // 序号与卡片 / 大纲正文同一套：大事件全篇只数大事件
+      final n = controller.majorNumberOfDraft(draft);
+      label = n == null ? '大事件' : '大事件$n';
     } else {
-      label = draft.isMajor
-          ? '大事件'
-          : '第 ${controller.aiTargetIndex + 1} 节';
+      // 小事件序号在所属大事件内部从 1 重新计数（与正文「○ 小事件N」一致）
+      final n = controller.minorNumberOfDraft(draft);
+      label = n == null ? '小事件' : '小事件$n';
     }
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 10, 4, 6),

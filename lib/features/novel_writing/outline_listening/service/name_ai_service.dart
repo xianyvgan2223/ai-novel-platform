@@ -5,7 +5,8 @@ import 'name_finder.dart';
 ///
 /// 离线规则（`name_finder.dart`）已经能挑出大部分中文人名与地名，但它对
 /// 「代号式名字」「译名」「组织简称」这类没把握。这里补一次模型调用：
-/// 只把大纲正文交给模型，要它返回 JSON 数组，解析失败就当没识别到——
+/// 把大纲正文（以及书名 / 主角 / 世界观 / 人物档案这些设定，帮助认出只在设定里
+/// 出现的名字）交给模型，要它返回 JSON 数组，解析失败就当没识别到——
 /// **失败绝不影响改名流程**，用户可以手填。
 class OutlineNameAiService {
   final ChapterWriteService _chapterService;
@@ -23,6 +24,7 @@ class OutlineNameAiService {
     String title = '',
     String protagonist = '',
     String worldview = '',
+    String characters = '',
   }) async {
     final text = content.trim();
     if (text.isEmpty) return const [];
@@ -38,6 +40,7 @@ class OutlineNameAiService {
           title: title,
           protagonist: protagonist,
           worldview: worldview,
+          characters: characters,
           content: _clip(text),
         ),
       },
@@ -74,6 +77,7 @@ class OutlineNameAiService {
     required String title,
     required String protagonist,
     required String worldview,
+    String characters = '',
     required String content,
   }) {
     final buf = StringBuffer();
@@ -83,6 +87,11 @@ class OutlineNameAiService {
     }
     if (worldview.trim().isNotEmpty) {
       buf.writeln('【世界观】${worldview.trim()}');
+    }
+    if (characters.trim().isNotEmpty) {
+      buf
+        ..writeln('【人物档案】')
+        ..writeln(characters.trim());
     }
     buf
       ..writeln('【大纲正文】')

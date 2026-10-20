@@ -673,6 +673,11 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
   ///
   /// 版面顺序：**标题与「＋ / 🗑 / AI 生成」同一行** → 类型标签与状态 → 概要。
   ///
+  /// 类型标签里带序号：大事件按全篇第几个大事件（大事件57），小事件按它在该
+  /// 大事件名下第几个（小事件2）——与大纲正文里的「══ 大事件N」/「○ 小事件N」
+  /// 是同一套编号，和「听大纲改名」页卡片也一致。序号由控制器按**全篇**算
+  /// （不能拿本页卡片下标：只勾选了几章时，下标与正文序号毫无关系）。
+  ///
   /// 为什么改：原先操作按钮独占卡片最上面一行，标题在它下面。概要有长有短时，
   /// 那张「按钮条」跟它管的那条标题会被拉开很远，连着几张卡片看下来就是一排
   /// 悬空的 ＋🗑——分不清点的是哪一条，删除这种破坏性操作尤其危险。
@@ -763,6 +768,7 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
                 EventTypeTag(
                   isMajor: draft.isMajor,
                   majorNumber: _controller.majorNumberOfDraft(draft),
+                  minorNumber: _controller.minorNumberOfDraft(draft),
                   background: draft.isMajor
                       ? const Color(0xFF4D6BFE)
                       : const Color(0xFFEFF3FF),
@@ -770,18 +776,6 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
                       ? Colors.white
                       : const Color(0xFF4D6BFE),
                 ),
-                // 大事件的序号已经在标签里（大事件57）；小事件给个「第N节」，
-                // 光一个数字看不出那是什么编号
-                if (!draft.isMajor) ...[
-                  const SizedBox(width: 5),
-                  Text(
-                    '第 ${index + 1} 节',
-                    style: const TextStyle(
-                      fontSize: 10,
-                      color: Color(0xFF999999),
-                    ),
-                  ),
-                ],
                 const SizedBox(width: 6),
                 Text(
                   draft.hasContent ? '已写正文' : '未写正文',

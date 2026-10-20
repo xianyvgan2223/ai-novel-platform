@@ -8,7 +8,6 @@ import '../../../shared/domain/outline_chapter.dart';
 import '../../../shared/domain/outline_record.dart';
 import '../../../shared/outline_chapter_sync.dart';
 import '../../../shared/outline_load_error_view.dart';
-import '../../../outline_editing/view/widget/event_type_tag.dart';
 import '../../controller/outline_listen_controller.dart';
 import '../../model/listening_segment.dart';
 import '../../service/tts_engine.dart';
@@ -119,6 +118,10 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
   ///    「大纲编辑」完全一致；
   /// 3. 最后才读章表建段落。即使章表原本是空的（还没在「大纲转章节」解析过），
   ///    第 2 步也已经按正文把事件解析入库了。
+  ///
+  /// 第 1 步拿到的**完整记录**要一并交给控制器（`init(record:)`）：列表页传下来
+  /// 的只是小字段摘要，`foreshadows` / `characters`（人物档案）不在里面。
+  /// 不补的话，保存 / 改名时写回会把伏笔清单与人物档案覆盖成空串。
   Future<void> _load() async {
     final id = widget.outline.id;
     // 没有 id（测试 / 未入库）：直接用传进来的章节
@@ -133,8 +136,8 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
       await reconcileOutlineChapters(outlineId: id, content: record.content);
       final rows = await OutlineChapterDbHelper().getByOutlineId(id);
       final chapters = rows.map((m) => OutlineChapter.fromMap(m)).toList();
-      // 刚从库里读完，不用再让控制器重读一遍
-      _controller.init(chapters, reload: false);
+      // 刚从库里读完，不用再让控制器重读一遍；完整记录一并交给控制器
+      _controller.init(chapters, reload: false, record: record);
     } catch (e, st) {
       debugPrint('[outline_listen] 加载事件结构失败 outline=$id：$e\n$st');
       _error = e;
@@ -770,9 +773,6 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
 
   Widget _buildList() {
     final segments = _controller.segments;
-    // 大事件序号按当前卡片表算一次：卡片逐个问的话，每次重建都要把整张表扫一遍
-    // （长大纲几百个事件），朗读时每秒重建几次就会明显卡。
-    final majorNumbers = _majorNumbers(segments);
     return ListView.builder(
       controller: _scrollCtrl,
       // 输入法升起时视口变矮，下面的卡片会掉出缓存区被卸载；
@@ -780,20 +780,19 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
       scrollCacheExtent: const ScrollCacheExtent.pixels(1000),
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
       itemCount: segments.length,
-      itemBuilder: (context, index) =>
-          _buildEventCard(index, majorNumbers[index]),
+      itemBuilder: (context, index) => _buildEventCard(index),
     );
   }
 
-  /// 卡片上的类型标签：大事件带全篇序号（大事件57），小事件带自己的序号。
+  /// 卡片上的类型标签：大事件带全篇序号（大事件57），小事件带所属大事件内的
+  /// 序号（小事件2）——与大纲正文、以及「大纲编辑」页卡片是同一套写法。
   ///
-  /// 为什么小事件也带序号：共用的 [EventTypeTag] 对小事件只显示「事件」，
-  /// 一张卡片上连序号都没有的话，用户没法把卡片和正文里的「○ 小事件2：」对上。
-  Widget _typeTag(OutlineListenSegment segment, int? majorNumber) {
+  /// 序号由控制器在 [OutlineListenController._buildSegments] 里按事件列表算好
+  /// （[OutlineListenSegment.typeLabel]），页面只管显示；这里不能拿
+  /// [OutlineListenSegment.eventIndex] 顶替：它是所有事件的连续序号，小事件会
+  /// 跳号（大事件1 后面跟着小事件2、3……），与正文的「○ 小事件1」对不上。
+  Widget _typeTag(OutlineListenSegment segment) {
     final isMajor = segment.isMajor;
-    final label = isMajor
-        ? (majorNumber == null ? '大事件' : '大事件$majorNumber')
-        : '小事件${segment.eventIndex}';
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
       decoration: BoxDecoration(
@@ -801,7 +800,7 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
         borderRadius: BorderRadius.circular(4),
       ),
       child: Text(
-        label,
+        segment.typeLabel,
         style: TextStyle(
           fontSize: 10,
           fontWeight: FontWeight.w600,
@@ -811,22 +810,12 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
     );
   }
 
-  /// 每一个卡片的大事件序号（只数大事件，与大纲正文里的「大事件N」一致）
-  List<int?> _majorNumbers(List<OutlineListenSegment> segments) {
-    final numbers = List<int?>.filled(segments.length, null);
-    var seq = 0;
-    for (var i = 0; i < segments.length; i++) {
-      if (segments[i].isMajor) numbers[i] = ++seq;
-    }
-    return numbers;
-  }
-
   /// **一个事件一张卡片**（V4.8.4 起）。
   ///
   /// 版面上这张卡片就是这个事件的全部：类型标签 + 标题（可改）+ 概要整段（可改），
   /// 左上角的播放按钮表示「从这一个事件开始往下读」。上一版把事件拆成「标题一行 +
   /// 概要逐行 N 行 + 正文一行」，读的时候一行一停——那不是用户要的粒度。
-  Widget _buildEventCard(int index, int? majorNumber) {
+  Widget _buildEventCard(int index) {
     final segment = _controller.segments[index];
     final key = _cardKeys.putIfAbsent(index, () => GlobalKey());
     final active = index == _controller.activeIndex;
@@ -868,7 +857,7 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
                 onPressed: () => _controller.playFrom(index),
               ),
               const SizedBox(width: 2),
-              _typeTag(segment, majorNumber),
+              _typeTag(segment),
               if (segment.hasContent) ...[
                 const SizedBox(width: 6),
                 Text(

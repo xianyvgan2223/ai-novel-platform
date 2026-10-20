@@ -206,9 +206,11 @@ class OutlineEditChapterListPageState
   @override
   Widget build(BuildContext context) {
     final outline = _outline;
-    // 大事件序号：与大纲正文里的「大事件N」同一套编号（只数大事件），
-    // 显示在卡片的类型标签上（大事件57），方便对上正文与生成记录
+    // 大 / 小事件序号：与大纲正文里的「大事件N」/「○ 小事件N」同一套编号
+    // （大事件只数大事件；小事件在每个大事件内部从 1 重新开始），
+    // 显示在卡片的类型标签上（大事件57 / 小事件2），方便对上正文与生成记录
     final majorNumbers = majorEventNumbers(_chapters);
+    final minorNumbers = minorEventNumbers(_chapters);
     return PopScope(
       // 系统返回手势与顶栏返回键保持同一套行为：先取消多选，再退出页面。
       // 否则手势一划就把页面退掉，勾选白选了（顶栏按钮却是先清勾选）。
@@ -274,6 +276,7 @@ class OutlineEditChapterListPageState
                           chapter: ch,
                           selected: ch.id != null && _selected.contains(ch.id),
                           majorNumber: majorNumbers[index],
+                          minorNumber: minorNumbers[index],
                           onTap: () => _toggleSelect(ch),
                           onEdit: () => _openEdit([ch]),
                         );
@@ -376,13 +379,16 @@ class OutlineEditChapterListPageState
 }
 
 /// 单个章节选择卡片：左侧复选框，点卡片切换选中；右侧「编辑」直接编辑单章。
-/// 大事件的类型标签上带序号（大事件57），与大纲正文的写法一致。
+/// 类型标签上带序号（大事件57 / 小事件2），与大纲正文的写法一致。
 class _ChapterSelectTile extends StatelessWidget {
   final OutlineChapter chapter;
   final bool selected;
 
-  /// 大事件序号（从 1 开始，只数大事件）；非大事件为 null
+  /// 大事件序号（全篇只数大事件，从 1 连续）；非大事件为 null
   final int? majorNumber;
+
+  /// 小事件序号（在所属大事件内部从 1 重新计数）；非小事件为 null
+  final int? minorNumber;
   final VoidCallback onTap;
   final VoidCallback onEdit;
 
@@ -390,6 +396,7 @@ class _ChapterSelectTile extends StatelessWidget {
     required this.chapter,
     required this.selected,
     this.majorNumber,
+    this.minorNumber,
     required this.onTap,
     required this.onEdit,
   });
@@ -467,11 +474,12 @@ class _ChapterSelectTile extends StatelessWidget {
                       EventTypeTag(
                         isMajor: isMajor,
                         majorNumber: majorNumber,
+                        minorNumber: minorNumber,
                         background: isMajor
                             ? const Color(0xFFE8ECF4)
                             : const Color(0xFFF2F4F8),
                         foreground: const Color(0xFF666666),
-                        // 序号用主色加粗：长列表里一眼能扫到第几个大事件
+                        // 序号用主色加粗：长列表里一眼能扫到第几个大事件 / 小事件
                         numberColor: const Color(0xFF4D6BFE),
                       ),
                     ],
