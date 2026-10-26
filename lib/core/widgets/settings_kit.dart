@@ -125,6 +125,38 @@ const TextStyle kSettingsRowLabelStyle = TextStyle(
   height: 1.25,
 );
 
+/// 作用域强调色：覆盖本文件各组件的默认主色（[kSettingsPrimary]）。
+///
+/// 默认不包这层 → 所有功能页保持原来的蓝色；个别页面（例如「一键生成大纲
+/// 设置」）要更克制的中性色时，只要在页面根部包一层即可，不用给每个组件
+/// 加参数。弹窗（Dialog）不在页面子树里，需要用 [accent] 显式传色。
+class SettingsAccent extends InheritedWidget {
+  /// 强调色：选中值 / 开关 / 滑杆 / 保存按钮 / 焦点线 / 图标
+  final Color color;
+
+  /// 强调色浅底：图标 chip / 提示卡
+  final Color soft;
+
+  const SettingsAccent({
+    super.key,
+    required this.color,
+    required this.soft,
+    required super.child,
+  });
+
+  static Color colorOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<SettingsAccent>()?.color ??
+      kSettingsPrimary;
+
+  static Color softOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<SettingsAccent>()?.soft ??
+      kSettingsPrimarySoft;
+
+  @override
+  bool updateShouldNotify(SettingsAccent oldWidget) =>
+      oldWidget.color != color || oldWidget.soft != soft;
+}
+
 // ─── 内部工具 ───
 
 /// 标签自然宽度的缓存。
@@ -137,7 +169,7 @@ const TextStyle kSettingsRowLabelStyle = TextStyle(
 /// key 用 (label, textScaler, style) 而不是只按文案：系统字号或主题字体变了，
 /// 量出来的宽度也会变，必须重新测量。
 final Map<({String label, TextScaler textScaler, TextStyle style}), double>
-    _labelWidthCache =
+_labelWidthCache =
     <({String label, TextScaler textScaler, TextStyle style}), double>{};
 
 /// 用真实字体测量单行标签的自然宽度（含当前系统字号缩放）。
@@ -148,7 +180,9 @@ final Map<({String label, TextScaler textScaler, TextStyle style}), double>
 /// 标签样式，保证和真实渲染同一套字体 / fallback / 缩放，
 /// 任何字体、任何系统字号下都不会截断。
 double _measureLabelWidth(BuildContext context, String label) {
-  final style = DefaultTextStyle.of(context).style.merge(kSettingsRowLabelStyle);
+  final style = DefaultTextStyle.of(
+    context,
+  ).style.merge(kSettingsRowLabelStyle);
   final key = (
     label: label,
     textScaler: MediaQuery.textScalerOf(context),
@@ -244,6 +278,8 @@ class SettingsSectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final accent = SettingsAccent.colorOf(context);
+    final accentSoft = SettingsAccent.softOf(context);
     return Padding(
       padding: EdgeInsets.fromLTRB(
         4,
@@ -258,10 +294,10 @@ class SettingsSectionHeader extends StatelessWidget {
             width: 26,
             height: 26,
             decoration: BoxDecoration(
-              color: kSettingsPrimarySoft,
+              color: accentSoft,
               borderRadius: BorderRadius.circular(8),
             ),
-            child: Icon(icon, size: 15, color: kSettingsPrimary),
+            child: Icon(icon, size: 15, color: accent),
           ),
           const SizedBox(width: 8),
           Expanded(
@@ -469,6 +505,7 @@ class _SettingsTextRowState extends State<SettingsTextRow> {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
+        final accent = SettingsAccent.colorOf(context);
         final stacked = _useStackedRow(
           context,
           constraints.maxWidth - 2 * kSettingsCardPadH,
@@ -485,7 +522,7 @@ class _SettingsTextRowState extends State<SettingsTextRow> {
           textAlign: TextAlign.right,
           textInputAction: TextInputAction.done,
           keyboardType: widget.keyboardType,
-          cursorColor: kSettingsPrimary,
+          cursorColor: accent,
           style: const TextStyle(fontSize: 13.5, color: kSettingsValue),
           decoration: InputDecoration(
             isDense: true,
@@ -500,8 +537,8 @@ class _SettingsTextRowState extends State<SettingsTextRow> {
             enabledBorder: const UnderlineInputBorder(
               borderSide: BorderSide(color: Colors.transparent, width: 1),
             ),
-            focusedBorder: const UnderlineInputBorder(
-              borderSide: BorderSide(color: kSettingsPrimary, width: 1),
+            focusedBorder: UnderlineInputBorder(
+              borderSide: BorderSide(color: accent, width: 1),
             ),
           ),
         );
@@ -519,11 +556,7 @@ class _SettingsTextRowState extends State<SettingsTextRow> {
                 ? Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     mainAxisSize: MainAxisSize.min,
-                    children: [
-                      label,
-                      const SizedBox(height: 2),
-                      field,
-                    ],
+                    children: [label, const SizedBox(height: 2), field],
                   )
                 : Row(
                     children: [
@@ -579,6 +612,9 @@ class SettingsSelectRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 弹层（PopupMenu）不在页面子树里，这里先取色再用到 itemBuilder，
+    // 否则菜单里的选中项会退回默认主色。
+    final accent = SettingsAccent.colorOf(context);
     final current = options.firstWhere(
       (o) => o.value == value,
       orElse: () => options.first,
@@ -606,9 +642,7 @@ class SettingsSelectRow extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontSize: 13.5,
-                      color: option.value == value
-                          ? kSettingsPrimary
-                          : kSettingsLabel,
+                      color: option.value == value ? accent : kSettingsLabel,
                       fontWeight: option.value == value
                           ? FontWeight.w500
                           : FontWeight.w400,
@@ -616,11 +650,7 @@ class SettingsSelectRow extends StatelessWidget {
                   ),
                 ),
                 if (option.value == value)
-                  const Icon(
-                    Icons.check_rounded,
-                    size: 16,
-                    color: kSettingsPrimary,
-                  ),
+                  Icon(Icons.check_rounded, size: 16, color: accent),
               ],
             ),
           ),
@@ -748,6 +778,7 @@ class _SettingsSwitchRowState extends State<SettingsSwitchRow> {
 
   @override
   Widget build(BuildContext context) {
+    final accent = SettingsAccent.colorOf(context);
     return InkWell(
       onTap: _toggle,
       child: ConstrainedBox(
@@ -775,13 +806,12 @@ class _SettingsSwitchRowState extends State<SettingsSwitchRow> {
                     onChanged: (_) => _toggle(),
                     padding: EdgeInsets.zero,
                     materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    activeTrackColor: kSettingsPrimary,
+                    activeTrackColor: accent,
                     activeThumbColor: Colors.white,
                     inactiveTrackColor: kSettingsSwitchInactive,
                     inactiveThumbColor: Colors.white,
                     // M3 默认的开关描边在浅色卡片上显得很"重"，去掉后更干净。
-                    trackOutlineColor:
-                        const WidgetStatePropertyAll<Color?>(
+                    trackOutlineColor: const WidgetStatePropertyAll<Color?>(
                       Colors.transparent,
                     ),
                   ),
@@ -826,6 +856,7 @@ class SettingsSliderRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final accent = SettingsAccent.colorOf(context);
     final clamped = value.clamp(min, max).toDouble();
     final valueText =
         valueLabel?.call(clamped) ??
@@ -849,10 +880,10 @@ class SettingsSliderRow extends StatelessWidget {
                 const SizedBox(width: 12),
                 Text(
                   valueText,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 13.5,
                     fontWeight: FontWeight.w600,
-                    color: kSettingsPrimary,
+                    color: accent,
                   ),
                 ),
               ],
@@ -861,10 +892,10 @@ class SettingsSliderRow extends StatelessWidget {
           SliderTheme(
             data: SliderTheme.of(context).copyWith(
               trackHeight: 4,
-              activeTrackColor: kSettingsPrimary,
+              activeTrackColor: accent,
               inactiveTrackColor: kSettingsSwitchInactive,
-              thumbColor: kSettingsPrimary,
-              overlayColor: kSettingsPrimary.withValues(alpha: 0.12),
+              thumbColor: accent,
+              overlayColor: accent.withValues(alpha: 0.12),
               thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
               overlayShape: const RoundSliderOverlayShape(overlayRadius: 16),
             ),
@@ -1065,6 +1096,8 @@ class _SettingsPromptCardState extends State<SettingsPromptCard> {
 
   @override
   Widget build(BuildContext context) {
+    final accent = SettingsAccent.colorOf(context);
+    final accentSoft = SettingsAccent.softOf(context);
     return Padding(
       padding: const EdgeInsets.all(kSettingsCardPadH),
       child: Column(
@@ -1076,10 +1109,10 @@ class _SettingsPromptCardState extends State<SettingsPromptCard> {
                 width: 32,
                 height: 32,
                 decoration: BoxDecoration(
-                  color: kSettingsPrimarySoft,
+                  color: accentSoft,
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: Icon(widget.icon, size: 17, color: kSettingsPrimary),
+                child: Icon(widget.icon, size: 17, color: accent),
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -1110,7 +1143,7 @@ class _SettingsPromptCardState extends State<SettingsPromptCard> {
               color: kSettingsFieldBg,
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
-                color: _focused ? kSettingsPrimary : kSettingsFieldBorder,
+                color: _focused ? accent : kSettingsFieldBorder,
                 width: _focused ? 1.2 : 1,
               ),
             ),
@@ -1122,7 +1155,7 @@ class _SettingsPromptCardState extends State<SettingsPromptCard> {
               maxLines: widget.maxLines,
               keyboardType: TextInputType.multiline,
               textInputAction: TextInputAction.newline,
-              cursorColor: kSettingsPrimary,
+              cursorColor: accent,
               style: const TextStyle(
                 fontSize: 13.5,
                 height: 1.5,
@@ -1161,7 +1194,7 @@ class _SettingsPromptCardState extends State<SettingsPromptCard> {
                   TextButton(
                     onPressed: widget.onExpand,
                     style: TextButton.styleFrom(
-                      foregroundColor: kSettingsPrimary,
+                      foregroundColor: accent,
                       padding: const EdgeInsets.symmetric(horizontal: 8),
                       minimumSize: const Size(0, 32),
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -1297,7 +1330,7 @@ class SettingsSaveButton extends StatelessWidget {
       child: TextButton(
         onPressed: enabled ? onPressed : null,
         style: TextButton.styleFrom(
-          backgroundColor: kSettingsPrimary,
+          backgroundColor: SettingsAccent.colorOf(context),
           foregroundColor: Colors.white,
           disabledBackgroundColor: kSettingsSwitchInactive,
           disabledForegroundColor: Colors.white,
@@ -1349,7 +1382,8 @@ class SettingsAppBar extends StatelessWidget implements PreferredSizeWidget {
 
   @override
   Widget build(BuildContext context) {
-    final actionWidgets = actions ??
+    final actionWidgets =
+        actions ??
         <Widget>[
           if (onSave != null)
             SettingsSaveButton(
@@ -1396,11 +1430,7 @@ class SettingsAppBar extends StatelessWidget implements PreferredSizeWidget {
       // 但不要阴影（阴影会让头部看起来是悬浮的）。
       bottom: const PreferredSize(
         preferredSize: Size.fromHeight(1),
-        child: Divider(
-          height: 1,
-          thickness: 1,
-          color: kSettingsAppBarDivider,
-        ),
+        child: Divider(height: 1, thickness: 1, color: kSettingsAppBarDivider),
       ),
     );
   }
@@ -1420,6 +1450,9 @@ class SettingsAppBar extends StatelessWidget implements PreferredSizeWidget {
 /// - 按钮用"仍是栈顶才 pop"的判定，快速连点不会把下层页面一起弹掉。
 ///
 /// 典型用法：配合 [SettingsPromptCard] 的「放大编辑」按钮。
+///
+/// [accentColor] 用于弹窗内的强调色（光标 / 聚焦边 / 确定按钮）：
+/// Dialog 是独立路由，不在页面子树的 [SettingsAccent] 之下，必须显式传色。
 Future<void> showSettingsPromptDialog(
   BuildContext context, {
   required String title,
@@ -1429,104 +1462,112 @@ Future<void> showSettingsPromptDialog(
   String confirmLabel = '确定',
   int minLines = 8,
   int maxLines = 12,
+  Color? accentColor,
 }) async {
+  final accent = accentColor ?? kSettingsPrimary;
   final editController = TextEditingController(text: controller.text);
   final result = await showDialog<String>(
     context: context,
     builder: (dialogContext) {
-      return Dialog(
-        backgroundColor: Colors.white,
-        surfaceTintColor: Colors.transparent,
-        insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 18, 20, 12),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: kSettingsTitle,
+      return SettingsAccent(
+        color: accent,
+        soft: kSettingsPrimarySoft,
+        child: Dialog(
+          backgroundColor: Colors.white,
+          surfaceTintColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 20,
+            vertical: 24,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 18, 20, 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: kSettingsTitle,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 14),
-              TextField(
-                controller: editController,
-                autofocus: true,
-                minLines: minLines,
-                maxLines: maxLines,
-                keyboardType: TextInputType.multiline,
-                textInputAction: TextInputAction.newline,
-                cursorColor: kSettingsPrimary,
-                style: const TextStyle(
-                  fontSize: 13,
-                  height: 1.5,
-                  color: kSettingsValue,
-                ),
-                decoration: InputDecoration(
-                  hintText: hint,
-                  hintStyle: const TextStyle(
-                    fontSize: 12.5,
-                    color: kSettingsHint,
+                const SizedBox(height: 14),
+                TextField(
+                  controller: editController,
+                  autofocus: true,
+                  minLines: minLines,
+                  maxLines: maxLines,
+                  keyboardType: TextInputType.multiline,
+                  textInputAction: TextInputAction.newline,
+                  cursorColor: accent,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    height: 1.5,
+                    color: kSettingsValue,
                   ),
-                  filled: true,
-                  fillColor: kSettingsFieldBg,
-                  isDense: true,
-                  contentPadding: const EdgeInsets.all(12),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: kSettingsFieldBorder),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: kSettingsFieldBorder),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(
-                      color: kSettingsPrimary,
-                      width: 1.2,
+                  decoration: InputDecoration(
+                    hintText: hint,
+                    hintStyle: const TextStyle(
+                      fontSize: 12.5,
+                      color: kSettingsHint,
                     ),
+                    filled: true,
+                    fillColor: kSettingsFieldBg,
+                    isDense: true,
+                    contentPadding: const EdgeInsets.all(12),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: kSettingsFieldBorder),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: kSettingsFieldBorder),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: accent, width: 1.2),
+                  ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    onPressed: () => _closeDialogSafely(dialogContext),
-                    style: TextButton.styleFrom(
-                      foregroundColor: kSettingsValue,
-                      padding: const EdgeInsets.symmetric(horizontal: 14),
-                      minimumSize: const Size(0, 34),
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                    child: Text(
-                      cancelLabel,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
+                const SizedBox(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: () => _closeDialogSafely(dialogContext),
+                      style: TextButton.styleFrom(
+                        foregroundColor: kSettingsValue,
+                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                        minimumSize: const Size(0, 34),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: Text(
+                        cancelLabel,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  SettingsSaveButton(
-                    onPressed: () => _closeDialogSafely(
-                      dialogContext,
-                      result: editController.text,
+                    const SizedBox(width: 8),
+                    SettingsSaveButton(
+                      onPressed: () => _closeDialogSafely(
+                        dialogContext,
+                        result: editController.text,
+                      ),
+                      label: confirmLabel,
                     ),
-                    label: confirmLabel,
-                  ),
-                ],
-              ),
-            ],
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
       );

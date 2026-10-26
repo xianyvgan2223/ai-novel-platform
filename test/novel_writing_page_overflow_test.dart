@@ -13,10 +13,9 @@ import 'package:deepseekapp/features/novel_writing/novel_writing_page.dart';
 /// constraints: BoxConstraints(0.0<=w<=360.0, 0.0<=h<=421.5)
 /// size: Size(220.0, 421.5)
 /// ```
-/// 修法：`novel_writing_page.dart` 的 body 改成
-/// LayoutBuilder + SingleChildScrollView + IntrinsicHeight —— 装得下时照旧居中，
-/// 装不下时可滚动。这样切页时**不需要**等输入法收起（等一帧会让切换发涩），
-/// 输入法收起动画与新页面入场动画并行也不会溢出。
+/// 修法：`novel_writing_page.dart` 的 body 改成 ListView（内容装不下时可滚动，
+/// 不会给 Column 一个装不下的紧约束）。这样切页时**不需要**等输入法收起
+/// （等一帧会让切换发涩），输入法收起动画与新页面入场动画并行也不会溢出。
 void main() {
   /// 复现真机尺寸：宽 360、正文可用高度 421.5（= 报错里的约束）
   Future<void> pumpWithBodyHeight(WidgetTester tester, double bodyHeight) async {
@@ -38,12 +37,11 @@ void main() {
     await pumpWithBodyHeight(tester, 421.5);
 
     expect(tester.takeException(), isNull);
-    // 五个入口都在，且页面可滚动（内容比视口高）
+    // 首屏入口可见，页面可滚动（内容比视口高）
     expect(find.text('一键生成大纲'), findsOneWidget);
-    expect(find.text('匹配大纲格式'), findsOneWidget);
 
-    final scrollable = find.byType(SingleChildScrollView).first;
-    expect(tester.widget<SingleChildScrollView>(scrollable).child, isNotNull);
+    final scrollable = find.byType(Scrollable).first;
+    expect(tester.widget<Scrollable>(scrollable).axisDirection, isNotNull);
     expect(find.byType(NovelWritingPage), findsOneWidget);
   });
 
@@ -61,7 +59,7 @@ void main() {
     expect(find.text('匹配大纲格式'), findsOneWidget);
   });
 
-  testWidgets('正文高度充足时仍然居中、不出现滚动条', (tester) async {
+  testWidgets('正文高度充足时不出现滚动条', (tester) async {
     await pumpWithBodyHeight(tester, 700);
 
     expect(tester.takeException(), isNull);

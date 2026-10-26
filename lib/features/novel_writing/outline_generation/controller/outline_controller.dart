@@ -233,7 +233,17 @@ class OutlineController extends ChangeNotifier {
     OutlineBackgroundNotification? backgroundNotification,
   }) : _outlineService = outlineService ?? OutlineService(),
        _backgroundNotification =
-           backgroundNotification ?? OutlineBackgroundNotification.instance;
+           backgroundNotification ?? OutlineBackgroundNotification.instance {
+    // 贴底状态跟随用户滚动实时更新：往上滚开 200px 就停止自动跟随
+    scrollController.addListener(_syncStickToBottom);
+  }
+
+  void _syncStickToBottom() {
+    if (!scrollController.hasClients) return;
+    final pos = scrollController.position;
+    if (!pos.hasContentDimensions) return;
+    _stickToBottom = pos.pixels >= pos.maxScrollExtent - 200;
+  }
 
   // ─── 后台通知同步 ────────────────────────────────────────────
 
@@ -362,7 +372,8 @@ class OutlineController extends ChangeNotifier {
         // 后面精写只改 _step2Json 的概述，不会把它改掉
         _coarseActs = _cloneActs(parsed.acts);
         _stepPreview = '${_step1Text ?? ''}\n\n${_renderSkeleton()}';
-        _coarseSkeletonSnapshot = _renderCoarseSkeleton(); // 编辑后快照同步，返回上一步时展示最新粗骨
+        _coarseSkeletonSnapshot =
+            _renderCoarseSkeleton(); // 编辑后快照同步，返回上一步时展示最新粗骨
         _upsertBubble('三幕粗骨架', _renderCoarseSkeleton());
         _checkpointEdited = true;
       }
@@ -708,21 +719,27 @@ class OutlineController extends ChangeNotifier {
     protagonistController.dispose();
     worldViewController.dispose();
     requirementController.dispose();
+    scrollController.removeListener(_syncStickToBottom);
     scrollController.dispose();
     super.dispose();
   }
 
-  /// 智能滚动：仅当用户接近底部时才自动滚动到底
+  /// 用户是否贴底：贴底时新内容到来就自动跟随；主动往上滚开后就不再抢滚动。
+  /// 只在滚动位置变化时更新（内容变长本身不改变它），因此不受「这次新增
+  /// 多少像素、判断发生在布局前还是布局后」影响。
+  ///
+  /// 初始为 false：刚进页面 / 还没滚到底时不抢滚动；用户滚到底（或点
+  /// 「一键到底」）后由滚动监听置为 true，之后一直跟随。
+  bool _stickToBottom = false;
+
+  /// 智能滚动：仅当用户贴底时才自动滚动到底
   void scrollToBottom() {
+    if (!_stickToBottom || !scrollController.hasClients) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!scrollController.hasClients) return;
-      final pos = scrollController.position;
-      if (!pos.hasContentDimensions) return;
-      final max = pos.maxScrollExtent;
-      if (pos.pixels < max - 200) return;
-      // 流式期间每 300ms 触发一次，animateTo 动画会逐帧布局整份大文档导致卡顿，
+      // 流式期间每 300ms 触发一次，animateTo 会逐帧布局整份大文档导致卡顿，
       // 改用 jumpTo 直接定位，开销最小
-      scrollController.jumpTo(max);
+      scrollController.jumpTo(scrollController.position.maxScrollExtent);
     });
   }
 
@@ -1234,10 +1251,12 @@ class OutlineController extends ChangeNotifier {
         final s = er['summary'] ?? er['position'];
         if (t is! String || t.trim().isEmpty) return null;
         if (s is! String || s.trim().isEmpty) return null;
-        events.add(_Event(
-          title: t.trim(),
-          summary: OutlineMetaRefCleaner.clean(s.trim()),
-        ));
+        events.add(
+          _Event(
+            title: t.trim(),
+            summary: OutlineMetaRefCleaner.clean(s.trim()),
+          ),
+        );
         total++;
       }
       acts.add(_Act(name: name, events: events));
@@ -1555,9 +1574,7 @@ class OutlineController extends ChangeNotifier {
                         f['status'] as String,
                       ),
                     if (f['plan'] is String)
-                      'plan': OutlineMetaRefCleaner.clean(
-                        f['plan'] as String,
-                      ),
+                      'plan': OutlineMetaRefCleaner.clean(f['plan'] as String),
                   },
                 ),
           );
@@ -2077,10 +2094,7 @@ class OutlineController extends ChangeNotifier {
       if (t is! String || t.trim().isEmpty) return null;
       if (s is! String || s.trim().isEmpty) return null;
       events.add(
-        _Event(
-          title: t.trim(),
-          summary: OutlineMetaRefCleaner.clean(s.trim()),
-        ),
+        _Event(title: t.trim(), summary: OutlineMetaRefCleaner.clean(s.trim())),
       );
     }
     return events;
@@ -2107,14 +2121,16 @@ class OutlineController extends ChangeNotifier {
       });
     }
     final chars =
-        (map['character_states'] as List?)?.whereType<String>().map(
-          OutlineMetaRefCleaner.clean,
-        ).toList() ??
+        (map['character_states'] as List?)
+            ?.whereType<String>()
+            .map(OutlineMetaRefCleaner.clean)
+            .toList() ??
         const <String>[];
     final unres =
-        (map['unresolved'] as List?)?.whereType<String>().map(
-          OutlineMetaRefCleaner.clean,
-        ).toList() ??
+        (map['unresolved'] as List?)
+            ?.whereType<String>()
+            .map(OutlineMetaRefCleaner.clean)
+            .toList() ??
         const <String>[];
     return _LedgerResult(
       foreshadows: items,
@@ -2699,9 +2715,8 @@ class OutlineController extends ChangeNotifier {
   /// 精写后的 [_renderSkeleton] 会显示精写概述；「粗骨检查点 / 返回上一步 /
   /// 编辑粗骨」要用这一份，别拿精写版本冒充粗骨。
   /// 旧草稿/旧记录没有保存粗骨时退回精写骨架，避免检查点出现空白文本。
-  String _renderCoarseSkeleton() => _coarseActs == null
-      ? _renderSkeleton()
-      : _renderActs(_coarseActs!);
+  String _renderCoarseSkeleton() =>
+      _coarseActs == null ? _renderSkeleton() : _renderActs(_coarseActs!);
 
   String _renderActs(List<_Act> acts, {bool withNumbers = true}) {
     const headers = ['══ 第一幕：开端 ══', '══ 第二幕：发展 ══', '══ 第三幕：高潮&结局 ══'];

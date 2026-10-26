@@ -17,6 +17,8 @@ class OutlineHistoryListPage extends StatelessWidget {
       emptyTitle: '还没有历史大纲',
       // 旧「历史大纲」列表页的删除入口：改成长按卡片触发
       allowDelete: true,
+      // 只有这个历史入口用中性配色；大纲编辑 / 转章节入口保持原样
+      mutedAccent: true,
       onOpenNovel: (context, outline) async {
         await Navigator.of(context).push(
           MaterialPageRoute(

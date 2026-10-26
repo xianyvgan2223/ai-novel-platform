@@ -95,10 +95,7 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
     await OutlineDbHelper().saveSettings(setting.toMap());
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('设置已保存'),
-          duration: Duration(seconds: 1),
-        ),
+        const SnackBar(content: Text('设置已保存'), duration: Duration(seconds: 1)),
       );
       Navigator.of(context).pop();
     }
@@ -116,6 +113,7 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
       title: '编辑系统提示',
       controller: _systemCtrl,
       hint: _defaultSystemPrompt(),
+      accentColor: kSettingsTitle,
     );
   }
 
@@ -127,164 +125,174 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: kSettingsPageBg,
-      appBar: SettingsAppBar(
-        title: '大纲生成设置',
-        // 加载中保存按钮显示为禁用态（与改造前 AppBar 的禁用语义一致）。
-        onSave: _save,
-        saveEnabled: !_loading,
-      ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator(color: kSettingsPrimary))
-          : ListView(
-              padding: EdgeInsets.only(
-                top: 2,
-                left: kSettingsCardMarginH,
-                right: kSettingsCardMarginH,
-                bottom: 40 + MediaQuery.paddingOf(context).bottom,
+    // 一键生成大纲专属的克制中性配色：不改 settings_kit 默认值，
+    // 只在本页子树内把强调色换成炭黑 + 中性灰。
+    return SettingsAccent(
+      color: kSettingsTitle,
+      soft: kSettingsChipBg,
+      child: Scaffold(
+        backgroundColor: kSettingsPageBg,
+        appBar: SettingsAppBar(
+          title: '大纲生成设置',
+          // 加载中保存按钮显示为禁用态（与改造前 AppBar 的禁用语义一致）。
+          onSave: _save,
+          saveEnabled: !_loading,
+        ),
+        body: _loading
+            ? const Center(
+                child: CircularProgressIndicator(color: kSettingsSubtitle),
+              )
+            : ListView(
+                padding: EdgeInsets.only(
+                  top: 2,
+                  left: kSettingsCardMarginH,
+                  right: kSettingsCardMarginH,
+                  bottom: 40 + MediaQuery.paddingOf(context).bottom,
+                ),
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
+                children: [
+                  // ── 1. 系统提示 ──
+                  const SettingsSectionHeader(
+                    icon: Icons.edit_note_rounded,
+                    title: '系统提示',
+                    subtitle: '一键生成大纲时使用的 AI 指令',
+                    isFirst: true,
+                  ),
+                  SettingsCard(
+                    children: [
+                      SettingsPromptCard(
+                        icon: Icons.edit_note_rounded,
+                        title: '系统提示词',
+                        controller: _systemCtrl,
+                        hintText: _defaultSystemPrompt(),
+                        minLines: 4,
+                        maxLines: 8,
+                        onExpand: _openEnlargeEditor,
+                      ),
+                    ],
+                  ),
+
+                  // ── 2. 模型 ──
+                  // 分区标题用「模型选择」，避免与卡片内唯一的行标签「模型」上下重复。
+                  const SettingsSectionHeader(
+                    icon: Icons.memory_rounded,
+                    title: '模型选择',
+                  ),
+                  SettingsCard(
+                    children: [
+                      SettingsSelectRow(
+                        key: const ValueKey('outline_model'),
+                        label: '模型',
+                        value: _model,
+                        options: [
+                          for (final id in _models)
+                            SettingsSelectOption(
+                              id,
+                              DeepSeekModels.toDisplayName(id) ?? id,
+                            ),
+                        ],
+                        onChanged: (v) => setState(() => _model = v),
+                      ),
+                    ],
+                  ),
+
+                  // ── 3. 生成参数 ──
+                  const SettingsSectionHeader(
+                    icon: Icons.tune_rounded,
+                    title: '生成参数',
+                    subtitle: '影响生成速度、精度与输出长度',
+                  ),
+                  SettingsCard(
+                    children: [
+                      SettingsSwitchRow(
+                        key: const ValueKey('outline_enable_thinking'),
+                        label: '思考模式',
+                        // 行副标题必须 ≤14 个汉字（kit 是单行 + 省略号），
+                        // 完整旧文案放在本卡下方的 SettingsNote 里，信息不丢。
+                        subtitle: '关闭后更快更省',
+                        initialValue: _enableThinking,
+                        onChanged: (v) => setState(() => _enableThinking = v),
+                      ),
+                      SettingsSliderRow(
+                        key: const ValueKey('outline_temperature'),
+                        label: '温度',
+                        subtitle: '数值越高越有创造性',
+                        value: _temperature,
+                        min: 0,
+                        max: 2,
+                        divisions: 40,
+                        // 温度步长 0.05，真机习惯看一位小数。
+                        valueLabel: (v) => v.toStringAsFixed(1),
+                        onChanged: (v) => setState(() => _temperature = v),
+                      ),
+                      SettingsTextRow(
+                        key: const ValueKey('outline_max_tokens'),
+                        label: '最大生成长度',
+                        hint: '1 ~ 384000',
+                        keyboardType: TextInputType.number,
+                        initialValue: '$_maxTokens',
+                        // 钳制语义与改造前一致：只有 1..384000 的整数才更新内存值，
+                        // 非法输入不写入（保存时仍用最后一次合法值）。
+                        onChanged: (v) {
+                          final n = int.tryParse(v);
+                          if (n != null && n >= 1 && n <= 384000) {
+                            setState(() => _maxTokens = n);
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                  // 思考模式的完整旧文案（行副标题放不下，按 spec §2.1 放进说明卡）
+                  const SizedBox(height: kSettingsSectionGapBot),
+                  const SettingsNote(
+                    text:
+                        '思考模式关闭后，模型不再先进行推理思考，max_tokens 全部用于'
+                        '正式内容，生成更快更省；复杂任务精度可能略降。',
+                  ),
+
+                  // ── 4. 生成检查点 ──
+                  const SettingsSectionHeader(
+                    icon: Icons.pause_circle_outline_rounded,
+                    title: '生成检查点',
+                    subtitle: '阶段完成后暂停，可编辑后继续',
+                  ),
+                  SettingsCard(
+                    children: [
+                      SettingsSwitchRow(
+                        key: const ValueKey('outline_pause_after_skeleton'),
+                        label: '粗骨架检查点',
+                        subtitle: '三幕骨架完成后暂停',
+                        initialValue: _pauseAfterSkeleton,
+                        onChanged: (v) =>
+                            setState(() => _pauseAfterSkeleton = v),
+                      ),
+                      SettingsSwitchRow(
+                        key: const ValueKey('outline_pause_after_events'),
+                        label: '大事件检查点',
+                        subtitle: '大事件精写完成后暂停',
+                        initialValue: _pauseAfterEvents,
+                        onChanged: (v) => setState(() => _pauseAfterEvents = v),
+                      ),
+                      SettingsSwitchRow(
+                        key: const ValueKey('outline_pause_after_minor'),
+                        label: '小事件检查点',
+                        subtitle: '小事件全部展开后暂停',
+                        initialValue: _pauseAfterMinor,
+                        onChanged: (v) => setState(() => _pauseAfterMinor = v),
+                      ),
+                    ],
+                  ),
+                  // 三个检查点的完整旧说明（行副标题放不下，按 spec §2.1 放进说明卡）
+                  const SizedBox(height: kSettingsSectionGapBot),
+                  const SettingsNote(
+                    text:
+                        '开启后对应阶段生成完成即暂停，可编辑或重新生成该阶段内容，'
+                        '再手动点击「继续」推进后续流程。',
+                  ),
+                ],
               ),
-              keyboardDismissBehavior:
-                  ScrollViewKeyboardDismissBehavior.onDrag,
-              children: [
-                // ── 1. 系统提示 ──
-                const SettingsSectionHeader(
-                  icon: Icons.edit_note_rounded,
-                  title: '系统提示',
-                  subtitle: '一键生成大纲时使用的 AI 指令',
-                  isFirst: true,
-                ),
-                SettingsCard(
-                  children: [
-                    SettingsPromptCard(
-                      icon: Icons.edit_note_rounded,
-                      title: '系统提示词',
-                      controller: _systemCtrl,
-                      hintText: _defaultSystemPrompt(),
-                      minLines: 4,
-                      maxLines: 8,
-                      onExpand: _openEnlargeEditor,
-                    ),
-                  ],
-                ),
-
-                // ── 2. 模型 ──
-                // 分区标题用「模型选择」，避免与卡片内唯一的行标签「模型」上下重复。
-                const SettingsSectionHeader(
-                  icon: Icons.memory_rounded,
-                  title: '模型选择',
-                ),
-                SettingsCard(
-                  children: [
-                    SettingsSelectRow(
-                      key: const ValueKey('outline_model'),
-                      label: '模型',
-                      value: _model,
-                      options: [
-                        for (final id in _models)
-                          SettingsSelectOption(
-                            id,
-                            DeepSeekModels.toDisplayName(id) ?? id,
-                          ),
-                      ],
-                      onChanged: (v) => setState(() => _model = v),
-                    ),
-                  ],
-                ),
-
-                // ── 3. 生成参数 ──
-                const SettingsSectionHeader(
-                  icon: Icons.tune_rounded,
-                  title: '生成参数',
-                  subtitle: '影响生成速度、精度与输出长度',
-                ),
-                SettingsCard(
-                  children: [
-                    SettingsSwitchRow(
-                      key: const ValueKey('outline_enable_thinking'),
-                      label: '思考模式',
-                      // 行副标题必须 ≤14 个汉字（kit 是单行 + 省略号），
-                      // 完整旧文案放在本卡下方的 SettingsNote 里，信息不丢。
-                      subtitle: '关闭后更快更省',
-                      initialValue: _enableThinking,
-                      onChanged: (v) => setState(() => _enableThinking = v),
-                    ),
-                    SettingsSliderRow(
-                      key: const ValueKey('outline_temperature'),
-                      label: '温度',
-                      subtitle: '数值越高越有创造性',
-                      value: _temperature,
-                      min: 0,
-                      max: 2,
-                      divisions: 40,
-                      // 温度步长 0.05，真机习惯看一位小数。
-                      valueLabel: (v) => v.toStringAsFixed(1),
-                      onChanged: (v) => setState(() => _temperature = v),
-                    ),
-                    SettingsTextRow(
-                      key: const ValueKey('outline_max_tokens'),
-                      label: '最大生成长度',
-                      hint: '1 ~ 384000',
-                      keyboardType: TextInputType.number,
-                      initialValue: '$_maxTokens',
-                      // 钳制语义与改造前一致：只有 1..384000 的整数才更新内存值，
-                      // 非法输入不写入（保存时仍用最后一次合法值）。
-                      onChanged: (v) {
-                        final n = int.tryParse(v);
-                        if (n != null && n >= 1 && n <= 384000) {
-                          setState(() => _maxTokens = n);
-                        }
-                      },
-                    ),
-                  ],
-                ),
-                // 思考模式的完整旧文案（行副标题放不下，按 spec §2.1 放进说明卡）
-                const SizedBox(height: kSettingsSectionGapBot),
-                const SettingsNote(
-                  text: '思考模式关闭后，模型不再先进行推理思考，max_tokens 全部用于'
-                      '正式内容，生成更快更省；复杂任务精度可能略降。',
-                ),
-
-                // ── 4. 生成检查点 ──
-                const SettingsSectionHeader(
-                  icon: Icons.pause_circle_outline_rounded,
-                  title: '生成检查点',
-                  subtitle: '阶段完成后暂停，可编辑后继续',
-                ),
-                SettingsCard(
-                  children: [
-                    SettingsSwitchRow(
-                      key: const ValueKey('outline_pause_after_skeleton'),
-                      label: '粗骨架检查点',
-                      subtitle: '三幕骨架完成后暂停',
-                      initialValue: _pauseAfterSkeleton,
-                      onChanged: (v) =>
-                          setState(() => _pauseAfterSkeleton = v),
-                    ),
-                    SettingsSwitchRow(
-                      key: const ValueKey('outline_pause_after_events'),
-                      label: '大事件检查点',
-                      subtitle: '大事件精写完成后暂停',
-                      initialValue: _pauseAfterEvents,
-                      onChanged: (v) => setState(() => _pauseAfterEvents = v),
-                    ),
-                    SettingsSwitchRow(
-                      key: const ValueKey('outline_pause_after_minor'),
-                      label: '小事件检查点',
-                      subtitle: '小事件全部展开后暂停',
-                      initialValue: _pauseAfterMinor,
-                      onChanged: (v) => setState(() => _pauseAfterMinor = v),
-                    ),
-                  ],
-                ),
-                // 三个检查点的完整旧说明（行副标题放不下，按 spec §2.1 放进说明卡）
-                const SizedBox(height: kSettingsSectionGapBot),
-                const SettingsNote(
-                  text: '开启后对应阶段生成完成即暂停，可编辑或重新生成该阶段内容，'
-                      '再手动点击「继续」推进后续流程。',
-                ),
-              ],
-            ),
+      ),
     );
   }
 }

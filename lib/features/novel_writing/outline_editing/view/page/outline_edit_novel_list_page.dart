@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../../../core/widgets/settings_kit.dart';
 import '../../../shared/dialog_utils.dart';
 import '../../../shared/data/outline_chapter_db_helper.dart';
 import '../../../shared/data/outline_record_db_helper.dart';
@@ -34,6 +35,10 @@ class OutlineEditNovelListPage extends StatefulWidget {
   /// 只有「一键生成大纲」的历史入口开启，保持旧「历史大纲」列表页的删除能力。
   final bool allowDelete;
 
+  /// 中性配色：只给「一键生成大纲」的历史入口用。
+  /// 其余入口（大纲编辑 / 大纲转章节）保持原来的主色蓝。
+  final bool mutedAccent;
+
   const OutlineEditNovelListPage({
     super.key,
     this.title = '大纲编辑',
@@ -42,6 +47,7 @@ class OutlineEditNovelListPage extends StatefulWidget {
     this.emptyHint = '请先在「一键生成大纲」中创建',
     this.onOpenNovel,
     this.allowDelete = false,
+    this.mutedAccent = false,
   });
 
   @override
@@ -203,7 +209,11 @@ class _OutlineEditNovelListPageState extends State<OutlineEditNovelListPage> {
         elevation: 0.5,
         centerTitle: true,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Color(0xFF333333)),
+          icon: Icon(
+            Icons.arrow_back_ios_new_rounded,
+            size: 18,
+            color: widget.mutedAccent ? kSettingsLabel : const Color(0xFF333333),
+          ),
           onPressed: () => Navigator.of(context).pop(),
         ),
       ),
@@ -248,7 +258,9 @@ class _OutlineEditNovelListPageState extends State<OutlineEditNovelListPage> {
                     horizontal: 16,
                     vertical: 10,
                   ),
-                  color: const Color(0xFFF8F9FF),
+                  color: widget.mutedAccent
+                      ? kSettingsChipBg
+                      : const Color(0xFFF8F9FF),
                   child: Text(
                     '共 ${_records.length} 部小说 · ${widget.hint}'
                     '${widget.allowDelete ? ' · 长按卡片删除' : ''}',
@@ -281,6 +293,7 @@ class _OutlineEditNovelListPageState extends State<OutlineEditNovelListPage> {
                         return _OutlineCard(
                           record: r,
                           stat: r.id == null ? null : _stats[r.id!],
+                          mutedAccent: widget.mutedAccent,
                           onTap: () => _openNovel(r),
                           onLongPress: widget.allowDelete
                               ? () => _confirmDelete(r)
@@ -300,6 +313,9 @@ class _OutlineEditNovelListPageState extends State<OutlineEditNovelListPage> {
 class _OutlineCard extends StatelessWidget {
   final OutlineRecord record;
   final ({int total, int completed})? stat;
+
+  /// 中性配色（仅「一键生成大纲」历史入口）
+  final bool mutedAccent;
   final VoidCallback onTap;
 
   /// 长按回调（为 null 时不响应长按）
@@ -309,6 +325,7 @@ class _OutlineCard extends StatelessWidget {
     required this.record,
     required this.stat,
     required this.onTap,
+    this.mutedAccent = false,
     this.onLongPress,
   });
 
@@ -320,6 +337,16 @@ class _OutlineCard extends StatelessWidget {
     final total = stat?.total ?? 0;
     final completed = stat?.completed ?? 0;
     final firstChar = title.characters.isEmpty ? '书' : title.characters.first;
+    // 默认保持原来的主色蓝；历史入口传 mutedAccent 时换成中性灰阶
+    final accent = mutedAccent ? kSettingsTitle : const Color(0xFF4D6BFE);
+    final avatarColors = mutedAccent
+        ? const [Color(0xFF2B303A), Color(0xFF6B7385)]
+        : const [Color(0xFF4D6BFE), Color(0xFF8AA2FF)];
+    final tagBg = mutedAccent ? kSettingsChipBg : const Color(0xFFEFF3FF);
+    final tagFg = mutedAccent ? kSettingsValue : const Color(0xFF4D6BFE);
+    final statIconColor = mutedAccent
+        ? kSettingsSubtitle
+        : const Color(0xFF4D6BFE);
     return Material(
       color: Colors.white,
       borderRadius: BorderRadius.circular(10),
@@ -351,8 +378,8 @@ class _OutlineCard extends StatelessWidget {
                     height: 30,
                     alignment: Alignment.center,
                     decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        colors: [Color(0xFF4D6BFE), Color(0xFF8AA2FF)],
+                      gradient: LinearGradient(
+                        colors: avatarColors,
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
                       ),
@@ -391,15 +418,12 @@ class _OutlineCard extends StatelessWidget {
                     vertical: 1,
                   ),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFEFF3FF),
+                    color: tagBg,
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: Text(
                     genre,
-                    style: const TextStyle(
-                      fontSize: 10,
-                      color: Color(0xFF4D6BFE),
-                    ),
+                    style: TextStyle(fontSize: 10, color: tagFg),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -420,10 +444,7 @@ class _OutlineCard extends StatelessWidget {
               const Spacer(),
               Text(
                 record.formattedDate,
-                style: const TextStyle(
-                  fontSize: 10,
-                  color: Color(0xFFBBBBBB),
-                ),
+                style: const TextStyle(fontSize: 10, color: Color(0xFFBBBBBB)),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -435,9 +456,7 @@ class _OutlineCard extends StatelessWidget {
                     value: completed / total,
                     minHeight: 3,
                     backgroundColor: const Color(0xFFF0F2F6),
-                    valueColor: const AlwaysStoppedAnimation<Color>(
-                      Color(0xFF4D6BFE),
-                    ),
+                    valueColor: AlwaysStoppedAnimation<Color>(accent),
                   ),
                 ),
                 const SizedBox(height: 5),
@@ -454,11 +473,7 @@ class _OutlineCard extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    const Icon(
-                      Icons.edit_note,
-                      size: 14,
-                      color: Color(0xFF4D6BFE),
-                    ),
+                    Icon(Icons.edit_note, size: 14, color: statIconColor),
                   ],
                 ),
               ] else

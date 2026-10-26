@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
+import '../../../../../core/widgets/settings_kit.dart';
 import '../../../shared/dialog_utils.dart';
 import '../../../shared/domain/outline_record.dart';
 import '../../../shared/data/outline_record_db_helper.dart';
@@ -138,10 +139,7 @@ class _OutlineHistoryDetailPageState extends State<OutlineHistoryDetailPage> {
           ),
           TextButton(
             onPressed: () => closeDialogSafely(ctx, result: true),
-            child: const Text(
-              '确定',
-              style: TextStyle(color: Color(0xFF4D6BFE)),
-            ),
+            child: const Text('确定', style: TextStyle(color: kSettingsTitle)),
           ),
         ],
       ),
@@ -224,9 +222,8 @@ class _OutlineHistoryDetailPageState extends State<OutlineHistoryDetailPage> {
     if (!await _ensureSavedBeforeProceed()) return;
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => OutlineGenerationPage(
-          initialRecord: _recordWithLatestContent(),
-        ),
+        builder: (_) =>
+            OutlineGenerationPage(initialRecord: _recordWithLatestContent()),
       ),
     );
     widget.onSaved?.call();
@@ -293,6 +290,14 @@ class _OutlineHistoryDetailPageState extends State<OutlineHistoryDetailPage> {
           ),
           ElevatedButton(
             onPressed: () => closeDialogSafely(ctx, result: 'save'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: kSettingsTitle,
+              foregroundColor: Colors.white,
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
             child: const Text('保存并退出'),
           ),
         ],
@@ -364,10 +369,7 @@ class _OutlineHistoryDetailPageState extends State<OutlineHistoryDetailPage> {
           ),
           TextButton(
             onPressed: () => closeDialogSafely(ctx, result: 'save'),
-            child: const Text(
-              '保存并继续',
-              style: TextStyle(color: Color(0xFF4D6BFE)),
-            ),
+            child: const Text('保存并继续', style: TextStyle(color: kSettingsTitle)),
           ),
         ],
       ),
@@ -394,7 +396,6 @@ class _OutlineHistoryDetailPageState extends State<OutlineHistoryDetailPage> {
     createdAt: widget.record.createdAt,
   );
 
-
   @override
   Widget build(BuildContext context) {
     final r = widget.record;
@@ -407,206 +408,244 @@ class _OutlineHistoryDetailPageState extends State<OutlineHistoryDetailPage> {
       },
       child: Scaffold(
         backgroundColor: Colors.white,
-      appBar: AppBar(
-        title: Text(
-          r.title.isNotEmpty ? r.title : '大纲详情',
-          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-        ),
-        backgroundColor: Colors.white,
-        elevation: 0.5,
-        centerTitle: true,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Color(0xFF333333)),
-          onPressed: _confirmExitIfDirty,
-        ),
-        actions: [
-          TextButton(
-            onPressed: _save,
-            child: const Text(
-              '保存',
-              style: TextStyle(fontSize: 14, color: Color(0xFF4D6BFE)),
+        appBar: AppBar(
+          title: Text(
+            r.title.isNotEmpty ? r.title : '大纲详情',
+            style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: kSettingsTitle,
             ),
           ),
-        ],
-      ),
-      body: CupertinoScrollbar(
-        controller: _scrollCtrl,
-        thumbVisibility: true,
-        thickness: 6,
-        radius: const Radius.circular(3),
-        child: ListView.builder(
+          backgroundColor: Colors.white,
+          elevation: 0,
+          scrolledUnderElevation: 0,
+          centerTitle: true,
+          leading: IconButton(
+            icon: const Icon(
+              Icons.arrow_back_ios_new_rounded,
+              size: 18,
+              color: kSettingsLabel,
+            ),
+            onPressed: _confirmExitIfDirty,
+          ),
+          actions: [
+            TextButton(
+              onPressed: _save,
+              child: const Text(
+                '保存',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: kSettingsTitle,
+                ),
+              ),
+            ),
+          ],
+          bottom: const PreferredSize(
+            preferredSize: Size.fromHeight(1),
+            child: Divider(
+              height: 1,
+              thickness: 1,
+              color: kSettingsAppBarDivider,
+            ),
+          ),
+        ),
+        body: CupertinoScrollbar(
           controller: _scrollCtrl,
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-          // 默认 250px 的预构建区在行数上千时会显著增加滚动重建量，调小以提速
-          cacheExtent: 120,
-          itemCount: _lineCtrls.length + 1,
-          itemBuilder: (context, index) {
-            if (index == 0) {
-              // 头部：标题 + 设定信息 + 操作按钮，作为列表首项随正文一起滚动，
-              // 主角/世界观设定较长时不会被裁剪，整页均可滑动
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (r.title.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: Text(
-                          '${r.title}',
-                          style: const TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
+          thumbVisibility: true,
+          thickness: 6,
+          radius: const Radius.circular(3),
+          child: ListView.builder(
+            controller: _scrollCtrl,
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+            // 默认 250px 的预构建区在行数上千时会显著增加滚动重建量，调小以提速
+            cacheExtent: 120,
+            itemCount: _lineCtrls.length + 1,
+            itemBuilder: (context, index) {
+              if (index == 0) {
+                // 头部：标题 + 设定信息 + 操作按钮，作为列表首项随正文一起滚动，
+                // 主角/世界观设定较长时不会被裁剪，整页均可滑动
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (r.title.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Text(
+                            '${r.title}',
+                            style: const TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      _infoRow('类型', _genreCtrl.text),
+                      _infoRow('主题', _themeCtrl.text),
+                      _infoRow('主角简介', _protagonistCtrl.text),
+                      _infoRow('世界观', _worldviewCtrl.text),
+                      _infoRow('生成时间', r.formattedDate),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton.icon(
+                          onPressed: _editSettings,
+                          icon: const Icon(Icons.edit_note, size: 18),
+                          label: const Text(
+                            '编辑设定（类型 / 主题 / 主角简介 / 世界观）',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                          style: TextButton.styleFrom(
+                            foregroundColor: kSettingsValue,
+                            visualDensity: VisualDensity.compact,
+                            padding: EdgeInsets.zero,
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                           ),
                         ),
                       ),
-                    _infoRow('类型', _genreCtrl.text),
-                    _infoRow('主题', _themeCtrl.text),
-                    _infoRow('主角简介', _protagonistCtrl.text),
-                    _infoRow('世界观', _worldviewCtrl.text),
-                    _infoRow('生成时间', r.formattedDate),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: TextButton.icon(
-                        onPressed: _editSettings,
-                        icon: const Icon(Icons.edit_note, size: 18),
-                        label: const Text(
-                          '编辑设定（类型 / 主题 / 主角简介 / 世界观）',
-                          style: TextStyle(fontSize: 12),
+                      const SizedBox(height: 16),
+                      if (r.isIncomplete) ...[
+                        SizedBox(
+                          width: double.infinity,
+                          height: 40,
+                          child: ElevatedButton.icon(
+                            onPressed: _continueGeneration,
+                            icon: const Icon(
+                              Icons.play_arrow_rounded,
+                              size: 18,
+                            ),
+                            label: const Text('继续生成'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: kSettingsTitle,
+                              foregroundColor: Colors.white,
+                              elevation: 0,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                          ),
                         ),
-                        style: TextButton.styleFrom(
-                          foregroundColor: const Color(0xFF4D6BFE),
-                          visualDensity: VisualDensity.compact,
-                          padding: EdgeInsets.zero,
-                          minimumSize: Size.zero,
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    if (r.isIncomplete) ...[
+                        const SizedBox(height: 8),
+                      ],
                       SizedBox(
                         width: double.infinity,
                         height: 40,
-                        child: ElevatedButton.icon(
-                          onPressed: _continueGeneration,
-                          icon: const Icon(Icons.play_arrow, size: 18),
-                          label: const Text('继续生成'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF4D6BFE),
-                            foregroundColor: Colors.white,
+                        child: OutlinedButton.icon(
+                          onPressed: _regenerate,
+                          icon: const Icon(Icons.auto_awesome, size: 18),
+                          label: const Text('重新生成大纲'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: kSettingsLabel,
+                            backgroundColor: Colors.white,
+                            side: const BorderSide(color: kSettingsFieldBorder),
                             shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
+                              borderRadius: BorderRadius.circular(12),
                             ),
                           ),
                         ),
                       ),
                       const SizedBox(height: 8),
-                    ],
-                    SizedBox(
-                      width: double.infinity,
-                      height: 40,
-                      child: OutlinedButton.icon(
-                        onPressed: _regenerate,
-                        icon: const Icon(Icons.auto_awesome, size: 18),
-                        label: const Text('重新生成大纲'),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: const Color(0xFF4D6BFE),
-                          side: const BorderSide(color: Color(0xFF4D6BFE)),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: () => _reedit('skeleton'),
+                              icon: const Icon(
+                                Icons.edit_note_rounded,
+                                size: 18,
+                              ),
+                              label: const Text('编辑粗骨'),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: kSettingsLabel,
+                                backgroundColor: Colors.white,
+                                side: const BorderSide(
+                                  color: kSettingsFieldBorder,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                            ),
                           ),
-                        ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: () => _reedit('events'),
+                              icon: const Icon(
+                                Icons.edit_note_rounded,
+                                size: 18,
+                              ),
+                              label: const Text('编辑大事件'),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: kSettingsLabel,
+                                backgroundColor: Colors.white,
+                                side: const BorderSide(
+                                  color: kSettingsFieldBorder,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: () => _reedit('skeleton'),
-                            icon: const Icon(Icons.edit_note, size: 18),
-                            label: const Text('编辑粗骨'),
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: const Color(0xFF4D6BFE),
-                              side: const BorderSide(color: Color(0xFF4D6BFE)),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: () => _reedit('events'),
-                            icon: const Icon(Icons.edit_note, size: 18),
-                            label: const Text('编辑大事件'),
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: const Color(0xFF4D6BFE),
-                              side: const BorderSide(color: Color(0xFF4D6BFE)),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '局部重新生成：编辑粗骨/大事件后仅重写对应下游内容，另存为新大纲',
-                      style: TextStyle(fontSize: 11, color: Colors.grey[500]),
-                    ),
-                  ],
-                ),
-              );
-            }
-            // 正文行：非编辑行用轻量 Text 渲染（滚动每帧重建成本低），
-            // 点击进入编辑态切换为 TextField；格式与单个 TextField 完全一致
-            // （按 \n 拆分、保存时重新 join）
-            final lineIndex = index - 1;
-            if (lineIndex == _editingIndex) {
-              return TextField(
-                controller: _lineCtrls[lineIndex],
-                focusNode: _editFocusNode,
-                maxLines: null,
-                minLines: 1,
-                style: const TextStyle(
-                  fontSize: 12,
-                  height: 1.5,
-                  color: Color(0xFF444444),
-                ),
-                decoration: const InputDecoration(
-                  border: InputBorder.none,
-                  contentPadding: EdgeInsets.zero,
-                  isDense: true,
-                ),
-                // 点击编辑区外（其他行/空白处）退出编辑态
-                onTapOutside: (_) => _stopEditing(),
-              );
-            }
-            final text = _lineCtrls[lineIndex].text;
-            return GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () => _startEditing(lineIndex),
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(minHeight: 18),
-                child: Align(
-                  alignment: Alignment.topLeft,
-                  child: Text(
-                    // 空行显示为最小高度行，保证可点击进入编辑
-                    text.isEmpty ? '\u00A0' : text,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      height: 1.5,
-                      color: Color(0xFF444444),
+                      const SizedBox(height: 4),
+                      Text(
+                        '局部重新生成：编辑粗骨/大事件后仅重写对应下游内容，另存为新大纲',
+                        style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                      ),
+                    ],
+                  ),
+                );
+              }
+              // 正文行：非编辑行用轻量 Text 渲染（滚动每帧重建成本低），
+              // 点击进入编辑态切换为 TextField；格式与单个 TextField 完全一致
+              // （按 \n 拆分、保存时重新 join）
+              final lineIndex = index - 1;
+              if (lineIndex == _editingIndex) {
+                return TextField(
+                  controller: _lineCtrls[lineIndex],
+                  focusNode: _editFocusNode,
+                  maxLines: null,
+                  minLines: 1,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    height: 1.5,
+                    color: Color(0xFF444444),
+                  ),
+                  decoration: const InputDecoration(
+                    border: InputBorder.none,
+                    contentPadding: EdgeInsets.zero,
+                    isDense: true,
+                  ),
+                  // 点击编辑区外（其他行/空白处）退出编辑态
+                  onTapOutside: (_) => _stopEditing(),
+                );
+              }
+              final text = _lineCtrls[lineIndex].text;
+              return GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => _startEditing(lineIndex),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: 18),
+                  child: Align(
+                    alignment: Alignment.topLeft,
+                    child: Text(
+                      // 空行显示为最小高度行，保证可点击进入编辑
+                      text.isEmpty ? '\u00A0' : text,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        height: 1.5,
+                        color: Color(0xFF444444),
+                      ),
                     ),
                   ),
                 ),
-              ),
-            );
-          },
+              );
+            },
           ),
         ),
       ),

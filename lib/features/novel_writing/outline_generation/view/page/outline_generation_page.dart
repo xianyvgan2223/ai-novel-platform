@@ -2,12 +2,45 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import '../../../../../core/config/route_names.dart';
+import '../../../../../core/widgets/settings_kit.dart';
 import '../../background/outline_generation_session.dart';
 import '../../controller/outline_controller.dart';
 import '../../../shared/dialog_utils.dart';
 import '../../../shared/domain/outline_record.dart';
 import 'outline_setting_page.dart';
 import 'outline_history_list_page.dart';
+
+// ─── 本页视觉（色值 / 圆角 / 间距全部取自 settings_kit 的令牌，禁止另起一套） ───
+
+/// 警告横幅：柔和的暖底 + 深琥珀字。
+const Color _kWarningSoft = Color(0xFFFFF6E3);
+const Color _kWarningInk = Color(0xFF9A6B12);
+
+/// 检查点卡片：琥珀色点缀（图标 chip + 标题），底色仍用白卡。
+const Color _kAmberSoft = Color(0xFFFFF3DA);
+const Color _kAmberInk = Color(0xFFB8860B);
+const Color _kAmberTitle = Color(0xFF7A5C00);
+
+/// 错误气泡里的正文色（比纯红更沉，长文阅读不刺眼）。
+const Color _kErrorInk = Color(0xFF8C2F2F);
+
+/// 卡片发丝描边：白卡不用投影，改用 1px 浅灰描边，页面更平、更克制。
+const Color _kCardBorder = Color(0xFFECEEF2);
+
+/// 输入框聚焦时的描边：不用主色，一条中灰线即可（本页没有第二强调色）。
+const Color _kFieldFocusBorder = Color(0xFFD8DCE3);
+
+const TextStyle _kFieldTextStyle = TextStyle(
+  fontSize: 14,
+  height: 1.4,
+  color: kSettingsLabel,
+);
+
+const TextStyle _kHelperStyle = TextStyle(
+  fontSize: 11.5,
+  height: 1.5,
+  color: kSettingsSubtitle,
+);
 
 /// 一键生成小说大纲页面（流式输出）
 class OutlineGenerationPage extends StatefulWidget {
@@ -95,6 +128,14 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
     '历史',
   ];
 
+  /// 「停止生成」悬浮块位置（相对 body 右下角的偏移，可拖动；跨重建保留）
+  double _stopRight = 16;
+  double _stopBottom = 24;
+  final GlobalKey _stopFabKey = GlobalKey();
+
+  /// 「一键到底」按钮的显隐状态（仅用于滚动时触发重建）
+  bool _canJumpToBottom = false;
+
   @override
   void initState() {
     super.initState();
@@ -109,6 +150,7 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
     _controller = attach.controller;
     _attachedExisting = attach.attachedExisting;
     _controller.addListener(_onChanged);
+    _controller.scrollController.addListener(_onScrollChanged);
     if (!_attachedExisting) _applyInitialRecord();
     _majorEventCountController.text = '${_controller.majorEventCount}';
     _minorEventCountController.text = '${_controller.minorEventCount}';
@@ -169,6 +211,7 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _controller.removeListener(_onChanged);
+    _controller.scrollController.removeListener(_onScrollChanged);
     // 退出页面前把检查点编辑立即落盘，防止意外返回/退出丢失用户更改
     _controller.flushCheckpointSync();
     // 记录滚动位置后归还会话：生成中 / 检查点等待中会保留控制器（生成继续跑），
@@ -224,6 +267,55 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
     if (mounted) setState(() => _hasDraft = has);
   }
 
+  /// 滚动位置变化：只在「是否需要一键到底」翻转时重建，避免每个像素 setState。
+  void _onScrollChanged() {
+    final sc = _controller.scrollController;
+    if (!sc.hasClients) return;
+    final can = (sc.position.maxScrollExtent - sc.offset) > 120;
+    if (can != _canJumpToBottom) {
+      setState(() => _canJumpToBottom = can);
+    }
+  }
+
+  /// 布局完成后同步「一键到底」的显隐：内容变长 / 检查点出现后
+  /// maxScrollExtent 会变化，但滚动监听不一定触发，必须主动对齐一次。
+  void _syncJumpVisibility() {
+    if (!mounted) return;
+    final sc = _controller.scrollController;
+    if (!sc.hasClients) return;
+    final can = (sc.position.maxScrollExtent - sc.offset) > 120;
+    if (can != _canJumpToBottom) {
+      setState(() => _canJumpToBottom = can);
+    }
+  }
+
+  /// 拖动「停止生成」悬浮块：位置记在 body 右下角偏移里，限制在可视区域内。
+  void _onStopDrag(DragUpdateDetails d, BoxConstraints constraints) {
+    final fabSize = _stopFabKey.currentContext?.size ?? const Size(140, 48);
+    final inset = MediaQuery.paddingOf(context).bottom;
+    final maxRight = (constraints.maxWidth - fabSize.width - 8).clamp(
+      8.0,
+      9999.0,
+    );
+    final maxBottom = (constraints.maxHeight - fabSize.height - 8 - inset)
+        .clamp(8.0, 9999.0);
+    setState(() {
+      _stopRight = (_stopRight - d.delta.dx).clamp(8.0, maxRight);
+      _stopBottom = (_stopBottom - d.delta.dy).clamp(8.0, maxBottom);
+    });
+  }
+
+  /// 一键滚到最底部（流式生成时看最新内容）。
+  Future<void> _jumpToBottom() async {
+    final sc = _controller.scrollController;
+    if (!sc.hasClients) return;
+    await sc.animateTo(
+      sc.position.maxScrollExtent,
+      duration: const Duration(milliseconds: 320),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
   // 气泡 Widget 实例缓存：内容未变化的气泡复用同一实例，
   // Flutter 对 identical 的旧实例会跳过 rebuild/layout，避免流式更新时
   // 每 300ms 全量重建几十个大段 SelectableText 导致卡顿。
@@ -245,17 +337,18 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
     if (k == _bubbleCacheKey) return _bubbleCacheWidgets;
     _bubbleCacheKey = k;
     _bubbleCacheWidgets = List.unmodifiable([
-      for (final b in bubbles)
-        Padding(
-          padding: const EdgeInsets.only(bottom: 10),
-          child: RepaintBoundary(
-            child: _buildBubble(
-              label: b.label,
-              content: b.content,
-              isError: b.isError,
-            ),
+      for (var i = 0; i < bubbles.length; i++) ...[
+        // 步骤之间用发丝分割线而不是间距：长结果更像连续文档，不是一摞气泡
+        if (i > 0)
+          const Divider(height: 28, thickness: 1, color: kSettingsDivider),
+        RepaintBoundary(
+          child: _buildBubble(
+            label: bubbles[i].label,
+            content: bubbles[i].content,
+            isError: bubbles[i].isError,
           ),
         ),
+      ],
     ]);
     return _bubbleCacheWidgets;
   }
@@ -305,694 +398,660 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
   @override
   Widget build(BuildContext context) {
     final c = _controller;
-    return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        title: Text(
-          _isContinue ? '继续生成' : (_isReedit ? '局部重新生成' : '一键生成大纲'),
-          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-        ),
-        backgroundColor: Colors.white,
-        elevation: 0.5,
-        centerTitle: true,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Color(0xFF333333)),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.history, color: Color(0xFF4D6BFE)),
-            tooltip: '历史大纲',
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const OutlineHistoryListPage()),
+    final hasOutput =
+        c.bubbles.isNotEmpty || c.displayText.isNotEmpty || c.loading;
+    return DefaultSelectionStyle(
+      // 光标 / 选中高亮也用中性色，避免输入框里还残留蓝色
+      cursorColor: kSettingsTitle,
+      selectionColor: kSettingsTitle.withValues(alpha: 0.18),
+      child: Scaffold(
+        backgroundColor: kSettingsPageBg,
+        appBar: AppBar(
+          backgroundColor: kSettingsCardBg,
+          surfaceTintColor: Colors.transparent,
+          elevation: 0,
+          scrolledUnderElevation: 0,
+          centerTitle: true,
+          title: Text(
+            _isContinue ? '继续生成' : (_isReedit ? '局部重新生成' : '一键生成大纲'),
+            style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: kSettingsTitle,
             ),
           ),
-          IconButton(
-            icon: const Icon(Icons.settings, color: Color(0xFF4D6BFE)),
-            tooltip: '大纲生成设置',
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                // 命名路由：让全局悬浮球在大纲生成设置页隐藏（见 route_names.dart）
-                settings: const RouteSettings(name: kOutlineSettingsRouteName),
-                builder: (_) => const OutlineSettingPage(),
+          leading: IconButton(
+            icon: const Icon(
+              Icons.arrow_back_ios_new_rounded,
+              size: 18,
+              color: kSettingsLabel,
+            ),
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+          actions: [
+            IconButton(
+              icon: const Icon(
+                Icons.history_rounded,
+                size: 21,
+                color: kSettingsValue,
+              ),
+              tooltip: '历史大纲',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const OutlineHistoryListPage(),
+                ),
               ),
             ),
-          ),
-        ],
-      ),
-      floatingActionButton: c.loading
-          ? FloatingActionButton.extended(
-              onPressed: _onCancelPressed,
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
-              icon: const Icon(Icons.stop, size: 20),
-              label: const Text(
-                '停止生成',
-                style: TextStyle(fontWeight: FontWeight.w600),
+            IconButton(
+              icon: const Icon(
+                Icons.tune_rounded,
+                size: 21,
+                color: kSettingsValue,
               ),
-            )
-          : null,
-      body: CupertinoScrollbar(
-        controller: c.scrollController,
-        thumbVisibility: true,
-        thickness: 6,
-        radius: const Radius.circular(3),
-        child: SingleChildScrollView(
-          controller: c.scrollController,
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // 局部重新生成模式：显示可编辑的「小说设定」卡片（类型/主题/主角/世界观），
-              // 隐藏大/小事件数与「一键生成」按钮，直接进入检查点编辑
-              if (_isReedit) ...[
-                _buildReeditSettingCard(),
-                const SizedBox(height: 12),
-              ],
-              if (!_isReedit) ...[
-                _buildInputSection(),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  height: 44,
-                  child: ElevatedButton.icon(
-                    onPressed: (c.loading || c.paused)
-                        ? null
-                        : () async {
-                            await c.generate();
-                            await _refreshDraft();
-                          },
-                    icon: c.loading
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
+              tooltip: '大纲生成设置',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  // 命名路由：让全局悬浮球在大纲生成设置页隐藏（见 route_names.dart）
+                  settings: const RouteSettings(
+                    name: kOutlineSettingsRouteName,
+                  ),
+                  builder: (_) => const OutlineSettingPage(),
+                ),
+              ),
+            ),
+            const SizedBox(width: 4),
+          ],
+          bottom: const PreferredSize(
+            preferredSize: Size.fromHeight(1),
+            child: Divider(
+              height: 1,
+              thickness: 1,
+              color: kSettingsAppBarDivider,
+            ),
+          ),
+        ),
+        body: LayoutBuilder(
+          builder: (context, constraints) {
+            final inset = MediaQuery.paddingOf(context).bottom;
+            // 内容高度变化后（流式追加 / 检查点卡出现）同步一次按钮显隐
+            WidgetsBinding.instance.addPostFrameCallback(
+              (_) => _syncJumpVisibility(),
+            );
+            return Stack(
+              children: [
+                CupertinoScrollbar(
+                  controller: c.scrollController,
+                  thumbVisibility: true,
+                  thickness: 5,
+                  radius: const Radius.circular(3),
+                  child: SingleChildScrollView(
+                    controller: c.scrollController,
+                    padding: EdgeInsets.fromLTRB(
+                      20,
+                      4,
+                      20,
+                      40 + MediaQuery.paddingOf(context).bottom,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // 局部重新生成模式：显示可编辑的「小说设定」卡片（类型/主题/主角/世界观），
+                        // 隐藏大/小事件数与「一键生成」按钮，直接进入检查点编辑
+                        if (_isReedit) ...[
+                          _buildReeditSettingCard(),
+                          const SizedBox(height: 4),
+                        ] else ...[
+                          _buildInputSection(),
+                          const SizedBox(height: 16),
+                          _buildGenerateButton(c),
+                        ],
+                        if (c.error != null) ...[
+                          const SizedBox(height: 14),
+                          _buildBanner(
+                            text: c.error!,
+                            icon: Icons.error_outline_rounded,
+                            background: kSettingsDangerSoft,
+                            foreground: kSettingsDanger,
+                          ),
+                        ],
+                        if (c.warning != null) ...[
+                          const SizedBox(height: 14),
+                          _buildBanner(
+                            text: c.warning!,
+                            icon: Icons.warning_amber_rounded,
+                            background: _kWarningSoft,
+                            foreground: _kWarningInk,
+                          ),
+                        ],
+                        if (hasOutput) ...[
+                          const SizedBox(height: 18),
+                          _buildOutputCard(c),
+                        ],
+                        if (c.paused && c.checkpointKind != null) ...[
+                          const SizedBox(height: 18),
+                          _buildCheckpointCard(),
+                        ],
+                        if (!_isReedit &&
+                            _hasDraft &&
+                            !c.loading &&
+                            !c.paused) ...[
+                          const SizedBox(height: 16),
+                          SizedBox(
+                            width: double.infinity,
+                            height: 44,
+                            child: OutlinedButton.icon(
+                              onPressed: _onResume,
+                              icon: const Icon(Icons.restore_rounded, size: 18),
+                              label: const Text('继续上次未完成的生成'),
+                              style: _secondaryButtonStyle(
+                                fontSize: 13.5,
+                                foreground: kSettingsLabel,
+                              ),
                             ),
-                          )
-                        : const Icon(Icons.auto_awesome),
-                    label: Text(c.loading ? '生成中...' : '一键生成大纲'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF4D6BFE),
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      textStyle: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                      ),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
                 ),
-              ],
-              if (c.error != null) ...[
-                const SizedBox(height: 8),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: Colors.red.shade50,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.red.shade200),
+                // 一键到底：只在下方还有内容时出现，放左下避开右下的停止块
+                if (_canJumpToBottom)
+                  Positioned(
+                    left: 16,
+                    bottom: 24 + inset,
+                    child: _JumpToBottomButton(onTap: _jumpToBottom),
                   ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.error_outline,
-                        size: 16,
-                        color: Colors.red.shade700,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          c.error!,
+                // 停止生成：可自由拖动，位置限制在可视区域内
+                if (c.loading)
+                  Positioned(
+                    right: _stopRight,
+                    bottom: _stopBottom + inset,
+                    child: GestureDetector(
+                      key: _stopFabKey,
+                      onPanUpdate: (d) => _onStopDrag(d, constraints),
+                      child: FloatingActionButton.extended(
+                        onPressed: _onCancelPressed,
+                        // 白底 + 红字：停止是「打断」而不是主行动，不用大面积红色抢焦点
+                        backgroundColor: kSettingsCardBg,
+                        foregroundColor: kSettingsDanger,
+                        elevation: 0,
+                        highlightElevation: 0,
+                        extendedPadding: const EdgeInsets.symmetric(
+                          horizontal: 18,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          side: const BorderSide(color: Color(0xFFF2E2E0)),
+                        ),
+                        icon: const Icon(Icons.stop_rounded, size: 18),
+                        label: const Text(
+                          '停止生成',
                           style: TextStyle(
-                            color: Colors.red.shade700,
-                            fontSize: 13,
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
                       ),
-                    ],
+                    ),
                   ),
-                ),
               ],
-              if (c.warning != null) ...[
-                const SizedBox(height: 8),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: Colors.amber.shade50,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.amber.shade200),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.warning_amber_rounded,
-                        size: 16,
-                        color: Colors.amber.shade800,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          c.warning!,
-                          style: TextStyle(
-                            color: Colors.amber.shade800,
-                            fontSize: 13,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-              if (c.bubbles.isNotEmpty ||
-                  c.displayText.isNotEmpty ||
-                  c.loading) ...[
-                const SizedBox(height: 16),
-                if (c.title.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: Text(
-                      c.title,
-                      style: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF333333),
-                      ),
-                    ),
-                  ),
-                // 已提交的多气泡（步骤结果 / 失败尝试的思考与输出）
-                // 缓存复用实例：流式更新时未变化的气泡直接跳过重建
-                ..._bubbleWidgetsFor(c.bubbles),
-                // 回退：无气泡但有历史/预览内容（如断点续跑恢复）
-                if (c.bubbles.isEmpty &&
-                    c.displayText.isNotEmpty &&
-                    c.liveText.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: _buildBubble(
-                      label: null,
-                      content: c.displayText,
-                      isError: false,
-                    ),
-                  ),
-                // 实时流式气泡：每 300ms 更新，用 RepaintBoundary 隔离重绘，
-                // 用普通 Text 而非 SelectableText（后者布局成本高，流式期间不可选也无妨）
-                if (c.liveText.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: RepaintBoundary(
-                      child: _buildBubble(
-                        label: '生成中',
-                        content: c.liveText,
-                        isError: false,
-                        selectable: false,
-                      ),
-                    ),
-                  )
-                else if (c.loading)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: _buildBubble(
-                      label: '生成中',
-                      content: '正在生成...',
-                      isError: false,
-                    ),
-                  ),
-                if (c.loading) ...[
-                  const SizedBox(height: 8),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(4),
-                    child: LinearProgressIndicator(
-                      value: c.progress,
-                      minHeight: 4,
-                      backgroundColor: const Color(0xFFE8ECF4),
-                      color: const Color(0xFF4D6BFE),
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      const SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          c.progressText,
-                          style: const TextStyle(
-                            fontSize: 13,
-                            color: Color(0xFF999999),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  if (c.lastStepSummary != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: Text(
-                        '最近完成：${c.lastStepSummary}',
-                        style: TextStyle(fontSize: 12, color: Colors.grey[500]),
-                      ),
-                    ),
-                ],
-              ],
-              if (c.paused && c.checkpointKind != null) ...[
-                const SizedBox(height: 12),
-                _buildCheckpointCard(),
-              ],
-              if (!_isReedit && _hasDraft && !c.loading && !c.paused) ...[
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  height: 40,
-                  child: OutlinedButton.icon(
-                    onPressed: _onResume,
-                    icon: const Icon(Icons.play_circle_outline, size: 18),
-                    label: const Text('继续上次未完成的生成'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: const Color(0xFF4D6BFE),
-                      side: const BorderSide(color: Color(0xFF4D6BFE)),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ],
-          ),
+            );
+          },
         ),
       ),
     );
   }
 
-  /// 局部重新生成模式的「小说设定」卡片：类型/主题/主角设定/世界观 可直接编辑。
+  /// 局部重新生成模式的「小说设定」区块：类型/主题/主角设定/世界观 可直接编辑。
   /// 修改后点「继续」按新设定重新生成下游内容，并随另存的新大纲记录保存；
   /// 不含大/小事件数（数量决定骨架结构，由检查点内容控制）。
   Widget _buildReeditSettingCard() {
     final c = _controller;
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF8F9FF),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFE8ECF4)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            '小说设定（可修改）',
-            style: TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w600,
-              color: Color(0xFF333333),
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            '修改世界观 / 主角设定后点「继续」，将按新设定重新生成后续内容并保存到新大纲',
-            style: TextStyle(fontSize: 11, color: Colors.grey[500]),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: c.genreController,
-            decoration: _inputDecoration('小说类型'),
-            style: const TextStyle(fontSize: 14),
-          ),
-          const SizedBox(height: 10),
-          Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const _SectionHeading(
+          title: '小说设定（可修改）',
+          subtitle: '改完点「继续」重新生成',
+          isFirst: true,
+        ),
+        _card(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: TextField(
-                  controller: c.themeController,
-                  decoration: _inputDecoration('主题（如：废土世界中的 AI 觉醒）'),
-                  style: const TextStyle(fontSize: 14),
-                ),
+              const Text(
+                '修改世界观 / 主角设定后点「继续」，将按新设定重新生成后续内容并保存到新大纲',
+                style: _kHelperStyle,
               ),
-              const SizedBox(width: 4),
-              IconButton(
-                icon: const Icon(
-                  Icons.fullscreen,
-                  size: 20,
-                  color: Color(0xFF4D6BFE),
-                ),
-                tooltip: '放大编辑',
-                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                padding: EdgeInsets.zero,
-                onPressed: () =>
-                    _showLargeEditor(context, c.themeController, '主题'),
+              const SizedBox(height: 12),
+              TextField(
+                controller: c.genreController,
+                decoration: _inputDecoration('小说类型'),
+                style: _kFieldTextStyle,
+              ),
+              const SizedBox(height: 12),
+              _fieldWithExpand(c.themeController, '主题（如：废土世界中的 AI 觉醒）', '主题'),
+              const SizedBox(height: 12),
+              _fieldWithExpand(
+                c.protagonistController,
+                '主角设定（如：流浪剑客林墨）',
+                '主角设定',
+              ),
+              const SizedBox(height: 12),
+              _fieldWithExpand(
+                c.worldViewController,
+                '世界观（如：灵力为尊的大陆，科技与魔法并存）',
+                '世界观',
+              ),
+              const SizedBox(height: 12),
+              _fieldWithExpand(
+                c.requirementController,
+                '要求提示词（如：节奏快、不要后宫、每个大事件都要有爽点）',
+                '要求提示词',
               ),
             ],
           ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: c.protagonistController,
-                  decoration: _inputDecoration('主角设定（如：流浪剑客林墨）'),
-                  style: const TextStyle(fontSize: 14),
-                ),
-              ),
-              const SizedBox(width: 4),
-              IconButton(
-                icon: const Icon(
-                  Icons.fullscreen,
-                  size: 20,
-                  color: Color(0xFF4D6BFE),
-                ),
-                tooltip: '放大编辑',
-                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                padding: EdgeInsets.zero,
-                onPressed: () =>
-                    _showLargeEditor(context, c.protagonistController, '主角设定'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: c.worldViewController,
-                  decoration: _inputDecoration(
-                    '世界观（如：灵力为尊的大陆，科技与魔法并存）',
-                  ),
-                  style: const TextStyle(fontSize: 14),
-                ),
-              ),
-              const SizedBox(width: 4),
-              IconButton(
-                icon: const Icon(
-                  Icons.fullscreen,
-                  size: 20,
-                  color: Color(0xFF4D6BFE),
-                ),
-                tooltip: '放大编辑',
-                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                padding: EdgeInsets.zero,
-                onPressed: () =>
-                    _showLargeEditor(context, c.worldViewController, '世界观'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: c.requirementController,
-                  decoration: _inputDecoration(
-                    '要求提示词（如：节奏快、不要后宫、每个大事件都要有爽点）',
-                  ),
-                  style: const TextStyle(fontSize: 14),
-                ),
-              ),
-              const SizedBox(width: 4),
-              IconButton(
-                icon: const Icon(
-                  Icons.fullscreen,
-                  size: 20,
-                  color: Color(0xFF4D6BFE),
-                ),
-                tooltip: '放大编辑',
-                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                padding: EdgeInsets.zero,
-                onPressed: () =>
-                    _showLargeEditor(context, c.requirementController, '要求提示词'),
-              ),
-            ],
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
   Widget _buildInputSection() {
     final c = _controller;
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF8F9FF),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            const Expanded(
+              child: _SectionHeading(
+                title: '小说设定',
+                subtitle: '写清设定，剩下的交给 AI',
+                isFirst: true,
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(
+                bottom: kSettingsSectionGapBot + 2,
+              ),
+              child: _InspirationButton(onTap: _randomInspiration),
+            ),
+          ],
+        ),
+        _card(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              DropdownButtonFormField<String>(
+                // 用 initialValue 而非已废弃的 value；外部改动时 FormField 会同步内部值
+                initialValue: _predefinedGenres.contains(c.genreController.text)
+                    ? c.genreController.text
+                    : (c.genreController.text.trim().isEmpty
+                          ? '__custom__'
+                          : c.genreController.text),
+                decoration: _inputDecoration('小说类型'),
+                style: _kFieldTextStyle,
+                items: [
+                  ..._predefinedGenres.map(
+                    (g) => DropdownMenuItem(value: g, child: Text(g)),
+                  ),
+                  // 自定义类型：回显已输入的值，避免确认后只能看到「自定义」字样。
+                  // 注意：下拉按钮闭合态在无界宽度下布局所有 item，
+                  // 子项不能用 Flexible/Expanded（会触发 unbounded flex 布局异常导致空白），
+                  // 因此用 mainAxisSize.min + ConstrainedBox 控制省略号。
+                  if (!_predefinedGenres.contains(c.genreController.text) &&
+                      c.genreController.text.trim().isNotEmpty)
+                    DropdownMenuItem(
+                      value: c.genreController.text,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.edit_rounded,
+                            size: 16,
+                            color: kSettingsValue,
+                          ),
+                          const SizedBox(width: 6),
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 160),
+                            child: Text(
+                              c.genreController.text,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  const DropdownMenuItem(
+                    value: '__custom__',
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.edit_rounded,
+                          size: 16,
+                          color: kSettingsValue,
+                        ),
+                        SizedBox(width: 6),
+                        Text('自定义'),
+                      ],
+                    ),
+                  ),
+                ],
+                onChanged: (v) async {
+                  if (v == '__custom__') {
+                    final result = await _showCustomGenreDialog(context);
+                    if (result != null && result.isNotEmpty) {
+                      c.genreController.text = result;
+                    }
+                  } else {
+                    c.genreController.text = v ?? '玄幻';
+                  }
+                  setState(() {});
+                },
+              ),
+              const SizedBox(height: 12),
+              _fieldWithExpand(c.themeController, '主题（如：废土世界中的 AI 觉醒）', '主题'),
+              const SizedBox(height: 12),
+              _fieldWithExpand(
+                c.protagonistController,
+                '主角设定（如：流浪剑客林墨）',
+                '主角设定',
+              ),
+              const SizedBox(height: 12),
+              _fieldWithExpand(
+                c.worldViewController,
+                '世界观（如：灵力为尊的大陆，科技与魔法并存）',
+                '世界观',
+              ),
+              const SizedBox(height: 12),
+              _fieldWithExpand(
+                c.requirementController,
+                '要求提示词（如：节奏快、不要后宫、每个大事件都要有爽点）',
+                '要求提示词',
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                '要求提示词会注入到定调、粗骨架、精写大事件、展开小事件的每一步',
+                style: _kHelperStyle,
+              ),
+              const SizedBox(height: 18),
+              const Text(
+                '事件规模',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: kSettingsSubtitle,
+                  letterSpacing: 0.3,
+                ),
+              ),
+              const SizedBox(height: 6),
+              _buildCountRow(
+                '大事件数：',
+                c.majorEventCount,
+                1,
+                null, // 无上限，数量多时生成耗时相应变长
+                (v) => c.majorEventCount = v,
+                _majorEventCountController,
+              ),
+              const SizedBox(height: 6),
+              _buildCountRow(
+                '小事件数：',
+                c.minorEventCount,
+                1,
+                10,
+                (v) => c.minorEventCount = v,
+                _minorEventCountController,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '预计约 ${c.estimatedApiCalls} 次 AI 调用，大事件数较多时耗时较长',
+                style: _kHelperStyle,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 填充式输入框：去边框（只留浅灰底），聚焦时出现一条中灰细边。
+  /// 一页 4~5 个输入框，如果每个都带描边会形成「灰框墙」，去边框后更像
+  /// 一张完整的表单，视觉噪音更低。
+  InputDecoration _inputDecoration(String hint) {
+    final base = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(12),
+      borderSide: BorderSide.none,
+    );
+    return InputDecoration(
+      hintText: hint,
+      hintStyle: const TextStyle(fontSize: 13.5, color: kSettingsHint),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+      border: base,
+      enabledBorder: base,
+      focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFE8ECF4)),
+        borderSide: const BorderSide(color: _kFieldFocusBorder),
+      ),
+      filled: true,
+      fillColor: kSettingsFieldBg,
+      isDense: true,
+    );
+  }
+
+  /// 白卡：18dp 圆角 + 1px 发丝描边、无投影（比浮起投影更平更高级）。
+  Widget _card({required Widget child}) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: kSettingsCardBg,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _kCardBorder),
+      ),
+      child: child,
+    );
+  }
+
+  /// 输入框 + 内嵌「放大编辑」按钮（主题 / 主角 / 世界观 / 要求提示词共用）。
+  /// 按钮收进输入框内部（suffixIcon），不再独占一列，表单整体更干净。
+  Widget _fieldWithExpand(
+    TextEditingController controller,
+    String hint,
+    String title,
+  ) {
+    return TextField(
+      controller: controller,
+      decoration: _inputDecoration(hint).copyWith(
+        suffixIcon: IconButton(
+          icon: const Icon(
+            Icons.open_in_full_rounded,
+            size: 16,
+            color: kSettingsHint,
+          ),
+          tooltip: '放大编辑',
+          onPressed: () => _showLargeEditor(context, controller, title),
+        ),
+        suffixIconConstraints: const BoxConstraints(
+          minWidth: 40,
+          minHeight: 40,
+        ),
+      ),
+      style: _kFieldTextStyle,
+    );
+  }
+
+  /// 顶部主行动：炭黑小胶囊（右对齐），靠明度而不是饱和色建立层级。
+  /// 不铺满整行 —— 满宽深色块在这个以留白为主的页面里会显得过重。
+  Widget _buildGenerateButton(OutlineController c) {
+    return Align(
+      alignment: Alignment.centerRight,
+      child: SizedBox(
+        width: 176,
+        height: 44,
+        child: ElevatedButton.icon(
+          onPressed: (c.loading || c.paused)
+              ? null
+              : () async {
+                  await c.generate();
+                  await _refreshDraft();
+                },
+          icon: c.loading
+              ? const SizedBox(
+                  width: 15,
+                  height: 15,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: kSettingsSubtitle,
+                  ),
+                )
+              : const Icon(Icons.auto_awesome_rounded, size: 17),
+          label: Text(c.loading ? '生成中...' : '一键生成大纲'),
+          style: _primaryButtonStyle(fontSize: 13.5).copyWith(
+            // 生成中：按钮禁用但仍保持「同一颗按钮」的克制浅灰态
+            backgroundColor: WidgetStateProperty.resolveWith(
+              (states) => states.contains(WidgetState.disabled)
+                  ? kSettingsChipBg
+                  : kSettingsTitle,
+            ),
+            foregroundColor: WidgetStateProperty.resolveWith(
+              (states) => states.contains(WidgetState.disabled)
+                  ? kSettingsSubtitle
+                  : Colors.white,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 生成结果区：一张白卡承载书名 + 各步骤文本 + 进度。
+  /// 步骤之间不画盒子，用 1px 发丝分割线 + 字距区分层级，长结果读起来像
+  /// 一篇排版过的文档而不是一摞卡片。
+  Widget _buildOutputCard(OutlineController c) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 18),
+      decoration: BoxDecoration(
+        color: kSettingsCardBg,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _kCardBorder),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              const Text(
-                '小说设定',
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFF333333),
-                ),
+          if (c.title.isNotEmpty) ...[
+            Text(
+              c.title,
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                height: 1.4,
+                letterSpacing: 0.1,
+                color: kSettingsTitle,
               ),
-              const Spacer(),
-              TextButton.icon(
-                style: TextButton.styleFrom(
-                  foregroundColor: const Color(0xFF4D6BFE),
-                  visualDensity: VisualDensity.compact,
-                  padding: EdgeInsets.zero,
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-                onPressed: _randomInspiration,
-                icon: const Icon(Icons.casino, size: 16),
-                label: const Text('随机灵感', style: TextStyle(fontSize: 13)),
+            ),
+            const SizedBox(height: 16),
+          ],
+          // 已提交的多气泡（步骤结果 / 失败尝试的思考与输出）
+          // 缓存复用实例：流式更新时未变化的气泡直接跳过重建
+          ..._bubbleWidgetsFor(c.bubbles),
+          // 回退：无气泡但有历史/预览内容（如断点续跑恢复）
+          if (c.bubbles.isEmpty &&
+              c.displayText.isNotEmpty &&
+              c.liveText.isEmpty)
+            _buildBubble(label: null, content: c.displayText, isError: false),
+          // 实时流式气泡：每 300ms 更新，用 RepaintBoundary 隔离重绘，
+          // 用普通 Text 而非 SelectableText（后者布局成本高，流式期间不可选也无妨）
+          if (c.liveText.isNotEmpty)
+            RepaintBoundary(
+              child: _buildBubble(
+                label: '生成中',
+                content: c.liveText,
+                isError: false,
+                selectable: false,
               ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          DropdownButtonFormField<String>(
-            // 用 initialValue 而非已废弃的 value；外部改动时 FormField 会同步内部值
-            initialValue: _predefinedGenres.contains(c.genreController.text)
-                ? c.genreController.text
-                : (c.genreController.text.trim().isEmpty
-                      ? '__custom__'
-                      : c.genreController.text),
-            decoration: _inputDecoration('小说类型'),
-            items: [
-              ..._predefinedGenres.map(
-                (g) => DropdownMenuItem(value: g, child: Text(g)),
+            )
+          else if (c.loading)
+            _buildBubble(label: '生成中', content: '正在生成...', isError: false),
+          if (c.loading) ...[
+            const SizedBox(height: 14),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(2),
+              child: LinearProgressIndicator(
+                value: c.progress,
+                minHeight: 2,
+                backgroundColor: const Color(0xFFEAEDF4),
+                color: kSettingsTitle,
               ),
-              // 自定义类型：回显已输入的值，避免确认后只能看到「自定义」字样。
-              // 注意：下拉按钮闭合态在无界宽度下布局所有 item，
-              // 子项不能用 Flexible/Expanded（会触发 unbounded flex 布局异常导致空白），
-              // 因此用 mainAxisSize.min + ConstrainedBox 控制省略号。
-              if (!_predefinedGenres.contains(c.genreController.text) &&
-                  c.genreController.text.trim().isNotEmpty)
-                DropdownMenuItem(
-                  value: c.genreController.text,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(
-                        Icons.edit,
-                        size: 16,
-                        color: Color(0xFF4D6BFE),
-                      ),
-                      const SizedBox(width: 6),
-                      ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 160),
-                        child: Text(
-                          c.genreController.text,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              const DropdownMenuItem(
-                value: '__custom__',
-                child: Row(
-                  children: [
-                    Icon(Icons.edit, size: 16, color: Color(0xFF4D6BFE)),
-                    SizedBox(width: 6),
-                    Text('自定义'),
-                  ],
-                ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              c.progressText,
+              style: const TextStyle(fontSize: 12, color: kSettingsSubtitle),
+            ),
+            if (c.lastStepSummary != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text('最近完成：${c.lastStepSummary}', style: _kHelperStyle),
               ),
-            ],
-            onChanged: (v) async {
-              if (v == '__custom__') {
-                final result = await _showCustomGenreDialog(context);
-                if (result != null && result.isNotEmpty) {
-                  c.genreController.text = result;
-                }
-              } else {
-                c.genreController.text = v ?? '玄幻';
-              }
-              setState(() {});
-            },
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: c.themeController,
-                  decoration: _inputDecoration('主题（如：废土世界中的 AI 觉醒）'),
-                  style: const TextStyle(fontSize: 14),
-                ),
-              ),
-              const SizedBox(width: 4),
-              IconButton(
-                icon: const Icon(
-                  Icons.fullscreen,
-                  size: 20,
-                  color: Color(0xFF4D6BFE),
-                ),
-                tooltip: '放大编辑',
-                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                padding: EdgeInsets.zero,
-                onPressed: () =>
-                    _showLargeEditor(context, c.themeController, '主题'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: c.protagonistController,
-                  decoration: _inputDecoration('主角设定（如：流浪剑客林墨）'),
-                  style: const TextStyle(fontSize: 14),
-                ),
-              ),
-              const SizedBox(width: 4),
-              IconButton(
-                icon: const Icon(
-                  Icons.fullscreen,
-                  size: 20,
-                  color: Color(0xFF4D6BFE),
-                ),
-                tooltip: '放大编辑',
-                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                padding: EdgeInsets.zero,
-                onPressed: () =>
-                    _showLargeEditor(context, c.protagonistController, '主角设定'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: c.worldViewController,
-                  decoration: _inputDecoration('世界观（如：灵力为尊的大陆，科技与魔法并存）'),
-                  style: const TextStyle(fontSize: 14),
-                ),
-              ),
-              const SizedBox(width: 4),
-              IconButton(
-                icon: const Icon(
-                  Icons.fullscreen,
-                  size: 20,
-                  color: Color(0xFF4D6BFE),
-                ),
-                tooltip: '放大编辑',
-                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                padding: EdgeInsets.zero,
-                onPressed: () =>
-                    _showLargeEditor(context, c.worldViewController, '世界观'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: c.requirementController,
-                  decoration: _inputDecoration(
-                    '要求提示词（如：节奏快、不要后宫、每个大事件都要有爽点）',
-                  ),
-                  style: const TextStyle(fontSize: 14),
-                ),
-              ),
-              const SizedBox(width: 4),
-              IconButton(
-                icon: const Icon(
-                  Icons.fullscreen,
-                  size: 20,
-                  color: Color(0xFF4D6BFE),
-                ),
-                tooltip: '放大编辑',
-                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                padding: EdgeInsets.zero,
-                onPressed: () =>
-                    _showLargeEditor(context, c.requirementController, '要求提示词'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(
-            '要求提示词会注入到定调、粗骨架、精写大事件、展开小事件的每一步',
-            style: TextStyle(fontSize: 11, color: Colors.grey[500]),
-          ),
-          const SizedBox(height: 10),
-          _buildCountRow(
-            '大事件数：',
-            c.majorEventCount,
-            1,
-            null, // 无上限，数量多时生成耗时相应变长
-            (v) => c.majorEventCount = v,
-            _majorEventCountController,
-          ),
-          const SizedBox(height: 10),
-          _buildCountRow(
-            '小事件数：',
-            c.minorEventCount,
-            1,
-            10,
-            (v) => c.minorEventCount = v,
-            _minorEventCountController,
-          ),
-          const SizedBox(height: 6),
-          Text(
-            '预计约 ${c.estimatedApiCalls} 次 AI 调用，大事件数较多时耗时较长',
-            style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBanner({
+    required String text,
+    required IconData icon,
+    required Color background,
+    required Color foreground,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 16, color: foreground),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(color: foreground, fontSize: 12.5, height: 1.45),
+            ),
           ),
         ],
       ),
     );
   }
 
-  InputDecoration _inputDecoration(String hint) {
-    return InputDecoration(
-      hintText: hint,
-      hintStyle: const TextStyle(fontSize: 14, color: Color(0xFF999999)),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
-        borderSide: const BorderSide(color: Color(0xFFDDE1EA)),
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
-        borderSide: const BorderSide(color: Color(0xFFDDE1EA)),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
-        borderSide: const BorderSide(color: Color(0xFF4D6BFE), width: 1.5),
-      ),
-      filled: true,
-      fillColor: Colors.white,
-      isDense: true,
+  ButtonStyle _primaryButtonStyle({double fontSize = 13}) {
+    return ElevatedButton.styleFrom(
+      // 炭黑主按钮：靠明度而不是饱和色建立层级，避免亮蓝铺底显廉价
+      backgroundColor: kSettingsTitle,
+      foregroundColor: Colors.white,
+      elevation: 0,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      textStyle: TextStyle(fontSize: fontSize, fontWeight: FontWeight.w600),
+    );
+  }
+
+  ButtonStyle _secondaryButtonStyle({
+    double fontSize = 13,
+    Color foreground = kSettingsLabel,
+  }) {
+    return OutlinedButton.styleFrom(
+      foregroundColor: foreground,
+      backgroundColor: kSettingsCardBg,
+      side: const BorderSide(color: kSettingsFieldBorder),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      textStyle: TextStyle(fontSize: fontSize, fontWeight: FontWeight.w500),
     );
   }
 
@@ -1026,64 +1085,74 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
     }
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: const Color(0xFFFFF8E1),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFF0D9A8)),
+        color: kSettingsCardBg,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _kCardBorder),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Icon(
-                Icons.pause_circle_outline,
-                size: 18,
-                color: Color(0xFFB8860B),
+              Container(
+                width: 26,
+                height: 26,
+                decoration: BoxDecoration(
+                  color: _kAmberSoft,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(
+                  Icons.pause_rounded,
+                  size: 15,
+                  color: _kAmberInk,
+                ),
               ),
-              const SizedBox(width: 6),
-              Text(
-                cardTitle,
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFF7A5C00),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  cardTitle,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: kSettingsTitle,
+                  ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 6),
           Text(
             cardDesc,
-            style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+            style: const TextStyle(
+              fontSize: 11.5,
+              height: 1.45,
+              color: kSettingsSubtitle,
+            ),
           ),
           if (_isReedit) ...[
             const SizedBox(height: 4),
             Text(
               _isContinue ? '继续生成后将另存为新大纲，不会覆盖原记录' : '重新生成后将另存为新大纲，不会覆盖原记录',
-              style: const TextStyle(fontSize: 11, color: Color(0xFFB8860B)),
+              style: const TextStyle(fontSize: 11.5, color: _kAmberTitle),
             ),
           ],
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           TextField(
             controller: _checkpointCtrl,
             maxLines: null,
             minLines: 6,
-            style: const TextStyle(fontSize: 12, height: 1.5),
-            decoration: InputDecoration(
-              hintText: fieldHint,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-              filled: true,
-              fillColor: Colors.white,
-              isDense: true,
+            style: const TextStyle(
+              fontSize: 12.5,
+              height: 1.6,
+              color: kSettingsLabel,
             ),
+            decoration: _inputDecoration(fieldHint),
             // 编辑内容实时同步到控制器并防抖落盘，意外退出页面后可通过「继续上次」恢复
             onChanged: (v) => _controller.syncCheckpointEdit(v),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           // 导航行：返回上一步 / 下一步（按状态动态显示，仅出现有意义的方向）
           ...[
             if (canBack || canForward)
@@ -1091,19 +1160,30 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
                 children: [
                   if (canBack)
                     Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: c.backCheckpoint,
-                        icon: const Icon(Icons.arrow_back, size: 18),
-                        label: const Text('返回上一步'),
+                      child: SizedBox(
+                        height: 40,
+                        child: OutlinedButton.icon(
+                          onPressed: c.backCheckpoint,
+                          icon: const Icon(Icons.arrow_back_rounded, size: 16),
+                          label: const Text('返回上一步'),
+                          style: _secondaryButtonStyle(),
+                        ),
                       ),
                     ),
                   if (canBack && canForward) const SizedBox(width: 8),
                   if (canForward)
                     Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: c.forwardCheckpoint,
-                        icon: const Icon(Icons.arrow_forward, size: 18),
-                        label: const Text('下一步'),
+                      child: SizedBox(
+                        height: 40,
+                        child: OutlinedButton.icon(
+                          onPressed: c.forwardCheckpoint,
+                          icon: const Icon(
+                            Icons.arrow_forward_rounded,
+                            size: 16,
+                          ),
+                          label: const Text('下一步'),
+                          style: _secondaryButtonStyle(),
+                        ),
                       ),
                     ),
                 ],
@@ -1113,21 +1193,25 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
           Row(
             children: [
               Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: c.regenerateCheckpoint,
-                  icon: const Icon(Icons.refresh, size: 18),
-                  label: const Text('重新生成'),
+                child: SizedBox(
+                  height: 42,
+                  child: OutlinedButton.icon(
+                    onPressed: c.regenerateCheckpoint,
+                    icon: const Icon(Icons.refresh_rounded, size: 16),
+                    label: const Text('重新生成'),
+                    style: _secondaryButtonStyle(),
+                  ),
                 ),
               ),
               const SizedBox(width: 8),
               Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: () => c.continueCheckpoint(_checkpointCtrl.text),
-                  icon: const Icon(Icons.play_arrow, size: 18),
-                  label: const Text('继续'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF4D6BFE),
-                    foregroundColor: Colors.white,
+                child: SizedBox(
+                  height: 42,
+                  child: ElevatedButton.icon(
+                    onPressed: () => c.continueCheckpoint(_checkpointCtrl.text),
+                    icon: const Icon(Icons.play_arrow_rounded, size: 18),
+                    label: const Text('继续'),
+                    style: _primaryButtonStyle(),
                   ),
                 ),
               ),
@@ -1137,9 +1221,9 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
           Center(
             child: TextButton.icon(
               onPressed: _onCancelPressed,
-              icon: const Icon(Icons.stop, size: 16),
-              label: const Text('取消生成', style: TextStyle(fontSize: 13)),
-              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              icon: const Icon(Icons.stop_rounded, size: 15),
+              label: const Text('取消生成', style: TextStyle(fontSize: 12.5)),
+              style: TextButton.styleFrom(foregroundColor: kSettingsDanger),
             ),
           ),
         ],
@@ -1157,69 +1241,79 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
   ) {
     return Row(
       children: [
-        Text(
-          label,
-          style: const TextStyle(fontSize: 14, color: Color(0xFF666666)),
-        ),
-        const Spacer(),
-        IconButton(
-          icon: const Icon(Icons.remove_circle_outline),
-          onPressed: value > min
-              ? () => setState(() {
-                  onChanged(value - 1);
-                  controller.text = '${value - 1}';
-                })
-              : null,
-          constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-          padding: EdgeInsets.zero,
-        ),
-        SizedBox(
-          width: 50,
-          height: 32,
-          child: TextField(
-            keyboardType: TextInputType.number,
-            textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-            decoration: InputDecoration(
-              contentPadding: const EdgeInsets.symmetric(vertical: 4),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(6),
-                borderSide: const BorderSide(color: Color(0xFFDDE1EA)),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(6),
-                borderSide: const BorderSide(color: Color(0xFFDDE1EA)),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(6),
-                borderSide: const BorderSide(
-                  color: Color(0xFF4D6BFE),
-                  width: 1.5,
-                ),
-              ),
-              filled: true,
-              fillColor: Colors.white,
-              isDense: true,
+        Expanded(
+          child: Text(
+            label,
+            style: const TextStyle(
+              fontSize: 13.5,
+              fontWeight: FontWeight.w500,
+              color: kSettingsLabel,
             ),
-            controller: controller,
-            onChanged: (v) {
-              final n = int.tryParse(v);
-              if (n != null && n >= min && (max == null || n <= max)) {
-                setState(() => onChanged(n));
-              }
-            },
           ),
         ),
-        IconButton(
-          icon: const Icon(Icons.add_circle_outline),
-          onPressed: max == null || value < max
-              ? () => setState(() {
-                  onChanged(value + 1);
-                  controller.text = '${value + 1}';
-                })
-              : null,
-          constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-          padding: EdgeInsets.zero,
+        Container(
+          height: 34,
+          decoration: BoxDecoration(
+            color: kSettingsFieldBg,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.remove_rounded),
+                iconSize: 18,
+                color: kSettingsValue,
+                disabledColor: kSettingsChevron,
+                onPressed: value > min
+                    ? () => setState(() {
+                        onChanged(value - 1);
+                        controller.text = '${value - 1}';
+                      })
+                    : null,
+                constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
+                padding: EdgeInsets.zero,
+              ),
+              SizedBox(
+                width: 36,
+                child: TextField(
+                  keyboardType: TextInputType.number,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: kSettingsTitle,
+                  ),
+                  decoration: const InputDecoration(
+                    isCollapsed: true,
+                    border: InputBorder.none,
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                  controller: controller,
+                  onChanged: (v) {
+                    final n = int.tryParse(v);
+                    if (n != null && n >= min && (max == null || n <= max)) {
+                      setState(() => onChanged(n));
+                    }
+                  },
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.add_rounded),
+                iconSize: 18,
+                color: kSettingsValue,
+                disabledColor: kSettingsChevron,
+                onPressed: max == null || value < max
+                    ? () => setState(() {
+                        onChanged(value + 1);
+                        controller.text = '${value + 1}';
+                      })
+                    : null,
+                constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
+                padding: EdgeInsets.zero,
+              ),
+            ],
+          ),
         ),
       ],
     );
@@ -1228,22 +1322,31 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
   /// 渲染单个生成内容气泡
   /// [selectable] 为 false 时（流式更新中的内容）用普通 Text 渲染，
   /// 布局成本远低于 SelectableText，显著降低大文档流式刷新时的卡顿。
+  ///
+  /// 视觉：正常步骤不铺底色、不描边（靠字号与间距分层）；只有「生成中」的
+  /// 流式内容用浅主色底、失败内容用浅红底，避免一屏十几个描边盒子。
   Widget _buildBubble({
     String? label,
     required String content,
     required bool isError,
     bool selectable = true,
   }) {
+    final bodyStyle = TextStyle(
+      fontSize: 13.5,
+      height: 1.65,
+      color: isError ? _kErrorInk : const Color(0xFF3A4150),
+    );
+    final text = content.isEmpty ? '（无内容）' : content;
+    final highlighted = isError || !selectable;
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: isError ? const Color(0xFFFFF3F3) : const Color(0xFFF8F9FF),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isError ? const Color(0xFFFFD6D6) : const Color(0xFFE8ECF4),
-        ),
-      ),
+      padding: highlighted ? const EdgeInsets.all(14) : EdgeInsets.zero,
+      decoration: highlighted
+          ? BoxDecoration(
+              color: isError ? kSettingsDangerSoft : kSettingsFieldBg,
+              borderRadius: BorderRadius.circular(12),
+            )
+          : null,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1251,22 +1354,21 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
             Row(
               children: [
                 Icon(
-                  isError ? Icons.error_outline : Icons.auto_awesome,
-                  size: 13,
-                  color: isError
-                      ? const Color(0xFFE5484D)
-                      : const Color(0xFF4D6BFE),
+                  isError
+                      ? Icons.error_outline_rounded
+                      : Icons.auto_awesome_rounded,
+                  size: 12,
+                  color: isError ? kSettingsDanger : kSettingsHint,
                 ),
-                const SizedBox(width: 4),
+                const SizedBox(width: 5),
                 Expanded(
                   child: Text(
                     label,
                     style: TextStyle(
-                      fontSize: 12,
+                      fontSize: 11.5,
                       fontWeight: FontWeight.w600,
-                      color: isError
-                          ? const Color(0xFFE5484D)
-                          : const Color(0xFF4D6BFE),
+                      letterSpacing: 0.4,
+                      color: isError ? kSettingsDanger : kSettingsSubtitle,
                     ),
                   ),
                 ),
@@ -1275,23 +1377,9 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
             const SizedBox(height: 6),
           ],
           if (selectable)
-            SelectableText(
-              content.isEmpty ? '（无内容）' : content,
-              style: const TextStyle(
-                fontSize: 12,
-                height: 1.5,
-                color: Color(0xFF444444),
-              ),
-            )
+            SelectableText(text, style: bodyStyle)
           else
-            Text(
-              content.isEmpty ? '（无内容）' : content,
-              style: const TextStyle(
-                fontSize: 12,
-                height: 1.5,
-                color: Color(0xFF444444),
-              ),
-            ),
+            Text(text, style: bodyStyle),
         ],
       ),
     );
@@ -1321,6 +1409,134 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
       builder: (ctx) => Padding(
         padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(ctx).bottom),
         child: const _CustomGenreDialog(),
+      ),
+    );
+  }
+}
+
+/// 「一键到底」：滚到最新内容的圆形按钮（白底细描边，避开主视觉）。
+class _JumpToBottomButton extends StatelessWidget {
+  final VoidCallback onTap;
+
+  const _JumpToBottomButton({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: '滚动到底部',
+      child: Material(
+        color: kSettingsCardBg,
+        elevation: 0,
+        shape: const CircleBorder(
+          side: BorderSide(color: kSettingsFieldBorder),
+        ),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onTap,
+          child: const SizedBox(
+            width: 40,
+            height: 40,
+            child: Icon(
+              Icons.vertical_align_bottom_rounded,
+              size: 19,
+              color: kSettingsValue,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 分区标题右侧的「随机灵感」：灰字 + 灰图标，无底色，不参与主行动的色彩层级。
+class _InspirationButton extends StatelessWidget {
+  final VoidCallback onTap;
+
+  const _InspirationButton({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.shuffle_rounded, size: 13, color: kSettingsValue),
+              SizedBox(width: 4),
+              Text(
+                '随机灵感',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: kSettingsValue,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 本页分区标题：只留标题 + 副标题，不带彩色图标 chip。
+///
+/// settings_kit 的 [SettingsSectionHeader] 是为「设置项」设计的；内容创作页
+/// 需要更克制的层级，一排蓝色图标 chip 会让页面显得杂、显廉价。
+class _SectionHeading extends StatelessWidget {
+  final String title;
+  final String? subtitle;
+  final bool isFirst;
+
+  const _SectionHeading({
+    required this.title,
+    this.subtitle,
+    this.isFirst = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        4,
+        isFirst ? 16 : kSettingsSectionGapTop,
+        4,
+        kSettingsSectionGapBot,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              height: 1.25,
+              color: kSettingsTitle,
+            ),
+          ),
+          if (subtitle != null) ...[
+            const SizedBox(height: 3),
+            Text(
+              subtitle!,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 11.5,
+                height: 1.25,
+                color: kSettingsSubtitle,
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }
@@ -1390,11 +1606,15 @@ class _LargeEditorDialogState extends State<_LargeEditorDialog> {
                   style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w600,
+                    color: kSettingsTitle,
                   ),
                 ),
                 const Spacer(),
                 IconButton(
-                  icon: const Icon(Icons.close),
+                  icon: const Icon(
+                    Icons.close_rounded,
+                    color: kSettingsSubtitle,
+                  ),
                   onPressed: () => Navigator.of(context).pop(),
                 ),
               ],
@@ -1406,12 +1626,17 @@ class _LargeEditorDialogState extends State<_LargeEditorDialog> {
                 maxLines: null,
                 expands: true,
                 textAlignVertical: TextAlignVertical.top,
-                style: const TextStyle(fontSize: 13, height: 1.5),
+                cursorColor: kSettingsTitle,
+                style: const TextStyle(
+                  fontSize: 13.5,
+                  height: 1.6,
+                  color: kSettingsLabel,
+                ),
                 decoration: InputDecoration(
                   hintText: _hintFor(widget.title),
                   hintStyle: const TextStyle(
                     fontSize: 13,
-                    color: Color(0xFFBBBBBB),
+                    color: kSettingsHint,
                   ),
                   border: InputBorder.none,
                   contentPadding: EdgeInsets.zero,
@@ -1421,23 +1646,25 @@ class _LargeEditorDialogState extends State<_LargeEditorDialog> {
             const SizedBox(height: 12),
             SizedBox(
               width: double.infinity,
-              height: 44,
+              height: 46,
               child: ElevatedButton(
                 onPressed: () {
                   widget.onConfirm(_controller.text);
                   Navigator.of(context).pop();
                 },
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF4D6BFE),
+                  backgroundColor: kSettingsTitle,
                   foregroundColor: Colors.white,
+                  elevation: 0,
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  textStyle: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
-                child: const Text(
-                  '确认',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                ),
+                child: const Text('确认'),
               ),
             ),
           ],
@@ -1483,48 +1710,69 @@ class _CustomGenreDialogState extends State<_CustomGenreDialog> {
             children: [
               const Text(
                 '自定义小说类型',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: kSettingsTitle,
+                ),
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: _controller,
                 autofocus: true,
+                cursorColor: kSettingsTitle,
+                style: _kFieldTextStyle,
                 decoration: InputDecoration(
                   hintText: '输入自定义类型（如：赛博朋克、末日废土...）',
                   hintStyle: const TextStyle(
                     fontSize: 14,
-                    color: Color(0xFFBBBBBB),
+                    color: kSettingsHint,
                   ),
                   contentPadding: const EdgeInsets.symmetric(
                     horizontal: 12,
-                    vertical: 10,
+                    vertical: 13,
+                  ),
+                  filled: true,
+                  fillColor: kSettingsFieldBg,
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: kSettingsFieldBorder),
                   ),
                   border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: kSettingsFieldBorder),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(
+                      color: kSettingsTitle,
+                      width: 1.5,
+                    ),
                   ),
                 ),
-                style: const TextStyle(fontSize: 14),
               ),
               const SizedBox(height: 16),
               SizedBox(
                 width: double.infinity,
-                height: 44,
+                height: 46,
                 child: ElevatedButton(
                   onPressed: () {
                     // 防重复点击：重复 pop 会连带关闭下层页面
                     closeDialogSafely(context, result: _controller.text.trim());
                   },
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF4D6BFE),
+                    backgroundColor: kSettingsTitle,
                     foregroundColor: Colors.white,
+                    elevation: 0,
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    textStyle: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
-                  child: const Text(
-                    '确定',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                  ),
+                  child: const Text('确定'),
                 ),
               ),
             ],
