@@ -90,6 +90,11 @@ class _LocalTtsEngine implements TtsEngine {
     }
   }
 
+  /// 内置离线语音用 AudioTrack 直接播放，本身不受 Activity 生命周期影响，
+  /// 无需额外处理。
+  @override
+  Future<void> setBackgroundPlayback(bool enabled) async {}
+
   @override
   void setCallbacks({
     required VoidCallback onDone,

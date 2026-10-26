@@ -75,6 +75,18 @@ class MainActivity : FlutterActivity() {
     /** 「一键生成大纲」的后台进度通道（前台服务 + 通知点击回传），见 OutlineBackgroundChannel */
     private var outlineBackground: OutlineBackgroundChannel? = null
 
+    /** 「听大纲」的后台朗读通道（前台服务 + 通知播控 + 通知点击回传），见 OutlineListeningChannel */
+    private var outlineListening: OutlineListeningChannel? = null
+
+    /**
+     * 退到后台后是否允许系统 TTS 继续朗读。
+     *
+     * 由 Dart 侧在读大纲播放/暂停时通过 TTS 通道的 `setBackgroundPlayback` 设置：
+     * 播放中置 true，前台服务负责保活；暂停/退出页面置 false，恢复原来「退后台就停」的行为。
+     * 其它页面不设置，保持默认 false，不会出现「退出大纲页还在念」的意外。
+     */
+    @Volatile private var backgroundPlayback = false
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
@@ -87,6 +99,11 @@ class MainActivity : FlutterActivity() {
         // 和 TTS 通道一样挂在引擎上：引擎销毁时通道一起失效（Dart 侧也不可能再有生成回调）。
         outlineBackground = OutlineBackgroundChannel(this, this)
         outlineBackground?.register(flutterEngine.dartExecutor.binaryMessenger)
+
+        // 「听大纲」后台朗读通道：朗读时把进度与播控钉在通知栏，退后台/锁屏后继续逐事件朗读。
+        // 注册位置放在既有 TTS / generation 通道之后，不改动它们的任何行为。
+        outlineListening = OutlineListeningChannel(this, this)
+        outlineListening?.register(flutterEngine.dartExecutor.binaryMessenger)
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, methodChannelName)
             .setMethodCallHandler { call, result ->
@@ -102,6 +119,14 @@ class MainActivity : FlutterActivity() {
                     )
                     "stop" -> {
                         stopSpeaking()
+                        result.success(true)
+                    }
+                    // 「听大纲」播放中由 Dart 置 true：退到后台时 onStop 不再停 TTS，
+                    // 由 OutlineListenService 前台服务负责保活、通知栏提供暂停/继续/停止。
+                    // 参数兼容「直接传 bool」与「传 {enabled: bool}」两种形态，
+                    // 避免 Dart 侧写法不同就静默失效（这是跨语言契约里最容易踩的坑）。
+                    "setBackgroundPlayback" -> {
+                        backgroundPlayback = readBackgroundPlayback(call.arguments)
                         result.success(true)
                     }
                     "isSpeaking" -> result.success(tts?.isSpeaking == true)
@@ -464,6 +489,22 @@ class MainActivity : FlutterActivity() {
         tts?.stop()
     }
 
+    /**
+     * 解析 `setBackgroundPlayback` 的参数。
+     *
+     * 兼容两种形态：Dart 侧 `invokeMethod('setBackgroundPlayback', true)`（参数就是 bool）
+     * 或 `invokeMethod(..., {'enabled': true})`。契约只冻结了方法名，参数形态由 Dart 实现决定，
+     * 这里两种都认，任何一边先改都不会让「后台继续朗读」静默失效。认不出来按 false 处理（保守：退后台仍停）。
+     */
+    private fun readBackgroundPlayback(arguments: Any?): Boolean = when (arguments) {
+        is Boolean -> arguments
+        is Map<*, *> -> (arguments["enabled"] as? Boolean)
+            ?: (arguments["value"] as? Boolean)
+            ?: (arguments["backgroundPlayback"] as? Boolean)
+            ?: false
+        else -> false
+    }
+
     private fun emit(event: String, message: String?) {
         val sink = events ?: return
         runOnUiThread {
@@ -487,6 +528,9 @@ class MainActivity : FlutterActivity() {
         // Dart 不可能抢在 handleLaunchIntent 之前调 consumeLaunchTap。
         if (savedInstanceState == null) {
             OutlineBackgroundChannel.handleLaunchIntent(intent)
+            // 同理：「听大纲」朗读通知点击拉起时带 open_outline_listening，
+            // 交给 OutlineListeningChannel 记成 pending / 直接发 tap 事件（两条通道各有各的 extra）
+            OutlineListeningChannel.handleLaunchIntent(intent)
         }
     }
 
@@ -495,6 +539,7 @@ class MainActivity : FlutterActivity() {
         // App 已在运行时点通知走这里：extra 只处理一次，handleLaunchIntent 内部会清掉它
         setIntent(intent)
         OutlineBackgroundChannel.handleLaunchIntent(intent)
+        OutlineListeningChannel.handleLaunchIntent(intent)
     }
 
     override fun onDestroy() {
@@ -504,10 +549,16 @@ class MainActivity : FlutterActivity() {
         // 只动通知与前台服务，生成数据仍留在 Dart/本地，重新打开后可从「继续上次」恢复。
         if (isFinishing && !isChangingConfigurations) {
             OutlineGenerationService.hostActivityDestroyed(applicationContext)
+            // 「听大纲」朗读同理：Activity 真正退出后 Dart 的逐事件循环停了，前台服务不能
+            // 继续挂「正在朗读」——按「已停止」收尾（保留可划掉的终态通知、释放 wakelock）
+            OutlineListenService.hostActivityDestroyed(applicationContext)
         }
-        // 通道跟着引擎一起失效：摘掉事件回调，避免之后还有通知点击往已销毁的引擎发事件
+        // 通道跟着引擎一起失效：摘掉事件回调，避免之后还有通知点击/播控往已销毁的引擎发事件
         outlineBackground?.dispose()
         outlineBackground = null
+        outlineListening?.dispose()
+        outlineListening = null
+        backgroundPlayback = false
         cancelInitTimeout()
         stopSpeaking()
         localTts?.dispose()
@@ -522,8 +573,10 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onStop() {
-        // 退到后台就停：继续读用户会以为 App 出了毛病（回来点播放即可续读）
-        if (!isChangingConfigurations) stopSpeaking()
+        // 退到后台默认停 TTS：继续读用户会以为 App 出了毛病（回来点播放即可续读）。
+        // 但「听大纲」播放中 Dart 会把 backgroundPlayback 置 true：此时朗读要继续
+        //（前台服务保活 + 通知栏播控），由 onDestroy 兜底停止，避免退出 App 后还在念。
+        if (!isChangingConfigurations && !backgroundPlayback) stopSpeaking()
         super.onStop()
     }
 }

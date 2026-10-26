@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 「听大纲」通知展开视图进度条上的**滑块圆点（thumb）**。
+     为什么需要它：Android 通知的 RemoteViews 不支持真正的 SeekBar（不能拖动），
+     所以用一个随句序移动的圆点做「视觉滑块」，交互仍由进度条上 10 个透明分区点按承载。
+     样式：**白色实心圆 16dp + 主色 #4D6BFE 描边环 2.5dp**。
+     为什么是白底蓝环（而不是蓝底白边）：展开视图的进度填充也是主色 #4D6BFE，
+     圆点如果同色填充会和蓝条糊在一起；白底能把圆点从蓝条里「挖出来」，蓝环再给它在
+     浅色通知背景上勾出轮廓，深浅背景下都清楚，也不会有「蓝线穿过圆点中心」的观感。 -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 外层：白色实心底圆 16dp——盖住下方蓝色进度轨道，圆点区域不被蓝线穿过 -->
+    <item>
+        <shape android:shape="oval">
+            <solid android:color="#FFFFFFFF" />
+            <size
+                android:width="16dp"
+                android:height="16dp" />
+        </shape>
+    </item>
+
+    <!-- 内层：#4D6BFE 描边环 2.5dp、透明填充，画在 16dp 圆的外缘；
+         浅色通知背景上靠蓝环识别轮廓，深色背景上靠白色实心底识别。 -->
+    <item>
+        <shape android:shape="oval">
+            <solid android:color="#00000000" />
+            <stroke
+                android:width="2.5dp"
+                android:color="#FF4D6BFE" />
+            <size
+                android:width="16dp"
+                android:height="16dp" />
+        </shape>
+    </item>
+</layer-list>

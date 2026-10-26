@@ -8,6 +8,7 @@ import '../../../shared/domain/outline_chapter.dart';
 import '../../../shared/domain/outline_record.dart';
 import '../../../shared/outline_chapter_sync.dart';
 import '../../../shared/outline_load_error_view.dart';
+import '../../background/outline_listen_session.dart';
 import '../../controller/outline_listen_controller.dart';
 import '../../model/listening_segment.dart';
 import '../../service/tts_engine.dart';
@@ -25,21 +26,39 @@ import 'outline_rename_sheet.dart';
 ///
 /// 与「大纲编辑」的分工：编辑页面向批量勾选、逐条改、最后保存；本页面向
 /// 顺着听一遍、听到问题就地改，因此列表按**行**铺开（而不是按事件折叠）。
+///
+/// **后台朗读**：controller 归进程级的 [OutlineListenSession] 所有，页面只是视图。
+/// 退出页面朗读不会停（前台服务 + 通知栏接管），从通知点回来 / 再次进入同一条
+/// 大纲都会挂回同一个 controller，当前事件 / 当前句 / 高亮 / 进度都还在。
 class OutlineListenPage extends StatefulWidget {
   final OutlineRecord outline;
 
   /// 初始事件列表（从章节选择页传下来）；为 null 时页面自己按大纲正文解析
   final List<OutlineChapter>? chapters;
 
-  /// 注入控制器（**仅供测试**）：为 null 时页面自建
+  /// 是否由「后台朗读通知」点击打开。
+  ///
+  /// 通知点击时 app 层把会话里正在朗读的那条大纲带过来（[fromNotification]），
+  /// 页面挂回同一个 controller；本参数用于「会话已不在时」补一句说明
+  /// （见 [_OutlineListenPageState._hintSessionLost]），正常路径不影响行为。
+  final bool fromNotification;
+
+  /// 注入控制器（**仅供测试**）：为 null 时页面走后台朗读会话
   @visibleForTesting
   final OutlineListenController? controller;
+
+  /// 当前打开的朗读页实例数。
+  ///
+  /// 通知点击时 app 层据此判断「朗读页是否已经在前台」：已在前台就只把 App
+  /// 拉到前面，不再 push 第二个页面（见 main.dart 的 _openOutlineListenPage）。
+  static int openInstanceCount = 0;
 
   const OutlineListenPage({
     super.key,
     required this.outline,
     this.chapters,
     this.controller,
+    this.fromNotification = false,
   });
 
   @override
@@ -48,6 +67,13 @@ class OutlineListenPage extends StatefulWidget {
 
 class _OutlineListenPageState extends State<OutlineListenPage> {
   late final OutlineListenController _controller;
+
+  /// 本页拿到的是**已有**后台会话（true）还是新建的（false）。
+  ///
+  /// 已有会话时不能再 init / load：那会把后台正在读的位置、卡片文本冲掉
+  /// （controller 里的段列表、句子计划、高亮都会重建）。
+  bool _attachedExisting = false;
+
   final ScrollController _scrollCtrl = ScrollController();
 
   /// 每条卡片一个 Key：朗读推进时把当前这条滚到可见位置
@@ -62,12 +88,32 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
   @override
   void initState() {
     super.initState();
-    _controller = widget.controller ?? OutlineListenController(widget.outline);
-    _controller.addListener(_onControllerChanged);
-    if (widget.controller == null) {
-      _load();
-    } else {
+    OutlineListenPage.openInstanceCount++;
+    final injected = widget.controller;
+    if (injected != null) {
+      // 测试注入：沿用旧行为（页面自建、页面 dispose，不碰后台会话）
+      _controller = injected;
+      _controller.addListener(_onControllerChanged);
       _loading = false;
+      unawaited(_prepareEngine());
+      unawaited(_controller.refreshEngineHint());
+      return;
+    }
+    // 生产路径：controller 归进程级会话所有。同一条大纲已有会话（后台朗读中 /
+    // 暂停在某一处，或点通知回来）就挂回去，位置与高亮都还在；否则新建一份。
+    final attach = OutlineListenSession.instance.acquire(
+      widget.outline,
+      widget.chapters,
+      preferExisting: true,
+    );
+    _controller = attach.controller;
+    _attachedExisting = attach.attachedExisting;
+    _controller.addListener(_onControllerChanged);
+    if (_attachedExisting) {
+      // 挂回已有会话：结构 / 引擎都就绪了，只需要显示并定位到正在读的那条
+      _loading = false;
+      _restoreActiveCardOnFirstFrame();
+      return;
     }
     // 提前把语音引擎准备好：第一次点播放不用等初始化（失败也无妨，
     // 真正播放时会再试一次并把原因显示出来）。
@@ -79,6 +125,33 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
     // 顺手体检一次：本机没有语音引擎 / 缺中文语音包的话，进页面就说清楚，
     // 而不是等用户点了播放才弹一句「初始化失败」
     unawaited(_controller.refreshEngineHint());
+    if (widget.fromNotification) {
+      // 通知说「后台在朗读」，但没挂回已有会话（例如进程被系统回收后重开）：
+      // 照常加载，加载完补一句说明，别让用户以为声音马上会响。
+      unawaited(_load().then((_) => _hintSessionLost()));
+    } else {
+      _load();
+    }
+  }
+
+  /// 挂回已有会话（点通知回来 / 再次进入同一条大纲）时，把正在读的卡片滚进视野。
+  ///
+  /// [_onControllerChanged] 只在新事件开始时才滚；挂回来的第一帧控制器不会发通知，
+  /// 不主动定位的话页面会停在列表顶部，用户还得自己翻回朗读位置。
+  void _restoreActiveCardOnFirstFrame() {
+    final index = _controller.activeIndex;
+    if (index < 0) return;
+    _lastScrolledIndex = index;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _scrollToSegment(index);
+    });
+  }
+
+  /// 从通知进来但会话已经没了：加载完如实说一句，避免「页面在、声音不响」的困惑
+  void _hintSessionLost() {
+    if (!mounted) return;
+    _toast('后台朗读已结束，点卡片上的播放可继续听');
   }
 
   /// 准备朗读引擎（能成功就顺手把「正在用内置语音」告诉页面）
@@ -87,10 +160,21 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
     if (!mounted) return;
     setState(() {});
   }
+
   @override
   void dispose() {
+    if (OutlineListenPage.openInstanceCount > 0) {
+      OutlineListenPage.openInstanceCount--;
+    }
     _controller.removeListener(_onControllerChanged);
-    _controller.dispose();
+    if (widget.controller != null) {
+      // 测试注入的 controller 归页面所有
+      _controller.dispose();
+    } else {
+      // 生产路径：controller 归后台会话所有。这里只 detach——朗读要继续；
+      // 会话会在「已停止 / 已听完且没有页面挂着」时自己释放，不能在这里 dispose。
+      OutlineListenSession.instance.detachPage(_controller);
+    }
     _scrollCtrl.dispose();
     super.dispose();
   }
@@ -177,10 +261,10 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
 
   /// 退出确认：有未保存修改时询问「保存并退出 / 不保存 / 取消」。
   ///
-  /// 无论走哪条路都**先停朗读**：弹着确认框、甚至已经退回列表页，声音还在读
-  /// 是最容易让人以为 App 出毛病的情况。
+  /// 退出**不暂停朗读**：本页支持后台朗读（进程级会话 + Android 前台服务 + 通知），
+  /// 返回列表 / 回桌面后声音继续，通知栏有进度与「停止」按钮。只有用户主动点
+  /// 播控条上的「停止朗读」（或通知栏的停止）才真的停。
   Future<void> _handleExit() async {
-    await _controller.pause();
     if (!mounted) return;
     if (!_controller.hasUnsaved) {
       Navigator.of(context).pop();
@@ -383,7 +467,7 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
     _toast('已取消撤回');
   }
 
-  /// 播控条：进度 + 当前朗读的事件 + 播放 / 上一个 / 下一个。
+  /// 播控条：未播放时只有「怎么开始」，播放中才是进度 + 当前朗读的事件 + 播控。
   ///
   /// **可收起**：按钮在顶栏（同一个位置两向切换：展开态是「收起」箭头，收起态是
   /// 「展开」箭头），播控条自己不再带按钮，版面因此干净。
@@ -434,30 +518,119 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
     );
   }
 
-  /// 展开态：**一行**，尺寸压到原来的一半左右。
+  /// 展开态：**一行播控 + 一行当前句**。
   ///
   /// 第一版是两行（书名 + 进度 + 两个标签一行，播控一行）再加一行状态，
-  /// 在窄屏上「标题 + 概要」这类标签会被挤成两行；现在只留一行：
-  /// 进度 · 当前事件 · 播控 · 语速 · 设置入口。
+  /// 在窄屏上「标题 + 概要」这类标签会被挤成两行；所以播控始终只留一行：
+  /// 未播放时只有「点卡片播放 + 开始 + 语速」（见 [_idlePlayerRow]），
+  /// 开始听之后才是完整的一行：进度 · 当前事件 · 播控 · 语速。
   /// 朗读范围这类状态收进设置面板（顶栏齿轮打开），不再挂在播控条上抢宽度。
+  /// 下方那条「当前句」只在真的停在一句上时出现（见 [_buildCurrentSentenceBar]），
+  /// 收起态整块不显示（见 [_buildCollapsedPlayer]）。
   Widget _buildExpandedPlayer() {
     final segment = _controller.activeSegment;
     final playing = _controller.playing;
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        // 窄屏（真机 360dp 那种）放不下语速，就不显示：它是次要状态，
-        // 设置面板里既能看到也能改；留在这一行只会把标题挤成省略号
-        final showRate = constraints.maxWidth >= 360;
-        return _playerRow(segment, playing, showRate: showRate);
-      },
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        LayoutBuilder(
+          builder: (context, constraints) {
+            // 窄屏（真机 360dp 那种）放不下语速，就不显示：它是次要状态，
+            // 设置面板里既能看到也能改；留在这一行只会把标题挤成省略号
+            final showRate = constraints.maxWidth >= 360;
+            return _playerRow(segment, playing, showRate: showRate);
+          },
+        ),
+        _buildCurrentSentenceBar(),
+      ],
     );
   }
 
+  /// 「当前句」提示条：正在读的是哪一句、这一句在事件里排第几。
+  ///
+  /// 卡片上的标题 / 概要输入框其实已经由 [OutlineListenTextController] 自己高亮
+  /// 当前句（控制器统一维护），这条是做两件高亮做不到的事：
+  /// 1. 读正文时没有输入框可高亮，只能在这里看到当前句；
+  /// 2. 长卡片滚出屏幕后，仍能一眼看到「正在读哪一句」。
+  ///
+  /// V4.11.4 起这一条下面多了一条**可直接左右拖动的滑条**：通知栏的进度条受
+  /// Android 限制只能点按（RemoteViews 没有连续触摸事件），所以真正能"像调亮度
+  /// 那样拖"的入口放在页面顶部——点通知回朗读页就能立刻拖，不必滚到卡片底部。
+  Widget _buildCurrentSentenceBar() {
+    // 没有当前句（没开始 / 已停止 / 事件间隙）就不占版面
+    if (_controller.activeIndex < 0 || _controller.activePiece == null) {
+      return const SizedBox.shrink();
+    }
+    final total = _controller.activeSentenceCount;
+    return Container(
+      width: double.infinity,
+      // 浅主色底 + 左侧 2dp 主色竖条：与卡片「朗读中」的配色同一套，不抢注意力
+      decoration: const BoxDecoration(
+        color: Color(0xFFEEF3FF),
+        border: Border(
+          left: BorderSide(color: Color(0xFF4D6BFE), width: 2),
+          bottom: BorderSide(color: Color(0xFFE3EAFB)),
+        ),
+      ),
+      padding: const EdgeInsets.fromLTRB(8, 4, 10, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF4D6BFE),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  '第 ${_controller.activeSentenceOrdinal}/${_controller.activeSentenceCount} 句',
+                  style: const TextStyle(
+                    fontSize: 9,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+              // 正文句子可能很长：最多两行 + 省略号，避免播控区吃掉半屏
+              Expanded(
+                child: Text(
+                  _controller.activeSentenceText,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 10.5,
+                    height: 1.35,
+                    color: Color(0xFF33415C),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (total > 1) _PlayerSentenceSlider(controller: _controller),
+        ],
+      ),
+    );
+  }
+
+  /// 完整播控行：进度 · 当前事件 · 上一个/播放/下一个/停止 · 内置语音 · 语速。
+  ///
+  /// 只在**已有朗读位置**（[OutlineListenController.activeIndex] >= 0）时出现；
+  /// 还没开始时走下面的 [_idlePlayerRow]。
   Widget _playerRow(
     OutlineListenSegment? segment,
     bool playing, {
     required bool showRate,
   }) {
+    // 未播放时换成极简一行：上一版这里同样是整排控件，但上一个 / 下一个 /
+    // 停止此刻全是灰的，点不动又占宽度——信息量最小、视觉噪音最大。
+    if (_controller.activeIndex < 0) {
+      return _idlePlayerRow(showRate: showRate);
+    }
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(10, 2, 6, 2),
@@ -467,18 +640,21 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
       ),
       child: Row(
         children: [
-          // 进度只在真的开始读之后才占位置：没开始读时这里显示「共 N」，
-          // 真机上会把窄屏的可用宽度吃掉一截，右侧提示被截成「点卡片上的…」
-          if (_controller.activeIndex >= 0) ...[
-            Text(
-              '${_controller.activeIndex + 1}/${_controller.segments.length}',
-              style: const TextStyle(fontSize: 9.5, color: Color(0xFF999999)),
-            ),
-            const SizedBox(width: 8),
-          ],
+          // 进度只在真的开始读之后才占位置：没开始读时这一整行会换成极简提示，
+          // 真机上那里的可用宽度不该被「共 N / 第 0」之类的无效数字吃掉
+          Text(
+            // 「只听大 / 小事件」时按范围内计数：范围过滤后还拿全篇事件数当
+            // 分母，会出现「第 2/7 个事件」却已经是最后一条的错觉
+            _controller.settings.scope == OutlineListenScope.all
+                ? '${_controller.activeIndex + 1}/${_controller.segments.length}'
+                : '${_controller.activePlayableOrdinal}/${_controller.playableCount}',
+            style: const TextStyle(fontSize: 9.5, color: Color(0xFF999999)),
+          ),
+          const SizedBox(width: 8),
           // 当前朗读的是哪一个事件：听的时候最怕「不知道读到哪了」
           Expanded(
             child: Text(
+              // 有朗读位置时 activeSegment 不会为空；兜底文案只防极端时序
               segment == null ? '点卡片播放' : _oneLine(segment.title),
               style: TextStyle(
                 fontSize: 10.5,
@@ -501,7 +677,10 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
                 : _controller.previous,
           ),
           const SizedBox(width: 2),
-          _playButton(playing),
+          _playButton(
+            playing,
+            onPressed: _controller.segments.isEmpty ? null : _controller.toggle,
+          ),
           const SizedBox(width: 2),
           _roundButton(
             icon: Icons.skip_next,
@@ -510,11 +689,12 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
           ),
           const SizedBox(width: 2),
           _roundButton(
-            icon: Icons.replay,
-            tooltip: '重读这一个事件',
-            onPressed: _controller.segments.isEmpty
-                ? null
-                : _controller.replayCurrent,
+            icon: Icons.stop,
+            // 后台朗读唯一的显式停止入口：退出页面后声音还在读，必须有一个
+            // 「现在立刻停下」的按钮（重读仍然可以用卡片上的播放按钮）。
+            tooltip: '停止朗读',
+            color: const Color(0xFFE53935),
+            onPressed: _controller.activeIndex >= 0 ? _controller.stop : null,
           ),
           const SizedBox(width: 2),
           // 正在用 App 自带的离线语音（手机系统里没有可用的 TTS 引擎）：
@@ -543,24 +723,70 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
     );
   }
 
-  Widget _playButton(bool playing) {
+  /// 未播放时的极简播控行：「点卡片播放」提示 + 一个开始按钮（+ 宽屏语速）。
+  ///
+  /// 只保留「怎么开始」这一件事：[activeIndex] < 0 时上一个 / 下一个 / 停止
+  /// 本来就是禁用态，进度数字也没有意义，全藏掉；用户点了卡片或这个按钮、
+  /// 有了朗读位置之后，下面那行完整播控会立刻顶上来。
+  Widget _idlePlayerRow({required bool showRate}) {
+    final hasContent = _controller.segments.isNotEmpty;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(10, 2, 6, 2),
+      decoration: const BoxDecoration(
+        color: Color(0xFFF8F9FF),
+        border: Border(bottom: BorderSide(color: Color(0xFFEEF1F8))),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              // 一条可读事件都没有时别再写「点卡片播放」：点了也不会有反应
+              hasContent ? '点卡片播放' : '暂无可朗读事件',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 10.5, color: Color(0xFF999999)),
+            ),
+          ),
+          const SizedBox(width: 6),
+          _playButton(
+            false,
+            // 走 play() 而不是 toggle()：未播放时语义就是「从头 / 从范围内
+            // 第一个事件开始读」，控制器自己会跳过范围外事件
+            onPressed: hasContent ? _controller.play : null,
+          ),
+          if (showRate) ...[
+            const SizedBox(width: 6),
+            Text(
+              _controller.settings.rateLabel,
+              style: const TextStyle(fontSize: 9.5, color: Color(0xFF999999)),
+              maxLines: 1,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// 圆形播放 / 暂停按钮；[onPressed] 为 null 时置灰（视作不可用）。
+  ///
+  /// 未播放态的极简行只留一个「开始」按钮，与完整播控行的播放 / 暂停共用同一套
+  /// 视觉（同一个圆形尺寸与配色），避免页面上出现两种长得不一样的播放键。
+  Widget _playButton(bool playing, {VoidCallback? onPressed}) {
+    final disabled = onPressed == null;
     return InkWell(
-      onTap: _controller.segments.isEmpty ? null : _controller.toggle,
+      onTap: onPressed,
       customBorder: const CircleBorder(),
       child: Container(
         width: 26,
         height: 26,
         decoration: BoxDecoration(
-          color: _controller.segments.isEmpty
-              ? const Color(0xFFE8ECF4)
-              : const Color(0xFF4D6BFE),
+          color: disabled ? const Color(0xFFE8ECF4) : const Color(0xFF4D6BFE),
           shape: BoxShape.circle,
         ),
         child: Icon(
           playing ? Icons.pause : Icons.play_arrow,
-          color: _controller.segments.isEmpty
-              ? const Color(0xFF999999)
-              : Colors.white,
+          color: disabled ? const Color(0xFF999999) : Colors.white,
           size: 16,
         ),
       ),
@@ -577,10 +803,12 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
     required IconData icon,
     required String tooltip,
     required VoidCallback? onPressed,
+    /// 图标颜色（默认主色）：停止按钮用红色，把自己和普通播控区分开
+    Color color = const Color(0xFF4D6BFE),
   }) {
     return IconButton(
       icon: Icon(icon, size: 15),
-      color: const Color(0xFF4D6BFE),
+      color: color,
       disabledColor: const Color(0xFFCCCCCC),
       tooltip: tooltip,
       onPressed: onPressed,
@@ -773,14 +1001,58 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
 
   Widget _buildList() {
     final segments = _controller.segments;
+    // 「只听大/小事件」的说明收成列表顶部**一条**轻横幅：以前每张范围外卡片
+    // 末尾都写一行「跳过此条」，一屏里重复七八次，既吵又白占高度；范围是整页
+    // 共用的状态，说一次就够了（范围恢复「全部事件」时横幅自然消失）。
+    final showScopeBanner =
+        _controller.settings.scope != OutlineListenScope.all;
+    final bannerCount = showScopeBanner ? 1 : 0;
     return ListView.builder(
       controller: _scrollCtrl,
       // 输入法升起时视口变矮，下面的卡片会掉出缓存区被卸载；
       // 缓存区给足（与「大纲编辑」同一个理由与取值）
       scrollCacheExtent: const ScrollCacheExtent.pixels(1000),
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-      itemCount: segments.length,
-      itemBuilder: (context, index) => _buildEventCard(index),
+      // 横幅也作为列表的第一项（而不是钉在 ListView 外面）：它跟着内容一起
+      // 滚走，不长期占用本就紧张的竖向空间
+      itemCount: segments.length + bannerCount,
+      itemBuilder: (context, index) {
+        if (showScopeBanner && index == 0) return _buildScopeBanner();
+        return _buildEventCard(index - bannerCount);
+      },
+    );
+  }
+
+  /// 朗读范围过滤的轻提示（只在「只听大/小事件」时出现一次，位于列表顶部）。
+  ///
+  /// 只陈述范围与影响、不做成按钮：要改范围去顶栏「朗读设置」，这里只负责让
+  /// 用户知道「为什么有些卡片不跟着读」，避免像旧版那样在每张卡片上重复解释。
+  Widget _buildScopeBanner() {
+    final majorOnly =
+        _controller.settings.scope == OutlineListenScope.majorOnly;
+    return Container(
+      // 与卡片同左右边距（ListView 的 padding 已给），底部留 8dp 与卡片分隔
+      margin: const EdgeInsets.only(bottom: 8),
+      height: 30,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF5F7FB),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.volume_off, size: 13, color: Color(0xFF8890A0)),
+          const SizedBox(width: 5),
+          Expanded(
+            child: Text(
+              majorOnly ? '只听大事件 · 小事件不参与朗读' : '只听小事件 · 大事件不参与朗读',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 10.5, color: Color(0xFF8890A0)),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -822,8 +1094,10 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
     final playing = active && _controller.playing;
     return Container(
       key: key,
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.fromLTRB(8, 6, 10, 10),
+      // 列表里不再有每张卡片的进度条之后，卡片本身可以略收紧一点：
+      // 一屏能多看到一点内容，整页的「满」主要就减在这里
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.fromLTRB(8, 6, 10, 8),
       decoration: BoxDecoration(
         color: playing ? const Color(0xFFF5F8FF) : Colors.white,
         borderRadius: BorderRadius.circular(10),
@@ -942,6 +1216,14 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
               ),
             ),
           ),
+          // 句子进度条只属于「正在读的那一条」：以前每张卡片末尾都挂一条，
+          // 一屏里全是灰条和「共 N 句」，把标题 / 概要挤成了次要信息。
+          // 现在只在当前朗读事件、并且它真的能拆出多句（拖了才有意义）时出现；
+          // 其余卡片干净收尾——要看句子进度，听的时候自然会停在那张卡片上。
+          if (active && _controller.activeSentenceCount > 1) ...[
+            const SizedBox(height: 2),
+            _SentenceSeekBar(controller: _controller, index: index),
+          ],
         ],
       ),
     );
@@ -1089,7 +1371,218 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
 /// 当前朗读的那一条在播控条上只占一行：把换行压成空格
 String _oneLine(String text) => text.replaceAll(RegExp(r'\s+'), ' ').trim();
 
-/// 朗读设置面板：模式 / 语速 / 音调 / 连读 / 循环 / 语言
+/// 播控区下方那条**可以直接左右拖动**的句子滑条（V4.11.4）。
+///
+/// 为什么放在这里：通知栏里的进度条受 Android 限制只能点按（通知的自定义视图
+/// 没有连续触摸事件，系统媒体通知的可拖 seekbar 在这台荣耀 Android 10 上又不
+/// 渲染），真正「像调亮度那样拖」的入口只能放在 App 内。这条滑条挂在顶部播控区
+/// 下面、一直可见，点通知回到朗读页就能立刻拖，不用滚到卡片底部找每卡进度条。
+///
+/// 拖动过程只改本地预览，松手才真正跳句（拖动中反复打断引擎会像卡带）；播放中
+/// 从落点句重新朗读，暂停时只把位置挪过去（高亮/通知同步），等点播放再读。
+class _PlayerSentenceSlider extends StatefulWidget {
+  final OutlineListenController controller;
+
+  const _PlayerSentenceSlider({required this.controller});
+
+  @override
+  State<_PlayerSentenceSlider> createState() => _PlayerSentenceSliderState();
+}
+
+class _PlayerSentenceSliderState extends State<_PlayerSentenceSlider> {
+  /// 拖动过程中的本地预览值（0~1）；null = 没在拖，跟随控制器
+  double? _dragValue;
+
+  int get _total => widget.controller.activeSentenceCount;
+
+  /// 进度换算成第几句（1 起），与卡片上那条进度条同一套坐标
+  int _ordinalOf(double progress) {
+    final total = _total;
+    if (total <= 0) return 0;
+    return (progress * total).ceil().clamp(1, total);
+  }
+
+  void _seekEnd(double value) {
+    final ordinal = _ordinalOf(value);
+    // 先清掉预览：控制器随后会通知真实位置，滑块不会一直卡在拖动值上
+    setState(() => _dragValue = null);
+    final index = widget.controller.activeIndex;
+    if (index < 0 || ordinal <= 0) return;
+    if (widget.controller.playing) {
+      unawaited(widget.controller.playFromSentence(index, ordinal - 1));
+    } else {
+      unawaited(widget.controller.seekToSentence(ordinal - 1));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = widget.controller;
+    final total = _total;
+    final dragging = _dragValue != null;
+    final progress = dragging ? _dragValue! : controller.activeSentenceProgress;
+    final ordinal = dragging
+        ? _ordinalOf(_dragValue!)
+        : controller.activeSentenceOrdinal;
+    return SizedBox(
+      height: 30,
+      child: Row(
+        children: [
+          // 一个滑动小图标提示「这里可以拖」——通知栏只能点，很多人不知道页面这条能滑
+          const Icon(Icons.swipe, size: 12, color: Color(0xFF7C89A8)),
+          const SizedBox(width: 2),
+          Expanded(
+            child: SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                trackHeight: 2.5,
+                trackShape: const RectangularSliderTrackShape(),
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5.5),
+                overlayShape: const RoundSliderOverlayShape(overlayRadius: 13),
+                activeTrackColor: const Color(0xFF4D6BFE),
+                inactiveTrackColor: const Color(0xFFC9D6F5),
+                thumbColor: const Color(0xFF4D6BFE),
+                overlayColor: const Color(0x224D6BFE),
+              ),
+              child: Slider(
+                // 测试用定位：页面上有两条句子滑条（这里 + 当前卡片底部），
+                // 用 key 区分「顶部这条」，不靠遍历顺序 / y 坐标
+                key: const ValueKey('player-sentence-slider'),
+                value: progress.clamp(0.0, 1.0),
+                onChangeStart: (v) => setState(() => _dragValue = v),
+                onChanged: (v) => setState(() => _dragValue = v),
+                onChangeEnd: _seekEnd,
+              ),
+            ),
+          ),
+          SizedBox(
+            // 与卡片进度条的标签同宽，两处句序数字对齐观感一致
+            width: 54,
+            child: Text(
+              ordinal <= 0 ? '共 $total 句' : '第 $ordinal/$total 句',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 9.5, color: Color(0xFF66738F)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 当前朗读卡片上的「句子进度条」：拖到某一句松手，就从这一句开始朗读。
+///
+/// 只在**正在读的那一条**卡片上出现（由 [_buildEventCard] 控制）：后台朗读是整篇
+/// 按范围连读的，用户听到某条想「从它的第 3 句再听一遍」时，播控条上的上一个 /
+/// 下一个只到事件级，不够用；手机上也很难靠反复点播放等前几句读完，滑动直接
+/// 定位最快。上一版每张卡片都挂一条（未播放的显示「共 N 句」、范围外的显示
+/// 「跳过此条」），一屏里全是重复的灰条，正是用户说「太满」的主要来源，所以
+/// 现在只留给真正在听的那一条。
+///
+/// 句数来自 [OutlineListenController.sentenceCountForIndex]（与朗读计划同一套
+/// 切句），所以滑块位置和实际朗读的句子永远对得上。拖动过程只改本地预览，
+/// 松手（onChangeEnd）才调 [OutlineListenController.playFromSentence]——拖动中
+/// 就跳转会反复打断引擎，听起来像卡带。
+class _SentenceSeekBar extends StatefulWidget {
+  final OutlineListenController controller;
+
+  /// 这张卡片对应的事件下标
+  final int index;
+
+  const _SentenceSeekBar({required this.controller, required this.index});
+
+  @override
+  State<_SentenceSeekBar> createState() => _SentenceSeekBarState();
+}
+
+class _SentenceSeekBarState extends State<_SentenceSeekBar> {
+  /// 拖动过程中的本地预览值（0~1）；null = 没在拖，跟随控制器
+  double? _dragValue;
+
+  int get _total => widget.controller.sentenceCountForIndex(widget.index);
+
+  /// 进度换算成第几句（1 起）。
+  ///
+  /// activeSentenceProgress 的语义是「读到第 n 句 = n/total」，所以用向上取整：
+  /// 0 → 第 1 句，1.0 → 最后一句，中间落在哪句就取哪句。
+  int _ordinalOf(double progress) {
+    final total = _total;
+    if (total <= 0) return 0;
+    return (progress * total).ceil().clamp(1, total);
+  }
+
+  void _seekEnd(double value) {
+    final ordinal = _ordinalOf(value);
+    // 先清掉预览：控制器随后会通知真实位置，滑块不会一直卡在拖动值上
+    setState(() => _dragValue = null);
+    if (ordinal <= 0) return;
+    unawaited(widget.controller.playFromSentence(widget.index, ordinal - 1));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = widget.controller;
+    final total = _total;
+    final dragging = _dragValue != null;
+    // 只在当前朗读事件上出现，所以进度直接跟控制器走；拖动时先用本地预览，
+    // 松手才真正跳转（拖动中就跳会反复打断引擎）。
+    final progress = dragging ? _dragValue! : controller.activeSentenceProgress;
+    final ordinal = dragging
+        ? _ordinalOf(_dragValue!)
+        : controller.activeSentenceOrdinal;
+    // 事件读完 / 暂停在末尾时 activeSentenceIndex 可能是 -1：这时写「第 0/N 句」
+    // 只会让人困惑，退回「共 N 句」
+    final label = ordinal <= 0 ? '共 $total 句' : '第 $ordinal/$total 句';
+
+    return SizedBox(
+      // 卡片已经很高了，进度条整行压在 30dp：track 2dp + 拇指 9dp + overlay 24dp
+      height: 30,
+      child: Row(
+        children: [
+          SizedBox(
+            // 64dp：「第 12/14 句」在 720px/9.5sp 下实测 50dp 会被省略号截断
+            // （真机验证时发现「第 12/1…」），这里给足宽度；再宽的句数也不常见
+            width: 64,
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 9.5, color: Color(0xFF999999)),
+            ),
+          ),
+          Expanded(
+            child: SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                trackHeight: 2,
+                trackShape: const RectangularSliderTrackShape(),
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 4.5),
+                overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+                activeTrackColor: const Color(0xFF4D6BFE),
+                inactiveTrackColor: const Color(0xFFE3E8F2),
+                thumbColor: const Color(0xFF4D6BFE),
+                disabledActiveTrackColor: const Color(0xFFE3E8F2),
+                disabledInactiveTrackColor: const Color(0xFFEDF0F6),
+                disabledThumbColor: const Color(0xFFCCCCCC),
+              ),
+              // 不设 divisions：每句的位置按 (n+1)/total 落，和 activeSentenceProgress
+              // 是同一套坐标；刻度模式会用 0..1 均分，反而对不上。
+              child: Slider(
+                value: progress.clamp(0.0, 1.0),
+                // 能显示这条进度条就说明总句数 > 1（[_buildEventCard] 已挡掉单句
+                // 事件），所以永远可拖，不再需要 enabled 判断
+                onChangeStart: (v) => setState(() => _dragValue = v),
+                onChanged: (v) => setState(() => _dragValue = v),
+                onChangeEnd: _seekEnd,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 朗读设置面板：朗读引擎 / 朗读范围 / 朗读事件类型 / 语速 / 音调 / 连读 / 循环 / 语言
 class _SpeechSettingsSheet extends StatefulWidget {
   final OutlineListenController controller;
 
@@ -1243,6 +1736,36 @@ class _SpeechSettingsSheetState extends State<_SpeechSettingsSheet> {
                     onTap: () => _update(s.copyWith(mode: mode)),
                   ),
               ],
+            ),
+            const SizedBox(height: 14),
+            // 「朗读事件类型」与「朗读范围」是两件事：范围决定一个事件读多少内容，
+            // 这里决定哪些事件参与朗读推进（全部 / 只大事件 / 只小事件）。
+            // 长篇小说上百个事件时，只听大事件能顺着主线快速过一遍。
+            const Text(
+              '朗读事件类型',
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF333333),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final scope in OutlineListenScope.values)
+                  _choice(
+                    label: scope.label,
+                    selected: s.scope == scope,
+                    onTap: () => _update(s.copyWith(scope: scope)),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              '只听大/小事件时，自动连读与上一个/下一个都只走范围内事件；卡片仍可编辑',
+              style: TextStyle(fontSize: 11, color: Color(0xFF999999)),
             ),
             const SizedBox(height: 14),
             const Text(

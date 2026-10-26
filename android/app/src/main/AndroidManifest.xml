@@ -11,6 +11,10 @@
          startForeground 时抛 SecurityException（App 直接崩） -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- 「听大纲」后台朗读的前台服务：mediaPlayback 类型。Android 14+ 除了 FOREGROUND_SERVICE
+         之外还要按类型声明这条，缺了会在 startForeground(..., MEDIA_PLAYBACK) 时抛
+         SecurityException（App 直接崩） -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <!-- 生成期间持 PARTIAL_WAKE_LOCK：锁屏后 CPU 不休眠，流式请求不会被挂起 -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <application
@@ -51,6 +55,30 @@
             android:exported="false"
             android:foregroundServiceType="dataSync"
             android:stopWithTask="false" />
+        <!-- 「听大纲改名」的后台朗读前台服务：朗读时退回桌面 / 切到别的 App / 锁屏后
+             继续逐事件朗读，并把朗读进度 + 播控（上一个事件 / 暂停-继续 / 停止）钉在通知栏，
+             点通知主体回到 MainActivity 的朗读页。
+
+             foregroundServiceType=mediaPlayback 必须与 Java 侧
+             startForeground(..., FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK) 以及
+             FOREGROUND_SERVICE_MEDIA_PLAYBACK 权限三者一致，否则 Android 14+ 会拒绝启动。
+             stopWithTask=false：用户从最近任务划掉 App 时先回调 onTaskRemoved，把「正在朗读」
+             通知改成「已停止」再 stopSelf（Dart 的逐事件循环已随进程停止），避免留一条假进度。 -->
+        <service
+            android:name=".OutlineListenService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback"
+            android:stopWithTask="false" />
+        <!-- 「听大纲」通知栏三个播控按钮的广播接收器：只在本 App 内使用（exported=false），
+             PendingIntent 里已经显式指定组件，外部 App 无法伪造播控指令。
+             intent-filter 的 action 必须与 OutlineListenService.ACTION_LISTEN 逐字一致。 -->
+        <receiver
+            android:name=".OutlineListenActionReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.deepseek.deepseekapp.outline.LISTEN_ACTION" />
+            </intent-filter>
+        </receiver>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

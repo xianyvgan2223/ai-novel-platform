@@ -3,7 +3,9 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:deepseekapp/features/novel_writing/outline_listening/background/outline_listening_notification.dart';
 import 'package:deepseekapp/features/novel_writing/outline_listening/controller/outline_listen_controller.dart';
+import 'package:deepseekapp/features/novel_writing/outline_listening/model/listening_segment.dart';
 import 'package:deepseekapp/features/novel_writing/outline_listening/service/tts_engine.dart';
 import 'package:deepseekapp/features/novel_writing/outline_listening/service/tts_engine_fake.dart';
 import 'package:deepseekapp/features/novel_writing/outline_listening/view/page/outline_listen_page.dart';
@@ -49,6 +51,8 @@ void main() {
         foreshadows: '',
       ),
       engine: engine,
+      // 单测不碰原生通知通道：注入「不支持」的通知桥，全部 no-op
+      notification: OutlineListeningNotification(supported: false),
     );
     ctrl.init([
       ch(1, 'major', '初入江湖', '李云飞在青阳城醒来。\n他失去了记忆。'),
@@ -68,6 +72,24 @@ void main() {
     return (ctrl: ctrl, engine: engine);
   }
 
+  /// 反复触发「这一句读完了」，直到当前事件推进或朗读停下。
+  ///
+  /// 逐句朗读后一次 [FakeTtsEngine.finishCurrent] 只推进一步，一个事件要推
+  /// 好几次；上限保护避免句子计划出 bug 时测试死循环。
+  Future<void> finishEvent(
+    WidgetTester tester,
+    FakeTtsEngine engine,
+    OutlineListenController ctrl,
+  ) async {
+    final startIndex = ctrl.activeIndex;
+    for (var i = 0; i < 100; i++) {
+      engine.finishCurrent();
+      await tester.pumpAndSettle();
+      if (!ctrl.playing || ctrl.activeIndex != startIndex) return;
+    }
+    fail('读了 100 句还没读完当前事件（activeIndex 停在 $startIndex）');
+  }
+
   /// 改名面板里的元素（页面本身也有一堆 TextField / Text，必须限定在面板内找）
   Finder inSheet(Finder matching) =>
       find.descendant(of: find.byType(BottomSheet), matching: matching);
@@ -77,6 +99,19 @@ void main() {
   /// 卡片上的播放按钮（播控条上那个没有 tooltip，卡片这个有）
   Finder cardPlay(int index) =>
       find.byTooltip('从这一个事件开始读').at(index);
+
+  /// 页面顶部「当前句」条里的可拖动句子滑条（lib 里给了 ValueKey 便于定位）
+  Finder playerSentenceSlider() =>
+      find.byKey(const ValueKey('player-sentence-slider'));
+
+  /// 当前朗读卡片上的句子进度条。
+  ///
+  /// 播放态页面上有两条句子滑条：顶部播控区一条、当前卡片底部一条。卡片在
+  /// ListView 里、顶部滑条不在，因此用「是否在 ListView 内」区分两者。
+  Finder cardSentenceSlider() => find.descendant(
+    of: find.byType(ListView),
+    matching: find.byType(Slider),
+  );
 
   testWidgets('一个事件一张卡片：标题与概要在同一张卡片里', (tester) async {
     await pumpPage(tester);
@@ -116,11 +151,13 @@ void main() {
 
     await tester.tap(cardPlay(0));
     await tester.pumpAndSettle();
-    env.engine.finishCurrent();
-    await tester.pumpAndSettle();
+    // 逐句朗读：事件 1 有 3 句，要逐句推完才算读完
+    expect(env.ctrl.sentenceCountForIndex(0), 3);
+    await finishEvent(tester, env.engine, env.ctrl);
 
-    expect(env.engine.spoken.length, 2);
+    expect(env.engine.spoken.last, startsWith('小事件1，拜师'));
     expect(find.text('2/2'), findsOneWidget);
+    expect(env.ctrl.spokenCount, 1);
   });
 
   testWidgets('下一个 / 上一个按钮切换事件', (tester) async {
@@ -391,15 +428,22 @@ void main() {
   testWidgets('上方播控区可以收起与展开（按钮在顶栏，两向切换）', (tester) async {
     final env = await pumpPage(tester);
 
-    // 展开态：一行播控（上一个 / 下一个 / 语速 / 进度都在）
-    expect(find.byTooltip('上一个事件'), findsOneWidget);
-    expect(find.byTooltip('下一个事件'), findsOneWidget);
+    // 未播放：播控行是极简态——只有「点卡片播放」+ 开始键 + 语速；
+    // 上一个 / 下一个 / 停止此刻都点不动，页面精简后直接不显示
+    expect(find.text('点卡片播放'), findsOneWidget);
+    expect(find.byTooltip('上一个事件'), findsNothing);
+    expect(find.byTooltip('下一个事件'), findsNothing);
+    expect(find.byTooltip('停止朗读'), findsNothing);
     expect(find.text('1.0x'), findsOneWidget);
     expect(env.ctrl.playerCollapsed, isFalse);
 
     await tester.tap(cardPlay(0));
     await tester.pumpAndSettle();
     expect(env.engine.spoken, isNotEmpty);
+    // 开始读之后完整播控顶上来
+    expect(find.byTooltip('上一个事件'), findsOneWidget);
+    expect(find.byTooltip('下一个事件'), findsOneWidget);
+    expect(find.byTooltip('停止朗读'), findsOneWidget);
 
     // 收起：播控条整块只剩一条窄条（按钮在顶栏，同一个位置变成「展开」）
     await tester.tap(find.byTooltip('收起播放控制'));
@@ -427,6 +471,39 @@ void main() {
     await tester.tap(find.byTooltip('收起播放控制'));
     await tester.pumpAndSettle();
     expect(env.ctrl.playerCollapsed, isTrue);
+  });
+
+  testWidgets('未播放时播控行极简：点「点卡片播放」旁的开始键从头播放', (tester) async {
+    final env = await pumpPage(tester);
+
+    // 极简行只说「怎么开始」，不摆一排此刻点不动的按钮
+    expect(find.text('点卡片播放'), findsOneWidget);
+    expect(find.byTooltip('上一个事件'), findsNothing);
+    expect(find.byTooltip('下一个事件'), findsNothing);
+    expect(find.byTooltip('停止朗读'), findsNothing);
+
+    // 这一行里只有一个圆形开始键（卡片上的播放键在列表里，不在播控行）
+    final idleRow = find.ancestor(
+      of: find.text('点卡片播放'),
+      matching: find.byType(Row),
+    );
+    final startIcon = find.descendant(
+      of: idleRow.first,
+      matching: find.byIcon(Icons.play_arrow),
+    );
+    expect(startIcon, findsOneWidget);
+
+    await tester.tap(startIcon);
+    await tester.pumpAndSettle();
+
+    expect(env.ctrl.playing, isTrue);
+    expect(env.ctrl.activeIndex, 0);
+    expect(env.engine.spoken.first, '大事件1，初入江湖');
+    // 开始后完整播控顶上来（同一个位置从「怎么开始」变成「怎么控制」）
+    expect(find.byTooltip('上一个事件'), findsOneWidget);
+    expect(find.byTooltip('下一个事件'), findsOneWidget);
+    expect(find.byTooltip('停止朗读'), findsOneWidget);
+    expect(find.text('点卡片播放'), findsNothing);
   });
 
   testWidgets('360dp 窄屏下收起态放得下（长事件标题与长概要）', (tester) async {
@@ -780,5 +857,341 @@ void main() {
       expect(env.ctrl.checkName('醒来').settingCount, 0);
       expect(env.ctrl.checkName('苏醒').settingCount, 1);
     });
+  });
+
+  group('句子级朗读：当前句 / 拖动定位 / 停止朗读', () {
+    testWidgets('播放时播控条显示当前句（第 x/y 句 + 句子文本）', (tester) async {
+      final env = await pumpPage(tester);
+
+      await tester.tap(cardPlay(0));
+      await tester.pumpAndSettle();
+
+      // 「第 1/3 句」三处：当前句提示条 + 顶部滑条右侧标签 + 当前卡片滑条标签
+      expect(find.text('第 1/3 句'), findsNWidgets(3));
+      // 标题句文本只在提示条里（卡片标题输入框里是「初入江湖」，不带类型前缀）
+      expect(find.text('大事件1，初入江湖'), findsOneWidget);
+      expect(env.ctrl.activeSentenceIndex, 0);
+
+      env.engine.finishCurrent();
+      await tester.pumpAndSettle();
+
+      // 推进到概要第 1 句：提示条 / 两条滑条的标签跟着变
+      expect(find.text('第 2/3 句'), findsNWidgets(3));
+      expect(find.text('李云飞在青阳城醒来。'), findsOneWidget);
+      expect(env.ctrl.activeSentenceIndex, 1);
+    });
+
+    testWidgets('卡片句子拖动条只在当前朗读卡片上；拖到头从该事件最后一句开始读', (tester) async {
+      final env = await pumpPage(tester);
+
+      // 未播放：一条句子滑条都没有（顶部「当前句」条不显示，卡片上也没有灰条）
+      expect(find.byType(Slider), findsNothing);
+      expect(playerSentenceSlider(), findsNothing);
+      expect(cardSentenceSlider(), findsNothing);
+      expect(find.text('共 3 句'), findsNothing);
+      expect(find.text('共 2 句'), findsNothing);
+
+      final plan = env.ctrl.planForIndex(0);
+      expect(plan.length, 3);
+
+      await tester.tap(cardPlay(0));
+      await tester.pumpAndSettle();
+
+      // 播放态两条滑条：顶部滑条 + 当前卡片滑条；卡片滑条只有这一条
+      expect(find.byType(Slider), findsNWidgets(2));
+      expect(playerSentenceSlider(), findsOneWidget);
+      expect(cardSentenceSlider(), findsOneWidget);
+      // 「第 1/3 句」三处：当前句提示条 + 顶部标签 + 当前卡片标签
+      expect(find.text('第 1/3 句'), findsNWidgets(3));
+      expect(find.text('共 2 句'), findsNothing);
+
+      // 拖卡片滑条到最右：松手才跳转，从这一事件最后一句开始读
+      await tester.drag(cardSentenceSlider(), const Offset(600, 0));
+      await tester.pumpAndSettle();
+
+      expect(env.ctrl.activeIndex, 0);
+      expect(env.ctrl.playing, isTrue);
+      expect(env.ctrl.activeSentenceIndex, plan.length - 1);
+      // 真的从这一句开始读了（假引擎记下最后一条朗读请求）
+      expect(env.engine.spoken.last, plan.pieces.last.text);
+      expect(find.text('朗读中'), findsOneWidget);
+      expect(find.byType(Slider), findsNWidgets(2));
+    });
+
+    testWidgets('卡片 SeekBar 跟着当前卡片走（顶部滑条不随卡片移动）', (tester) async {
+      final env = await pumpPage(tester);
+
+      await tester.tap(cardPlay(1));
+      await tester.pumpAndSettle();
+
+      expect(env.ctrl.activeIndex, 1);
+      // 仍是两条滑条，但卡片那条只有一条且句数换成第二张卡片的
+      expect(find.byType(Slider), findsNWidgets(2));
+      expect(cardSentenceSlider(), findsOneWidget);
+      expect(playerSentenceSlider(), findsOneWidget);
+      // 句数换成第二张卡片的（标题 + 1 句概要 = 2 句）
+      expect(find.text('第 1/2 句'), findsNWidgets(3));
+      // 大事件那张卡片没有 SeekBar，也不再出现「共 3 句」
+      expect(find.text('共 3 句'), findsNothing);
+    });
+
+    testWidgets('播控条「停止朗读」：停止后回到未播放状态，不再继续读', (tester) async {
+      final env = await pumpPage(tester);
+
+      // 未播放时极简播控行里没有停止按钮（点了也没用，不占位置）
+      expect(find.byTooltip('停止朗读'), findsNothing);
+      expect(playerSentenceSlider(), findsNothing);
+
+      await tester.tap(cardPlay(0));
+      await tester.pumpAndSettle();
+      final stopButton = find.byTooltip('停止朗读');
+      expect(stopButton, findsOneWidget);
+      expect(playerSentenceSlider(), findsOneWidget);
+      final spokeBefore = env.engine.spoken.length;
+
+      await tester.tap(stopButton);
+      await tester.pumpAndSettle();
+
+      expect(env.ctrl.activeIndex, -1);
+      expect(env.ctrl.playing, isFalse);
+      expect(env.engine.spoken.length, spokeBefore, reason: '停止后不该再发朗读请求');
+      // 当前句提示条、顶部滑条、朗读中标记、停止按钮都消失：回到极简播控行
+      expect(find.text('大事件1，初入江湖'), findsNothing);
+      expect(find.text('朗读中'), findsNothing);
+      expect(find.byTooltip('停止朗读'), findsNothing);
+      expect(playerSentenceSlider(), findsNothing);
+      expect(find.byType(Slider), findsNothing);
+      expect(find.text('点卡片播放'), findsOneWidget);
+    });
+
+    testWidgets('范围过滤改为列表顶部一条 banner，不再逐卡显示「跳过此条」', (tester) async {
+      final env = await pumpPage(tester);
+
+      // 默认「全部事件」：没有范围 banner
+      expect(find.textContaining('不参与朗读'), findsNothing);
+
+      env.ctrl.updateSettings(
+        env.ctrl.settings.copyWith(scope: OutlineListenScope.minorOnly),
+      );
+      await tester.pumpAndSettle();
+
+      // 列表顶部一条轻横幅说清「哪些事件不参与朗读」，卡片上不再逐条重复
+      expect(find.text('只听小事件 · 大事件不参与朗读'), findsOneWidget);
+      expect(find.textContaining('跳过此条'), findsNothing);
+      expect(env.ctrl.isPlayableAt(0), isFalse);
+      expect(env.ctrl.isPlayableAt(1), isTrue);
+      // 卡片本身一张不少：范围只影响朗读推进，不影响编辑
+      expect(env.ctrl.segments.length, 2);
+      expect(find.text('初入江湖'), findsOneWidget);
+
+      // 换成「只听大事件」：banner 文案跟着范围变
+      env.ctrl.updateSettings(
+        env.ctrl.settings.copyWith(scope: OutlineListenScope.majorOnly),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('只听大事件 · 小事件不参与朗读'), findsOneWidget);
+
+      // 切回「全部事件」：banner 消失
+      env.ctrl.updateSettings(
+        env.ctrl.settings.copyWith(scope: OutlineListenScope.all),
+      );
+      await tester.pumpAndSettle();
+      expect(find.textContaining('不参与朗读'), findsNothing);
+    });
+  });
+
+  group('顶部句子滑条（_PlayerSentenceSlider）', () {
+    testWidgets('播放中拖顶部滑条到末尾：从该事件最后一句开始读，标签同步更新', (tester) async {
+      final env = await pumpPage(tester);
+      final plan = env.ctrl.planForIndex(0);
+
+      await tester.tap(cardPlay(0));
+      await tester.pumpAndSettle();
+      expect(playerSentenceSlider(), findsOneWidget);
+      expect(find.text('第 1/3 句'), findsNWidgets(3));
+
+      await tester.drag(playerSentenceSlider(), const Offset(600, 0));
+      await tester.pumpAndSettle();
+
+      expect(env.ctrl.playing, isTrue);
+      expect(env.ctrl.activeIndex, 0);
+      expect(
+        env.ctrl.activeSentenceIndex,
+        plan.length - 1,
+        reason: '拖到末尾 → 该事件最后一句',
+      );
+      // 从落点句重新朗读（不是只改高亮）
+      expect(env.engine.spoken.last, plan.pieces.last.text);
+      // 顶部滑条右侧标签、当前句条徽标、卡片滑条标签一起更新
+      expect(find.text('第 3/3 句'), findsNWidgets(3));
+    });
+
+    testWidgets('暂停中拖顶部滑条：只挪位置不发声，再播放从该句读', (tester) async {
+      final env = await pumpPage(tester);
+      final plan = env.ctrl.planForIndex(0);
+
+      await tester.tap(cardPlay(0));
+      await tester.pumpAndSettle();
+      // 点播控条上的暂停（完整播控行里的圆形按钮）
+      await tester.tap(find.byIcon(Icons.pause));
+      await tester.pumpAndSettle();
+      expect(env.ctrl.playing, isFalse);
+      final spokeBefore = env.engine.spoken.length;
+
+      await tester.drag(playerSentenceSlider(), const Offset(600, 0));
+      await tester.pumpAndSettle();
+
+      expect(env.ctrl.playing, isFalse, reason: '暂停中拖动只挪位置');
+      expect(env.engine.spoken.length, spokeBefore, reason: '暂停中拖动不该发声');
+      expect(env.ctrl.activeSentenceIndex, plan.length - 1);
+      expect(find.text('第 3/3 句'), findsNWidgets(3));
+
+      // 再点播放：从落点句继续，而不是退回事件开头
+      await tester.tap(find.byIcon(Icons.play_arrow).first);
+      await tester.pumpAndSettle();
+      expect(env.ctrl.playing, isTrue);
+      expect(env.ctrl.activeSentenceIndex, plan.length - 1);
+      expect(env.engine.spoken.last, plan.pieces.last.text);
+    });
+
+    testWidgets('顶部滑条只在句数 >1 且有当前句时出现；停止后一起消失', (tester) async {
+      final env = await pumpPage(tester);
+
+      // 只读标题 → 每个事件只有 1 句：有「当前句」条，但没有可拖动的滑条
+      env.ctrl.updateSettings(
+        env.ctrl.settings.copyWith(mode: OutlineListenMode.titleOnly),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(cardPlay(0));
+      await tester.pumpAndSettle();
+
+      expect(env.ctrl.activeSentenceCount, 1);
+      expect(find.text('大事件1，初入江湖'), findsOneWidget);
+      expect(playerSentenceSlider(), findsNothing);
+      expect(find.byType(Slider), findsNothing);
+
+      // 停止 → 换回默认模式重播：滑条出现
+      await tester.tap(find.byTooltip('停止朗读'));
+      await tester.pumpAndSettle();
+      env.ctrl.updateSettings(
+        env.ctrl.settings.copyWith(mode: OutlineListenMode.titleAndSummary),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(cardPlay(0));
+      await tester.pumpAndSettle();
+      expect(playerSentenceSlider(), findsOneWidget);
+      expect(find.byType(Slider), findsNWidgets(2));
+
+      // 再停止：当前句条与顶部滑条一起消失
+      await tester.tap(find.byTooltip('停止朗读'));
+      await tester.pumpAndSettle();
+      expect(playerSentenceSlider(), findsNothing);
+      expect(find.byType(Slider), findsNothing);
+    });
+
+    testWidgets('顶部滑条始终在页面顶部（不在卡片列表里），不随当前卡片移动', (tester) async {
+      final env = await pumpPage(tester);
+
+      await tester.tap(cardPlay(0));
+      await tester.pumpAndSettle();
+      final topYBefore = tester.getTopLeft(playerSentenceSlider()).dy;
+      expect(tester.getTopLeft(cardSentenceSlider()).dy, greaterThan(topYBefore));
+      // 顶部滑条不在 ListView 内：卡片滚动 / 切换朗读事件都不影响它
+      expect(
+        find.descendant(
+          of: find.byType(ListView),
+          matching: playerSentenceSlider(),
+        ),
+        findsNothing,
+      );
+
+      await tester.ensureVisible(cardPlay(1));
+      await tester.pumpAndSettle();
+      await tester.tap(cardPlay(1));
+      await tester.pumpAndSettle();
+      expect(env.ctrl.activeIndex, 1);
+      expect(playerSentenceSlider(), findsOneWidget);
+      expect(cardSentenceSlider(), findsOneWidget);
+      expect(tester.getTopLeft(playerSentenceSlider()).dy, topYBefore);
+      expect(tester.getTopLeft(cardSentenceSlider()).dy, greaterThan(topYBefore));
+    });
+  });
+
+  group('朗读设置 · 朗读事件类型', () {
+    testWidgets('设置面板有「朗读事件类型」三选项，点一下立即生效', (tester) async {
+      final env = await pumpPage(tester);
+
+      await tester.tap(find.byTooltip('朗读设置'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('朗读事件类型'), findsOneWidget);
+      // 三档：全部 / 只听大 / 只听小（与「朗读范围」的标题/概要/正文是两件事）
+      expect(find.text('全部事件'), findsOneWidget);
+      expect(find.text('只听大事件'), findsOneWidget);
+      expect(find.text('只听小事件'), findsOneWidget);
+      expect(env.ctrl.settings.scope, OutlineListenScope.all);
+
+      // 面板在窄屏上要滚动才看得到这一节：先滚到可见再点
+      await tester.ensureVisible(find.text('只听小事件'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('只听小事件'));
+      await tester.pumpAndSettle();
+
+      expect(env.ctrl.settings.scope, OutlineListenScope.minorOnly);
+      // 范围切换不改卡片数量（卡片仍可编辑，只是不参与朗读推进）
+      expect(env.ctrl.segments.length, 2);
+    });
+  });
+
+  testWidgets('退出页面不再暂停朗读：返回列表后仍在播，引擎没收到额外 stop', (tester) async {
+    final engine = FakeTtsEngine();
+    final ctrl = OutlineListenController(
+      OutlineRecord(title: '测试小说', content: ''),
+      engine: engine,
+      notification: OutlineListeningNotification(supported: false),
+    );
+    ctrl.init([
+      ch(1, 'major', '初入江湖', '李云飞在青阳城醒来。'),
+    ], reload: false);
+    addTearDown(() => tester.pumpWidget(const SizedBox()));
+
+    // 页面挂在导航栈上（退出要真的 pop 回列表，才能验 dispose 行为）
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: Center(
+              child: ElevatedButton(
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => OutlineListenPage(
+                      outline: ctrl.outline,
+                      chapters: const [],
+                      controller: ctrl,
+                    ),
+                  ),
+                ),
+                child: const Text('打开朗读页'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('打开朗读页'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(cardPlay(0));
+    await tester.pumpAndSettle();
+    expect(ctrl.playing, isTrue);
+    final stopBefore = engine.stopCount;
+
+    // 点返回：退出页面不该再 pause 朗读（后台会话 / 通知栏继续）
+    await tester.tap(find.byIcon(Icons.arrow_back));
+    await tester.pumpAndSettle();
+
+    expect(find.text('打开朗读页'), findsOneWidget); // 已经回到列表
+    expect(ctrl.playing, isTrue, reason: '退出页面时不暂停，朗读继续');
+    expect(engine.stopCount, stopBefore, reason: '退出不该触发 pause/stop');
   });
 }

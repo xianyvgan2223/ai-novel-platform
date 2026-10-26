@@ -127,6 +127,19 @@ const TextStyle kSettingsRowLabelStyle = TextStyle(
 
 // ─── 内部工具 ───
 
+/// 标签自然宽度的缓存。
+///
+/// 测量要新建 TextPainter 并 layout，是「一行」里最贵的一步；而同一组
+/// （文案 / 字体样式 / 系统字号）在整页生命周期里会被反复测量：每次重建、
+/// 每次 LayoutBuilder 布局都会走一遍。设置项的文案集合是固定的，缓存后
+/// 只在首次出现时算一次，滚动 / 重建 / 转场时零开销。
+///
+/// key 用 (label, textScaler, style) 而不是只按文案：系统字号或主题字体变了，
+/// 量出来的宽度也会变，必须重新测量。
+final Map<({String label, TextScaler textScaler, TextStyle style}), double>
+    _labelWidthCache =
+    <({String label, TextScaler textScaler, TextStyle style}), double>{};
+
 /// 用真实字体测量单行标签的自然宽度（含当前系统字号缩放）。
 ///
 /// 为什么不按 textScale 阈值猜：真机系统 font_scale=1.15 时恰好卡在
@@ -135,19 +148,33 @@ const TextStyle kSettingsRowLabelStyle = TextStyle(
 /// 标签样式，保证和真实渲染同一套字体 / fallback / 缩放，
 /// 任何字体、任何系统字号下都不会截断。
 double _measureLabelWidth(BuildContext context, String label) {
+  final style = DefaultTextStyle.of(context).style.merge(kSettingsRowLabelStyle);
+  final key = (
+    label: label,
+    textScaler: MediaQuery.textScalerOf(context),
+    style: style,
+  );
+  final cached = _labelWidthCache[key];
+  if (cached != null) return cached;
+
   final painter = TextPainter(
     text: TextSpan(
       text: label,
       // Text 渲染时会把自身 style 合并到 DefaultTextStyle 上，这里做同样的合并，
       // 才能拿到正确的字体族 / fontFamilyFallback（截图测试环境尤其重要）。
-      style: DefaultTextStyle.of(context).style.merge(kSettingsRowLabelStyle),
+      style: style,
     ),
     textDirection: Directionality.of(context),
-    textScaler: MediaQuery.textScalerOf(context),
+    textScaler: key.textScaler,
     maxLines: 1,
   )..layout();
   final width = painter.width;
   painter.dispose();
+
+  // 设置项文案是固定的一小撮，超过上限只可能是字号 / 主题在变化，
+  // 整体清空即可，避免缓存无界增长。
+  if (_labelWidthCache.length >= 200) _labelWidthCache.clear();
+  _labelWidthCache[key] = width;
   return width;
 }
 

@@ -1,7 +1,9 @@
 import 'dart:convert';
+import 'dart:ui' show TextRange;
 
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:deepseekapp/features/novel_writing/outline_listening/background/outline_listening_notification.dart';
 import 'package:deepseekapp/features/novel_writing/outline_listening/controller/outline_listen_controller.dart';
 import 'package:deepseekapp/features/novel_writing/outline_listening/model/listening_segment.dart';
 import 'package:deepseekapp/features/novel_writing/outline_listening/service/name_finder.dart';
@@ -82,6 +84,41 @@ void main() {
     );
     ctrl.init(inMemoryChapters());
     return ctrl;
+  }
+
+  /// 等控制器里 `unawaited` 的连读 / 通知同步跑完（都是微任务级异步）
+  Future<void> settle() => Future<void>.delayed(Duration.zero);
+
+  /// 反复触发「这一句读完了」，直到**当前事件推进**或朗读停下。
+  ///
+  /// 逐句朗读之后，一次 [FakeTtsEngine.finishCurrent] 只代表「当前这一句读完」，
+  /// 一个事件有几句话就要推几次。上限保护：句子计划坏了也不会死循环。
+  Future<void> finishEvent(
+    FakeTtsEngine engine,
+    OutlineListenController ctrl,
+  ) async {
+    final startIndex = ctrl.activeIndex;
+    for (var i = 0; i < 100; i++) {
+      engine.finishCurrent();
+      await settle();
+      if (!ctrl.playing || ctrl.activeIndex != startIndex) return;
+    }
+    fail('读了 100 句还没读完当前事件（activeIndex 停在 $startIndex），句子推进可能卡住');
+  }
+
+  /// 只推一句：断言「当前句」往后走了一句（句子级朗读的核心链路）。
+  Future<void> finishSentence(
+    FakeTtsEngine engine,
+    OutlineListenController ctrl,
+  ) async {
+    final before = ctrl.activeSentenceIndex;
+    engine.finishCurrent();
+    await settle();
+    expect(
+      ctrl.activeSentenceIndex,
+      isNot(before),
+      reason: '读完一句后当前句序号必须推进（或事件已读完）',
+    );
   }
 
   group('一个事件一张卡片', () {
@@ -220,34 +257,35 @@ void main() {
       expect(engine.requests.last.language, 'zh-TW');
     });
 
-    test('读完一个事件自动读下一个（真机上由原生朗读完成回调驱动）', () async {
+    test('读完一个事件（逐句推完）自动读下一个', () async {
       final engine = FakeTtsEngine();
       final ctrl = build(engine: engine);
       addTearDown(ctrl.dispose);
 
       await ctrl.play();
-      engine.finishCurrent();
-      await Future<void>.delayed(Duration.zero);
+      // 事件 1 的朗读计划 = 标题句 + 概要 2 句，共 3 句：一次 finishCurrent 只推一句
+      expect(ctrl.sentenceCountForIndex(0), 3);
+      await finishEvent(engine, ctrl);
 
       expect(ctrl.activeIndex, 1);
-      expect(engine.spoken.length, 2);
       expect(engine.spoken.last, startsWith('小事件1，拜师'));
       expect(ctrl.spokenCount, 1);
     });
 
-    test('关闭「自动连读」后读完一个事件就停', () async {
+    test('关闭「自动连读」后读完一个事件就停（句子要逐句推完）', () async {
       final engine = FakeTtsEngine();
       final ctrl = build(engine: engine);
       addTearDown(ctrl.dispose);
 
       ctrl.updateSettings(ctrl.settings.copyWith(autoNext: false));
       await ctrl.play();
-      engine.finishCurrent();
-      await Future<void>.delayed(Duration.zero);
+      await finishEvent(engine, ctrl);
 
       expect(ctrl.playing, isFalse);
       expect(ctrl.activeIndex, 0);
-      expect(engine.spoken.length, 1);
+      // 逐句朗读：这个事件有几句就发了几个朗读请求（不是一次读完）
+      expect(engine.spoken.length, ctrl.sentenceCountForIndex(0));
+      expect(ctrl.activeSentenceIndex, -1);
     });
 
     test('读到最后一张卡片：不开循环就停并标记读完', () async {
@@ -256,9 +294,7 @@ void main() {
       addTearDown(ctrl.dispose);
 
       await ctrl.playFrom(ctrl.segments.length - 1);
-      await Future<void>.delayed(Duration.zero);
-      engine.finishCurrent();
-      await Future<void>.delayed(Duration.zero);
+      await finishEvent(engine, ctrl);
 
       expect(ctrl.playing, isFalse);
       expect(ctrl.finished, isTrue);
@@ -271,8 +307,7 @@ void main() {
 
       ctrl.updateSettings(ctrl.settings.copyWith(repeat: true));
       await ctrl.playFrom(ctrl.segments.length - 1);
-      engine.finishCurrent();
-      await Future<void>.delayed(Duration.zero);
+      await finishEvent(engine, ctrl);
 
       expect(ctrl.activeIndex, 0);
       expect(ctrl.playing, isTrue);
@@ -1083,4 +1118,1019 @@ void main() {
       expect(parseAiNameCandidates('[{坏掉的 json'), isEmpty);
     });
   });
+
+  // ─── 句子级朗读（逐句 speak / 高亮 / 单事件拖动进度） ─────────────
+
+  /// 四个事件（大 / 小交替），用于朗读范围过滤的用例
+  OutlineListenController build4({FakeTtsEngine? engine}) {
+    final ctrl = OutlineListenController(
+      OutlineRecord(title: '测试小说', content: ''),
+      engine: engine ?? FakeTtsEngine(),
+    );
+    ctrl.init([
+      ch(1, 'major', '甲', '概要一。'),
+      ch(2, 'minor', '乙', '概要二。'),
+      ch(3, 'major', '丙', '概要三。'),
+      ch(4, 'minor', '丁', '概要四。'),
+    ], reload: false);
+    return ctrl;
+  }
+
+  group('句子级朗读', () {
+    test('播放从标题句开始：activeSentenceIndex / 句数 / 句序号 / 当前句文本', () async {
+      final engine = FakeTtsEngine();
+      final ctrl = build(engine: engine);
+      addTearDown(ctrl.dispose);
+
+      // 事件 1：标题 1 句 + 概要「李云飞在青阳城醒来。\n他失去了记忆。」2 句
+      expect(ctrl.sentenceCountForIndex(0), 3);
+      expect(ctrl.activeSentenceIndex, -1);
+      expect(ctrl.activeSentenceCount, 0);
+
+      await ctrl.play();
+
+      expect(ctrl.activeIndex, 0);
+      expect(ctrl.activeSentenceIndex, 0);
+      expect(ctrl.activeSentenceCount, 3);
+      expect(ctrl.activeSentenceOrdinal, 1);
+      expect(ctrl.activePiece?.part, SpeechPiecePart.title);
+      expect(ctrl.activeSentenceText, '大事件1，初入江湖');
+      // 一次只把**当前这一句**发给引擎：不是把整个事件一次性读掉
+      expect(engine.spoken.single, '大事件1，初入江湖');
+      expect(ctrl.playing, isTrue);
+    });
+
+    test('读完一句自动接下一句，顺序：标题 → 概要第 1 句 → 概要第 2 句', () async {
+      final engine = FakeTtsEngine();
+      final ctrl = build(engine: engine);
+      addTearDown(ctrl.dispose);
+      await ctrl.play();
+
+      await finishSentence(engine, ctrl);
+      expect(ctrl.activeSentenceIndex, 1);
+      expect(ctrl.activeSentenceText, '李云飞在青阳城醒来。');
+      expect(engine.spoken.last, '李云飞在青阳城醒来。');
+      expect(ctrl.playing, isTrue, reason: '同一事件内读完一句不该停');
+
+      await finishSentence(engine, ctrl);
+      expect(ctrl.activeSentenceIndex, 2);
+      expect(ctrl.activeSentenceText, '他失去了记忆。');
+      expect(engine.spoken.last, '他失去了记忆。');
+
+      // 最后一句读完：事件推进到下一个（标题句先读）
+      await finishSentence(engine, ctrl);
+      expect(ctrl.activeIndex, 1);
+      expect(ctrl.activeSentenceIndex, 0);
+      expect(engine.spoken.last, '小事件1，拜师');
+      expect(ctrl.spokenCount, 1);
+    });
+
+    test('每个事件的句数 = 标题句 + 概要句数（空事件为 0，越界为 0）', () {
+      final ctrl = build();
+      addTearDown(ctrl.dispose);
+
+      expect(ctrl.sentenceCountForIndex(0), 3);
+      expect(ctrl.sentenceCountForIndex(1), 2);
+      expect(ctrl.sentenceCountForIndex(-1), 0);
+      expect(ctrl.sentenceCountForIndex(99), 0);
+      // 只读标题时每事件 1 句
+      ctrl.updateSettings(
+        ctrl.settings.copyWith(mode: OutlineListenMode.titleOnly),
+      );
+      expect(ctrl.sentenceCountForIndex(0), 1);
+      expect(ctrl.sentenceCountForIndex(1), 1);
+      // full 模式：中间插一句「正文」提示词 + 正文逐句
+      ctrl.updateSettings(ctrl.settings.copyWith(mode: OutlineListenMode.full));
+      expect(ctrl.sentenceCountForIndex(1), 4);
+    });
+
+    test('暂停后点播放从当前句继续，不回到事件第一句', () async {
+      final engine = FakeTtsEngine();
+      final ctrl = build(engine: engine);
+      addTearDown(ctrl.dispose);
+
+      await ctrl.play();
+      await finishSentence(engine, ctrl); // 推进到概要第 1 句
+      await ctrl.pause();
+      expect(ctrl.playing, isFalse);
+      expect(ctrl.activeSentenceIndex, 1, reason: '暂停保留当前句位置');
+
+      final spokeBefore = engine.spoken.length;
+      await ctrl.play();
+
+      expect(ctrl.playing, isTrue);
+      expect(ctrl.activeIndex, 0);
+      expect(ctrl.activeSentenceIndex, 1, reason: '继续播放不能退回标题句');
+      expect(engine.spoken.length, spokeBefore + 1);
+      expect(engine.spoken.last, '李云飞在青阳城醒来。');
+    });
+
+    test('playFromSentence 跳句：从指定句开始读', () async {
+      final engine = FakeTtsEngine();
+      final ctrl = build(engine: engine);
+      addTearDown(ctrl.dispose);
+
+      await ctrl.playFromSentence(0, 2);
+
+      expect(ctrl.activeIndex, 0);
+      expect(ctrl.activeSentenceIndex, 2);
+      expect(ctrl.activeSentenceText, '他失去了记忆。');
+      expect(engine.spoken.last, '他失去了记忆。');
+      expect(ctrl.playing, isTrue);
+
+      // 从别的卡片跳句同理
+      await ctrl.playFromSentence(1, 1);
+      expect(ctrl.activeIndex, 1);
+      expect(ctrl.activeSentenceIndex, 1);
+      expect(engine.spoken.last, '李云飞拜入青云宗。');
+    });
+
+    test('playFromSentence 序号越界会被夹到有效范围', () async {
+      final engine = FakeTtsEngine();
+      final ctrl = build(engine: engine);
+      addTearDown(ctrl.dispose);
+
+      await ctrl.playFromSentence(0, 99);
+      expect(ctrl.activeSentenceIndex, 2);
+
+      await ctrl.playFromSentence(0, -5);
+      expect(ctrl.activeSentenceIndex, 0);
+    });
+
+    test('空句子计划的事件不占朗读时间：直接算读完并连读下一个', () async {
+      final engine = FakeTtsEngine();
+      final ctrl = OutlineListenController(
+        OutlineRecord(title: '测试小说', content: ''),
+        engine: engine,
+      );
+      addTearDown(ctrl.dispose);
+      // 第 1 个事件标题 / 概要 / 正文全空：朗读计划为空
+      ctrl.init(
+        [
+          ch(1, 'major', '', ''),
+          ch(2, 'minor', '拜师', '李云飞拜入青云宗。'),
+        ],
+        reload: false,
+      );
+      expect(ctrl.sentenceCountForIndex(0), 0);
+
+      await ctrl.play();
+      await settle();
+
+      expect(ctrl.activeIndex, 1, reason: '空事件不该卡在播放');
+      expect(ctrl.playing, isTrue);
+      expect(engine.spoken.single, '小事件1，拜师');
+    });
+
+    test('一个事件读完后 activeSentenceIndex 归 -1，当前句信息清空', () async {
+      final engine = FakeTtsEngine();
+      final ctrl = build(engine: engine);
+      addTearDown(ctrl.dispose);
+      ctrl.updateSettings(ctrl.settings.copyWith(autoNext: false));
+
+      await ctrl.play();
+      await finishEvent(engine, ctrl);
+
+      expect(ctrl.activeIndex, 0);
+      expect(ctrl.activeSentenceIndex, -1);
+      expect(ctrl.activePiece, isNull);
+      expect(ctrl.activeSentenceText, isEmpty);
+      expect(ctrl.activeSentenceOrdinal, 0);
+      expect(ctrl.activeSentenceProgress, 0);
+      expect(ctrl.playing, isFalse);
+    });
+  });
+
+  // ─── 媒体通知 seekbar：跳到当前事件内的某一句 ─────────────────────
+
+  group('seekToSentence / seekToFraction（媒体通知拖动跳句）', () {
+    test('播放中 seekToSentence：停掉当前句，从目标句重新朗读', () async {
+      final engine = FakeTtsEngine();
+      final ctrl = build(engine: engine);
+      addTearDown(ctrl.dispose);
+
+      await ctrl.play(); // 当前在标题句
+      final spokeBefore = engine.spoken.length;
+      final stopBefore = engine.stopCount;
+
+      await ctrl.seekToSentence(2); // 第 3 句（概要第 2 行）
+
+      expect(ctrl.activeIndex, 0);
+      expect(ctrl.activeSentenceIndex, 2);
+      expect(ctrl.activeSentenceText, '他失去了记忆。');
+      expect(ctrl.playing, isTrue);
+      expect(engine.spoken.length, greaterThan(spokeBefore));
+      // 从目标句重新发声：最后一条朗读请求就是目标句
+      expect(engine.spoken.last, '他失去了记忆。');
+      // 先停掉原来的 utterance 再读，不能两句叠着读
+      expect(engine.stopCount, greaterThan(stopBefore));
+    });
+
+    test('播放中 seekToSentence 换到事件内其它句同样生效', () async {
+      final engine = FakeTtsEngine();
+      final ctrl = build(engine: engine);
+      addTearDown(ctrl.dispose);
+
+      await ctrl.playFrom(1); // 事件 2：标题句 + 概要 1 句
+      await ctrl.seekToSentence(1);
+
+      expect(ctrl.activeIndex, 1);
+      expect(ctrl.activeSentenceIndex, 1);
+      expect(engine.spoken.last, '李云飞拜入青云宗。');
+      expect(ctrl.playing, isTrue);
+    });
+
+    test('seekToSentence 序号越界会被夹到有效范围', () async {
+      final engine = FakeTtsEngine();
+      final ctrl = build(engine: engine);
+      addTearDown(ctrl.dispose);
+      await ctrl.play();
+      await ctrl.pause();
+
+      await ctrl.seekToSentence(99);
+      expect(ctrl.activeSentenceIndex, 2);
+
+      await ctrl.seekToSentence(-5);
+      expect(ctrl.activeSentenceIndex, 0);
+    });
+
+    test('暂停中 seekToSentence：只移动位置不发声，高亮 / 当前句跟着变', () async {
+      final engine = FakeTtsEngine();
+      final ctrl = build(engine: engine);
+      addTearDown(ctrl.dispose);
+
+      await ctrl.play();
+      await ctrl.pause();
+      final spokeBefore = engine.spoken.length;
+      final stopBefore = engine.stopCount;
+
+      await ctrl.seekToSentence(1);
+
+      expect(ctrl.playing, isFalse);
+      expect(ctrl.activeIndex, 0);
+      expect(ctrl.activeSentenceIndex, 1);
+      expect(ctrl.activeSentenceText, '李云飞在青阳城醒来。');
+      // 暂停中只挪位置：不发声、也不去停一个本来就没在播的引擎
+      expect(engine.spoken.length, spokeBefore, reason: '暂停中 seek 不该发声');
+      expect(engine.stopCount, stopBefore, reason: '暂停中 seek 不该再停引擎');
+
+      // 高亮随位置移动：标题高亮灭、概要句高亮亮
+      final piece = ctrl.planForIndex(0).pieces[1];
+      final range = ctrl.segments[0].summaryCtrl.highlightRange;
+      expect(range, isNotNull);
+      expect(range!.start, piece.start);
+      expect(range.end, piece.end);
+      expect(ctrl.segments[0].titleCtrl.highlightRange, isNull);
+
+      // 再点播放：从跳过去的那一句继续，而不是退回事件开头
+      await ctrl.play();
+      expect(ctrl.activeSentenceIndex, 1);
+      expect(ctrl.playing, isTrue);
+      expect(engine.spoken.last, '李云飞在青阳城醒来。');
+    });
+
+    test('seekToFraction 边界：0 → 第 1 句、1.0 → 最后一句、中间值按 floor 换算', () async {
+      final engine = FakeTtsEngine();
+      final ctrl = build(engine: engine);
+      addTearDown(ctrl.dispose);
+
+      await ctrl.play();
+      await ctrl.pause();
+      expect(ctrl.activeSentenceCount, 3);
+      final spokeBefore = engine.spoken.length;
+
+      await ctrl.seekToFraction(0);
+      expect(ctrl.activeSentenceIndex, 0, reason: '0 → 第 1 句');
+
+      await ctrl.seekToFraction(1.0);
+      expect(ctrl.activeSentenceIndex, 2, reason: '1.0 → 最后一句');
+
+      // 中间值 floor(比例 × 句数)：0.5 × 3 = 1.5 → 下标 1
+      await ctrl.seekToFraction(0.5);
+      expect(ctrl.activeSentenceIndex, 1);
+      // 0.33 × 3 = 0.99 → 下标 0；0.34 × 3 = 1.02 → 下标 1（floor 而不是四舍五入）
+      await ctrl.seekToFraction(0.33);
+      expect(ctrl.activeSentenceIndex, 0);
+      await ctrl.seekToFraction(0.34);
+      expect(ctrl.activeSentenceIndex, 1);
+
+      // 比例先 clamp 到 0~1：负数 → 第 1 句，>1 → 最后一句
+      await ctrl.seekToFraction(-0.5);
+      expect(ctrl.activeSentenceIndex, 0);
+      await ctrl.seekToFraction(2.0);
+      expect(ctrl.activeSentenceIndex, 2);
+
+      expect(ctrl.playing, isFalse);
+      expect(engine.spoken.length, spokeBefore, reason: '暂停中只移动位置');
+    });
+
+    test('播放中 seekToFraction：按比例跳句并从该句立即继续朗读', () async {
+      final engine = FakeTtsEngine();
+      final ctrl = build(engine: engine);
+      addTearDown(ctrl.dispose);
+
+      await ctrl.play();
+      await ctrl.seekToFraction(1.0);
+      expect(ctrl.activeSentenceIndex, 2);
+      expect(ctrl.playing, isTrue);
+      expect(engine.spoken.last, '他失去了记忆。');
+
+      await ctrl.seekToFraction(0.5);
+      expect(ctrl.activeSentenceIndex, 1);
+      expect(ctrl.playing, isTrue);
+      expect(engine.spoken.last, '李云飞在青阳城醒来。');
+    });
+
+    test('没有朗读位置 / 当前事件没有句子时 seek 是 no-op（不发声也不通知）', () async {
+      final engine = FakeTtsEngine();
+      final ctrl = build(engine: engine);
+      addTearDown(ctrl.dispose);
+
+      var notified = 0;
+      ctrl.addListener(() => notified++);
+
+      await ctrl.seekToSentence(1);
+      await ctrl.seekToFraction(0.5);
+      expect(ctrl.activeIndex, -1);
+      expect(ctrl.activeSentenceIndex, -1);
+      expect(ctrl.playing, isFalse);
+      expect(engine.spoken, isEmpty);
+      expect(notified, 0, reason: '没有朗读位置时 no-op，不该触发页面重建');
+
+      // 当前事件一句都拆不出来（标题 / 概要是空）：同样什么都不做
+      final emptyEngine = FakeTtsEngine();
+      final emptyCtrl = OutlineListenController(
+        OutlineRecord(title: '测试小说', content: ''),
+        engine: emptyEngine,
+      );
+      addTearDown(emptyCtrl.dispose);
+      emptyCtrl.init([ch(1, 'major', '', '')], reload: false);
+      emptyCtrl.activeIndex = 0; // 直接摆位置（正常连读时空事件会被立刻跳过）
+      var emptyNotified = 0;
+      emptyCtrl.addListener(() => emptyNotified++);
+
+      await emptyCtrl.seekToSentence(0);
+      await emptyCtrl.seekToFraction(0.5);
+      expect(emptyCtrl.activeSentenceIndex, -1);
+      expect(emptyEngine.spoken, isEmpty);
+      expect(emptyNotified, 0);
+    });
+  });
+
+  // ─── 通知展开视图「退 3 句 / 进 3 句」：事件内相对跳句 ─────────────
+
+  group('seekBy（通知展开视图退 / 进 3 句）', () {
+    /// 事件 1 有 5 句概要（+ 标题句 = 6 句），足够验 +3 / -3 的相对移动
+    OutlineListenController buildLong({FakeTtsEngine? engine}) {
+      final ctrl = OutlineListenController(
+        OutlineRecord(title: '测试小说', content: ''),
+        engine: engine ?? FakeTtsEngine(),
+      );
+      ctrl.init([
+        ch(1, 'major', '初入江湖', '第一句。第二句。第三句。第四句。第五句。'),
+        ch(2, 'minor', '拜师', '只有一句。'),
+      ], reload: false);
+      return ctrl;
+    }
+
+    test('播放中 +3：从目标句继续读（不是整个事件重读）', () async {
+      final engine = FakeTtsEngine();
+      final ctrl = buildLong(engine: engine);
+      addTearDown(ctrl.dispose);
+      expect(ctrl.sentenceCountForIndex(0), 6);
+
+      await ctrl.play(); // 当前在标题句（下标 0）
+      await ctrl.seekBy(3);
+
+      expect(ctrl.activeIndex, 0);
+      expect(ctrl.activeSentenceIndex, 3);
+      expect(ctrl.activeSentenceText, '第三句。');
+      expect(ctrl.playing, isTrue);
+      expect(engine.spoken.last, '第三句。');
+    });
+
+    test('播放中 -3：从目标句回退重读', () async {
+      final engine = FakeTtsEngine();
+      final ctrl = buildLong(engine: engine);
+      addTearDown(ctrl.dispose);
+
+      await ctrl.play();
+      await ctrl.seekBy(4); // 先到「第四句。」
+      expect(ctrl.activeSentenceIndex, 4);
+
+      await ctrl.seekBy(-3);
+      expect(ctrl.activeIndex, 0);
+      expect(ctrl.activeSentenceIndex, 1);
+      expect(ctrl.activeSentenceText, '第一句。');
+      expect(ctrl.playing, isTrue);
+      expect(engine.spoken.last, '第一句。');
+    });
+
+    test('边界：开头 -3 夹到第 1 句；最后一句 +3 夹到最后一句，不跨事件', () async {
+      final engine = FakeTtsEngine();
+      final ctrl = buildLong(engine: engine);
+      addTearDown(ctrl.dispose);
+
+      await ctrl.play();
+      await ctrl.seekBy(-3); // 0 - 3 → 夹到 0
+      expect(ctrl.activeSentenceIndex, 0);
+      expect(ctrl.activeIndex, 0);
+      expect(engine.spoken.last, startsWith('大事件1'));
+
+      await ctrl.seekBy(3); // 0 → 3
+      await ctrl.seekBy(3); // 3 → 6 → 夹到 5
+      expect(ctrl.activeSentenceIndex, 5);
+      expect(ctrl.activeSentenceText, '第五句。');
+
+      await ctrl.seekBy(3); // 最后一句再 +3：仍停在最后一句
+      expect(ctrl.activeSentenceIndex, 5);
+      expect(ctrl.activeIndex, 0, reason: '不跨到下一个事件');
+      expect(ctrl.playing, isTrue);
+      expect(engine.spoken.last, '第五句。');
+    });
+
+    test('暂停中 seekBy：只移动位置不发声，高亮随动；再播放从该句继续', () async {
+      final engine = FakeTtsEngine();
+      final ctrl = buildLong(engine: engine);
+      addTearDown(ctrl.dispose);
+
+      await ctrl.play();
+      await ctrl.pause();
+      final spokeBefore = engine.spoken.length;
+      final stopBefore = engine.stopCount;
+
+      await ctrl.seekBy(3);
+
+      expect(ctrl.playing, isFalse);
+      expect(ctrl.activeIndex, 0);
+      expect(ctrl.activeSentenceIndex, 3);
+      expect(ctrl.activeSentenceText, '第三句。');
+      expect(engine.spoken.length, spokeBefore, reason: '暂停中 seekBy 不该发声');
+      expect(engine.stopCount, stopBefore, reason: '暂停中 seekBy 不该再停引擎');
+
+      // 高亮跟着移动到「第三句。」所在的概要区间
+      final piece = ctrl.planForIndex(0).pieces[3];
+      final range = ctrl.segments[0].summaryCtrl.highlightRange;
+      expect(range, isNotNull);
+      expect(range!.start, piece.start);
+      expect(range.end, piece.end);
+
+      // 再点播放：从跳过去的那一句继续
+      await ctrl.play();
+      expect(ctrl.activeSentenceIndex, 3);
+      expect(engine.spoken.last, '第三句。');
+    });
+
+    test('事件读完后 activeSentenceIndex<0：seekBy 是 no-op（不发声不通知）', () async {
+      final engine = FakeTtsEngine();
+      final ctrl = buildLong(engine: engine);
+      addTearDown(ctrl.dispose);
+      ctrl.updateSettings(ctrl.settings.copyWith(autoNext: false));
+
+      await ctrl.play();
+      await finishEvent(engine, ctrl);
+      expect(ctrl.activeIndex, 0);
+      expect(ctrl.activeSentenceIndex, -1);
+
+      final spokeBefore = engine.spoken.length;
+      var notified = 0;
+      ctrl.addListener(() => notified++);
+
+      await ctrl.seekBy(3);
+      await ctrl.seekBy(-3);
+
+      expect(ctrl.activeIndex, 0);
+      expect(ctrl.activeSentenceIndex, -1, reason: '读完后不跳回某一句');
+      expect(engine.spoken.length, spokeBefore);
+      expect(notified, 0);
+    });
+
+    test('没有朗读位置 / 当前事件没有句子：seekBy 是 no-op', () async {
+      final engine = FakeTtsEngine();
+      final ctrl = buildLong(engine: engine);
+      addTearDown(ctrl.dispose);
+
+      var notified = 0;
+      ctrl.addListener(() => notified++);
+
+      await ctrl.seekBy(3);
+      await ctrl.seekBy(-3);
+      expect(ctrl.activeIndex, -1);
+      expect(ctrl.activeSentenceIndex, -1);
+      expect(engine.spoken, isEmpty);
+      expect(notified, 0, reason: '没有朗读位置时 no-op，不该触发页面重建');
+
+      // 当前事件一句都拆不出来（标题 / 概要是空）：同样什么都不做
+      final emptyEngine = FakeTtsEngine();
+      final emptyCtrl = OutlineListenController(
+        OutlineRecord(title: '测试小说', content: ''),
+        engine: emptyEngine,
+      );
+      addTearDown(emptyCtrl.dispose);
+      emptyCtrl.init([ch(1, 'major', '', '')], reload: false);
+      emptyCtrl.activeIndex = 0; // 直接摆位置（正常连读时空事件会被立刻跳过）
+      var emptyNotified = 0;
+      emptyCtrl.addListener(() => emptyNotified++);
+
+      await emptyCtrl.seekBy(3);
+      expect(emptyCtrl.activeSentenceIndex, -1);
+      expect(emptyEngine.spoken, isEmpty);
+      expect(emptyNotified, 0);
+    });
+  });
+
+  group('整篇朗读进度 overallProgress', () {
+    test('按「范围内事件序号 + 事件内句子占比」推进', () async {
+      final engine = FakeTtsEngine();
+      final ctrl = build(engine: engine);
+      addTearDown(ctrl.dispose);
+
+      expect(ctrl.overallProgress, 0);
+      await ctrl.play();
+      expect(ctrl.overallProgress, 0);
+
+      // 事件 1 共 3 句：听完第 1 句 → (0 + 1/3) / 2
+      await finishSentence(engine, ctrl);
+      expect(ctrl.overallProgress, closeTo((1 / 3) / 2, 1e-9));
+      // 听完第 2 句 → (0 + 2/3) / 2
+      await finishSentence(engine, ctrl);
+      expect(ctrl.overallProgress, closeTo((2 / 3) / 2, 1e-9));
+
+      // 进入事件 2（共 2 句）→ (1 + 0) / 2
+      await finishEvent(engine, ctrl);
+      expect(ctrl.activeIndex, 1);
+      expect(ctrl.overallProgress, closeTo(0.5, 1e-9));
+      await finishSentence(engine, ctrl);
+      expect(ctrl.overallProgress, closeTo((1 + 1 / 2) / 2, 1e-9));
+    });
+
+    test('事件内句子进度 activeSentenceProgress（0~1，最后一句读满）', () async {
+      final engine = FakeTtsEngine();
+      final ctrl = build(engine: engine);
+      addTearDown(ctrl.dispose);
+
+      expect(ctrl.activeSentenceProgress, 0);
+      await ctrl.play();
+      expect(ctrl.activeSentenceProgress, closeTo(1 / 3, 1e-9));
+      await finishSentence(engine, ctrl);
+      expect(ctrl.activeSentenceProgress, closeTo(2 / 3, 1e-9));
+      await finishSentence(engine, ctrl);
+      expect(ctrl.activeSentenceProgress, closeTo(1.0, 1e-9));
+    });
+
+    test('范围过滤后整篇进度按范围内事件数算（不是全篇）', () async {
+      final engine = FakeTtsEngine();
+      final ctrl = build4(engine: engine);
+      addTearDown(ctrl.dispose);
+      ctrl.updateSettings(
+        ctrl.settings.copyWith(scope: OutlineListenScope.majorOnly),
+      );
+      expect(ctrl.playableCount, 2);
+
+      await ctrl.playFrom(2); // 范围内第 2 个（全篇第 3 个）
+      expect(ctrl.activePlayableOrdinal, 2);
+      // (1 + 0) / 2，与全篇 4 个事件无关
+      expect(ctrl.overallProgress, closeTo(0.5, 1e-9));
+    });
+  });
+
+  group('朗读事件范围（全部 / 只听大 / 只听小）', () {
+    test('scope 过滤出范围内事件；进度文案按范围内数量算', () {
+      final ctrl = build4();
+      addTearDown(ctrl.dispose);
+
+      expect(ctrl.playableIndices, [0, 1, 2, 3]);
+      expect(ctrl.isPlayableAt(2), isTrue);
+      expect(ctrl.progressLabel, '共 4 个事件');
+
+      ctrl.updateSettings(
+        ctrl.settings.copyWith(scope: OutlineListenScope.majorOnly),
+      );
+      expect(ctrl.playableIndices, [0, 2]);
+      expect(ctrl.playableCount, 2);
+      expect(ctrl.isPlayableAt(1), isFalse);
+      expect(ctrl.progressLabel, '共 2 个事件 · 只听大事件');
+
+      ctrl.updateSettings(
+        ctrl.settings.copyWith(scope: OutlineListenScope.minorOnly),
+      );
+      expect(ctrl.playableIndices, [1, 3]);
+      expect(ctrl.playableCount, 2);
+    });
+
+    test('播放 / 下一个 / 上一个都只在范围内事件上走', () async {
+      final engine = FakeTtsEngine();
+      final ctrl = build4(engine: engine);
+      addTearDown(ctrl.dispose);
+      ctrl.updateSettings(
+        ctrl.settings.copyWith(scope: OutlineListenScope.minorOnly),
+      );
+
+      await ctrl.play();
+      expect(ctrl.activeIndex, 1, reason: '只听小事件时从第 2 个事件（首个小的）开始');
+      expect(ctrl.activePlayableOrdinal, 1);
+      expect(engine.spoken.single, startsWith('小事件1，乙'));
+
+      await ctrl.next();
+      expect(ctrl.activeIndex, 3, reason: '下一个跳到范围内下一条（大事件被跳过）');
+      expect(engine.spoken.last, startsWith('小事件1，丁'));
+      expect(ctrl.activePlayableOrdinal, 2);
+
+      await ctrl.previous();
+      expect(ctrl.activeIndex, 1);
+      expect(engine.spoken.last, startsWith('小事件1，乙'));
+    });
+
+    test('自动连读只走范围内事件：大事件读完后跳过中间的小事件', () async {
+      final engine = FakeTtsEngine();
+      final ctrl = build4(engine: engine);
+      addTearDown(ctrl.dispose);
+      ctrl.updateSettings(
+        ctrl.settings.copyWith(scope: OutlineListenScope.majorOnly),
+      );
+
+      await ctrl.playFrom(0); // 大事件甲
+      await finishEvent(engine, ctrl); // 读完整事件，自动连读下一条
+
+      // 事件 1（小事件乙）不在范围内：直接跳到事件 2（大事件丙）
+      expect(ctrl.activeIndex, 2);
+      expect(ctrl.playing, isTrue);
+      expect(engine.spoken.last, startsWith('大事件2，丙'));
+    });
+
+    test('范围最后一个事件：不开循环就停并标记读完', () async {
+      final engine = FakeTtsEngine();
+      final ctrl = build4(engine: engine);
+      addTearDown(ctrl.dispose);
+      ctrl.updateSettings(
+        ctrl.settings.copyWith(scope: OutlineListenScope.majorOnly),
+      );
+
+      await ctrl.playFrom(2); // 范围内最后一个
+      await ctrl.next();
+
+      expect(ctrl.playing, isFalse);
+      expect(ctrl.finished, isTrue);
+      expect(ctrl.activeIndex, 2);
+      expect(ctrl.activeSentenceIndex, -1);
+    });
+
+    test('开了循环后范围最后一个读完回到范围内第一个（不是全篇第一个）', () async {
+      final engine = FakeTtsEngine();
+      final ctrl = build4(engine: engine);
+      addTearDown(ctrl.dispose);
+      ctrl.updateSettings(
+        ctrl.settings.copyWith(
+          scope: OutlineListenScope.minorOnly,
+          repeat: true,
+        ),
+      );
+
+      await ctrl.playFrom(3); // 范围最后一个（全篇第 4 个）
+      await finishEvent(engine, ctrl);
+
+      expect(ctrl.activeIndex, 1, reason: '循环回到范围内第一个（第 2 个事件）');
+      expect(ctrl.playing, isTrue);
+    });
+
+    test('playFrom 点到范围外的事件：从它后面最近的可读事件开始', () async {
+      final engine = FakeTtsEngine();
+      final ctrl = build4(engine: engine);
+      addTearDown(ctrl.dispose);
+      ctrl.updateSettings(
+        ctrl.settings.copyWith(scope: OutlineListenScope.majorOnly),
+      );
+
+      await ctrl.playFrom(1); // 小事件，范围外 → 后面最近的大事件是 2
+      expect(ctrl.activeIndex, 2);
+      expect(engine.spoken.single, startsWith('大事件2，丙'));
+
+      // 最后一个事件是范围外的：后面没有了，回到范围内第一个
+      await ctrl.playFrom(3);
+      expect(ctrl.activeIndex, 0);
+    });
+
+    test('朗读中切换范围、当前事件被排除：跳到范围内下一个继续读', () async {
+      final engine = FakeTtsEngine();
+      final ctrl = build4(engine: engine);
+      addTearDown(ctrl.dispose);
+
+      await ctrl.playFrom(1); // 小事件，正在读
+      expect(ctrl.playing, isTrue);
+
+      ctrl.updateSettings(
+        ctrl.settings.copyWith(scope: OutlineListenScope.majorOnly),
+      );
+      await settle();
+      await settle();
+
+      expect(ctrl.activeIndex, 2);
+      expect(ctrl.playing, isTrue);
+      expect(engine.spoken.last, startsWith('大事件2，丙'));
+    });
+
+    test('朗读中切换范围、当前事件仍在范围内：继续读，不跳', () async {
+      final engine = FakeTtsEngine();
+      final ctrl = build4(engine: engine);
+      addTearDown(ctrl.dispose);
+
+      await ctrl.playFrom(0); // 大事件，正在读
+      ctrl.updateSettings(
+        ctrl.settings.copyWith(scope: OutlineListenScope.majorOnly),
+      );
+      await settle();
+
+      expect(ctrl.activeIndex, 0);
+      expect(ctrl.playing, isTrue);
+    });
+
+    test('范围内一个事件都没有时：不假播，如实提示', () async {
+      final engine = FakeTtsEngine();
+      final ctrl = OutlineListenController(
+        OutlineRecord(title: '测试小说', content: ''),
+        engine: engine,
+      );
+      addTearDown(ctrl.dispose);
+      ctrl.init(
+        [ch(1, 'major', '甲', '概要一。'), ch(2, 'major', '乙', '概要二。')],
+        reload: false,
+      );
+      ctrl.updateSettings(
+        ctrl.settings.copyWith(scope: OutlineListenScope.minorOnly),
+      );
+
+      expect(ctrl.playableCount, 0);
+      expect(ctrl.progressLabel, '当前范围内没有可朗读的事件');
+
+      await ctrl.play();
+
+      expect(ctrl.playing, isFalse);
+      expect(ctrl.activeIndex, -1);
+      expect(ctrl.errorMessage, contains('当前朗读范围内没有可播放的事件'));
+      expect(engine.spoken, isEmpty);
+    });
+  });
+
+  group('当前句高亮（标题 / 概要输入框）', () {
+    test('播放时高亮标题整段；概要与其他卡片都不高亮', () async {
+      final ctrl = build();
+      addTearDown(ctrl.dispose);
+
+      await ctrl.play();
+
+      expect(
+        ctrl.segments[0].titleCtrl.highlightRange,
+        const TextRange(start: 0, end: 4),
+      );
+      expect(ctrl.segments[0].summaryCtrl.highlightRange, isNull);
+      expect(ctrl.segments[1].titleCtrl.highlightRange, isNull);
+      expect(ctrl.segments[1].summaryCtrl.highlightRange, isNull);
+    });
+
+    test('推进到概要句时高亮对应区间，标题高亮清掉', () async {
+      final engine = FakeTtsEngine();
+      final ctrl = build(engine: engine);
+      addTearDown(ctrl.dispose);
+
+      await ctrl.play();
+      await finishSentence(engine, ctrl);
+
+      final piece = ctrl.planForIndex(0).pieces[1];
+      final range = ctrl.segments[0].summaryCtrl.highlightRange;
+      expect(range, isNotNull);
+      expect(range!.start, piece.start);
+      expect(range.end, piece.end);
+      expect(
+        ctrl.segments[0].summaryCtrl.text.substring(range.start, range.end),
+        piece.text,
+      );
+      expect(ctrl.segments[0].titleCtrl.highlightRange, isNull);
+    });
+
+    test('切换到另一个事件后旧卡片高亮全部清除', () async {
+      final engine = FakeTtsEngine();
+      final ctrl = build(engine: engine);
+      addTearDown(ctrl.dispose);
+
+      await ctrl.play();
+      await finishSentence(engine, ctrl);
+      await ctrl.playFrom(1);
+
+      expect(ctrl.segments[0].titleCtrl.highlightRange, isNull);
+      expect(ctrl.segments[0].summaryCtrl.highlightRange, isNull);
+      expect(ctrl.segments[1].titleCtrl.highlightRange, isNotNull);
+    });
+
+    test('停止后所有高亮清除', () async {
+      final engine = FakeTtsEngine();
+      final ctrl = build(engine: engine);
+      addTearDown(ctrl.dispose);
+
+      await ctrl.play();
+      expect(ctrl.segments[0].titleCtrl.highlightRange, isNotNull);
+
+      await ctrl.stop();
+
+      expect(ctrl.segments[0].titleCtrl.highlightRange, isNull);
+      expect(ctrl.segments[1].titleCtrl.highlightRange, isNull);
+    });
+  });
+
+  group('后台朗读通知同步（注入假通知器）', () {
+    OutlineListenController buildWith(
+      FakeTtsEngine engine,
+      FakeListenNotification notification,
+    ) {
+      final ctrl = OutlineListenController(
+        OutlineRecord(title: '测试小说', content: ''),
+        engine: engine,
+        notification: notification,
+      );
+      ctrl.init(chapters(), reload: false);
+      return ctrl;
+    }
+
+    test('播放 start → 句子推进 update → 暂停 paused → 停止 cancel', () async {
+      final fake = FakeListenNotification();
+      final engine = FakeTtsEngine();
+      final ctrl = buildWith(engine, fake);
+      addTearDown(ctrl.dispose);
+
+      await ctrl.play();
+      await settle();
+      expect(fake.calls, ['start']);
+      expect(fake.lastStart!.kind, ListenNotificationKind.playing);
+      expect(fake.lastStart!.content, contains('第1/2个事件'));
+      expect(fake.lastStart!.content, contains('第1/3句'));
+      expect(fake.lastStart!.subText, contains('大事件1'));
+      // 通知进度 = 事件内句子进度：第 1/3 句 → 33（不再是整篇事件百分比 0）
+      expect(fake.lastStart!.progress, 33);
+
+      await finishSentence(engine, ctrl);
+      await settle();
+      expect(fake.calls, contains('update'));
+      expect(fake.lastUpdate!.kind, ListenNotificationKind.playing);
+      expect(fake.lastUpdate!.content, contains('第2/3句'));
+      expect(fake.lastUpdate!.subText, '李云飞在青阳城醒来。');
+      expect(fake.lastUpdate!.progress, 67, reason: '第 2/3 句 → 67');
+
+      await ctrl.pause();
+      await settle();
+      expect(fake.calls.last, 'update');
+      expect(fake.lastUpdate!.kind, ListenNotificationKind.paused);
+      expect(fake.lastUpdate!.content, contains('停在第1/2个事件'));
+      expect(fake.lastUpdate!.progress, 67, reason: '暂停进度与播放中同规则');
+
+      await ctrl.stop();
+      await settle();
+      expect(fake.calls.last, 'cancel');
+    });
+
+    test('整篇读完：finish(success: true) 并带事件数', () async {
+      final fake = FakeListenNotification();
+      final engine = FakeTtsEngine();
+      final ctrl = buildWith(engine, fake);
+      addTearDown(ctrl.dispose);
+
+      await ctrl.playFrom(ctrl.segments.length - 1);
+      await finishEvent(engine, ctrl);
+      await settle();
+
+      expect(ctrl.finished, isTrue);
+      expect(fake.calls.last, 'finish');
+      expect(fake.lastSuccess, isTrue);
+      expect(fake.lastFinish!.kind, ListenNotificationKind.finished);
+      expect(fake.lastFinish!.content, contains('共 2 个事件'));
+      expect(fake.lastFinish!.progress, 100);
+    });
+
+    test('引擎报错：通知切到暂停态并带上错误原因', () async {
+      final fake = FakeListenNotification();
+      final engine = FakeTtsEngine();
+      final ctrl = buildWith(engine, fake);
+      addTearDown(ctrl.dispose);
+
+      await ctrl.play();
+      await settle();
+      engine.failCurrent('朗读通道异常');
+      await settle();
+
+      expect(ctrl.playing, isFalse);
+      expect(ctrl.errorMessage, isNotEmpty);
+      expect(fake.calls.last, 'update');
+      expect(fake.lastUpdate!.kind, ListenNotificationKind.paused);
+      expect(fake.lastUpdate!.subText, contains('朗读通道异常'));
+    });
+  });
+
+  group('后台继续朗读开关 setBackgroundPlayback', () {
+    test('播放打开、暂停 / 停止关闭', () async {
+      final engine = FakeTtsEngine();
+      final ctrl = build(engine: engine);
+      addTearDown(ctrl.dispose);
+
+      expect(engine.backgroundPlayback, isNull);
+      await ctrl.play();
+      expect(engine.backgroundPlayback, isTrue);
+
+      await ctrl.pause();
+      expect(engine.backgroundPlayback, isFalse);
+
+      await ctrl.play();
+      expect(engine.backgroundPlayback, isTrue);
+
+      await ctrl.stop();
+      expect(engine.backgroundPlayback, isFalse);
+    });
+
+    test('整篇读完 / 引擎出错时也会关掉（避免退后台还在读）', () async {
+      final engine = FakeTtsEngine();
+      final ctrl = build(engine: engine);
+      addTearDown(ctrl.dispose);
+
+      await ctrl.playFrom(ctrl.segments.length - 1);
+      expect(engine.backgroundPlayback, isTrue);
+      await finishEvent(engine, ctrl);
+      expect(engine.backgroundPlayback, isFalse);
+
+      final engine2 = FakeTtsEngine()..failNextSpeak = true;
+      final ctrl2 = build(engine: engine2);
+      addTearDown(ctrl2.dispose);
+      await ctrl2.play();
+      expect(ctrl2.playing, isFalse);
+      expect(engine2.backgroundPlayback, isFalse);
+    });
+  });
+
+  group('会话保留判定 isSessionNeeded', () {
+    test('有朗读位置（含暂停）为 true；停止后为 false', () async {
+      final engine = FakeTtsEngine();
+      final ctrl = build(engine: engine);
+      addTearDown(ctrl.dispose);
+
+      expect(ctrl.isSessionNeeded, isFalse);
+      await ctrl.play();
+      expect(ctrl.isSessionNeeded, isTrue);
+      await ctrl.pause();
+      expect(ctrl.isSessionNeeded, isTrue, reason: '暂停位置要保留给后台会话');
+      await ctrl.stop();
+      expect(ctrl.isSessionNeeded, isFalse);
+    });
+
+    test('整篇听完仍保留位置（页面关闭时才释放）', () async {
+      final engine = FakeTtsEngine();
+      final ctrl = build(engine: engine);
+      addTearDown(ctrl.dispose);
+
+      await ctrl.playFrom(ctrl.segments.length - 1);
+      await finishEvent(engine, ctrl);
+
+      expect(ctrl.finished, isTrue);
+      expect(ctrl.isSessionNeeded, isTrue);
+    });
+  });
+}
+
+/// 假通知器：只记录控制器发来的通知调用，不做任何平台交互。
+///
+/// `supported: false` 让基类自身的逻辑保持 no-op；所有会触发原生调用的方法
+/// 都被重写为纯记录，因此单测里不会碰 MethodChannel。
+class FakeListenNotification extends OutlineListeningNotification {
+  FakeListenNotification() : super(supported: false);
+
+  final List<String> calls = [];
+  OutlineListeningNotificationContent? lastStart;
+  OutlineListeningNotificationContent? lastUpdate;
+  OutlineListeningNotificationContent? lastFinish;
+  bool? lastSuccess;
+
+  @override
+  Future<bool> ensurePermission() async => false;
+
+  @override
+  Future<void> start(OutlineListeningNotificationContent c) async {
+    calls.add('start');
+    lastStart = c;
+  }
+
+  @override
+  void update(OutlineListeningNotificationContent c) {
+    calls.add('update');
+    lastUpdate = c;
+  }
+
+  @override
+  Future<void> finish(
+    OutlineListeningNotificationContent c, {
+    required bool success,
+  }) async {
+    calls.add('finish');
+    lastFinish = c;
+    lastSuccess = success;
+  }
+
+  @override
+  Future<void> cancel() async {
+    calls.add('cancel');
+  }
 }

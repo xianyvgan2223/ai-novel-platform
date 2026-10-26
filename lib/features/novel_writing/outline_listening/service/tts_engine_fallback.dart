@@ -144,6 +144,14 @@ class FallbackTtsEngine implements TtsEngine {
     await _local.stop();
   }
 
+  /// 后台继续朗读开关：内置离线语音本来就不受 Activity 生命周期影响，
+  /// 真正需要它的是系统 TTS 那条路（原生 MainActivity.onStop 会停朗读）。
+  @override
+  Future<void> setBackgroundPlayback(bool enabled) async {
+    await _system.setBackgroundPlayback(enabled);
+    await _local.setBackgroundPlayback(enabled);
+  }
+
   @override
   Future<TtsEngineStatus> diagnose() async {
     localModelAvailable = await localTtsHasModel();

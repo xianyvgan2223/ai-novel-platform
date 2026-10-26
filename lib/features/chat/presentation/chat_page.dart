@@ -50,6 +50,9 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     _scrollCtrl.addListener(_onScrollChanged);
     // 监听会话切换：抽屉里选中历史会话后自动定位到最新消息
     ref.read(chatProvider).addListener(_onChatChanged);
+    // 预热全局设置（幂等、异步）：设置页推入时首帧就有内容，
+    // 不会出现「转圈 → 整页表单」在转场动画中途切换的掉帧。
+    ref.read(settingProvider).loadSettings();
     // 进入页面时定位到底部（如从悬浮面板“展开”进入时展示最新消息）
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollCtrl.hasClients) {
@@ -229,6 +232,18 @@ class _ChatPageState extends ConsumerState<ChatPage> {
         builder: (_) => page,
       ),
     );
+  }
+
+  /// 打开设置页：先确保设置已加载，再推入页面。
+  ///
+  /// 若直接推入，页面首帧只能画「转圈」，数据库读完后才在推入动画中途
+  /// 一次性建出整页表单（600+ widget / 十余个输入框）——那一帧就是打开
+  /// 设置页时肉眼看到的掉帧。正常情况下设置已在启动时预热，这里的 await
+  /// 只是一次同步返回。
+  Future<void> _openSettings() async {
+    await ref.read(settingProvider).loadSettings();
+    if (!mounted) return;
+    await _pushPage(const SettingsPage(), routeName: kSettingsRouteName);
   }
 
   // ── 发送消息 ──
@@ -412,7 +427,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
             switch (value) {
               case 'settings':
                 // 带名字推入：设置页右上角全是控件，全局悬浮球要在这页隐藏。
-                _pushPage(const SettingsPage(), routeName: kSettingsRouteName);
+                _openSettings();
               case 'game':
                 _pushPage(const GameHubPage());
             }

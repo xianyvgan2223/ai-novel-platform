@@ -141,6 +141,13 @@ abstract class TtsEngine {
   /// 立刻停止朗读
   Future<void> stop();
 
+  /// 告诉原生引擎「本次朗读是否需要在 App 退到后台后继续」。
+  ///
+  /// 系统 TTS 通道默认在 Activity onStop 时停止朗读（防止用户以为 App 出毛病）；
+  /// 「听大纲」要后台连听，所以在播放期间把它置 true，暂停 / 停止 / 释放时置回 false。
+  /// 不支持的实现（内置离线语音、Web、单测假引擎）空实现即可。
+  Future<void> setBackgroundPlayback(bool enabled);
+
   /// 一段读完后回调；[onError] 仅在异常中断时回调
   void setCallbacks({required VoidCallback onDone, void Function(String message)? onError});
 

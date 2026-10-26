@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show TextRange;
 
 import 'package:flutter/foundation.dart';
 
@@ -8,6 +9,7 @@ import '../../shared/domain/character_profile.dart';
 import '../../shared/domain/outline_chapter.dart';
 import '../../shared/domain/outline_record.dart';
 import '../../shared/outline_text_sync.dart';
+import '../background/outline_listening_notification.dart';
 import '../model/listening_segment.dart';
 import '../service/name_ai_service.dart';
 import '../service/name_finder.dart';
@@ -35,17 +37,25 @@ class OutlineListenController extends ChangeNotifier {
     this.outline, {
     TtsEngine? engine,
     OutlineNameAiService? nameAiService,
+    OutlineListeningNotification? notification,
   })  : _engine = engine ?? FallbackTtsEngine(),
         _nameAi = nameAiService ?? OutlineNameAiService(),
+        _notification =
+            notification ?? OutlineListeningNotification.instance,
         outlineContent = outline.content {
     _engine.setCallbacks(
-      onDone: _handleSegmentDone,
+      // 逐句朗读：一次 onDone 只代表「这一句读完了」，由这里决定是下一句
+      // 还是下一个事件（见 _handleSentenceDone / _handleSegmentDone）。
+      onDone: _handleSentenceDone,
       onError: _handleEngineError,
     );
   }
 
   final TtsEngine _engine;
   final OutlineNameAiService _nameAi;
+
+  /// 后台朗读通知桥；单元测试可注入假实现，非 Android 平台自动 no-op。
+  final OutlineListeningNotification _notification;
 
   TtsEngine get engine => _engine;
 
@@ -126,6 +136,25 @@ class OutlineListenController extends ChangeNotifier {
   /// 已读完的事件数（「听到哪儿了」的粗略进度）
   int _spokenCount = 0;
 
+  // ─── 句子级朗读（高亮 / 每事件拖动进度共用） ─────────────────
+
+  /// 当前事件内读到第几句（0 起）；-1 = 没开始 / 当前事件已读完
+  int activeSentenceIndex = -1;
+
+  /// 每个事件的朗读计划缓存。
+  ///
+  /// 句子切分按事件懒算（几百个事件 × 每事件几百字，全量预算没必要）；
+  /// 朗读模式变化、卡片文本变化、列表重建时整体失效重算。
+  final Map<int, SpeechPlan> _planCache = {};
+
+  // ─── 后台朗读通知 ────────────────────────────────────────────
+
+  /// 本次朗读是否已经向原生发过 start（决定后续 update 还是 start）。
+  bool _listenTaskActive = false;
+
+  /// 通知栏当前是否还挂着这条朗读通知（进度态或完成态）。
+  bool _listenTaskNotified = false;
+
   // ---- 初始化 ----
 
   /// 从章节行建出卡片（构造后由页面调用一次）。
@@ -145,6 +174,7 @@ class OutlineListenController extends ChangeNotifier {
   }) {
     if (record != null) _adoptRecordFields(record);
     segments = _buildSegments(chapters);
+    _invalidateSpeechPlans();
     // 进页面时的状态就是「上一次提交状态」：第一次改动的撤回基线由它提供
     _lastCommitted = _takeSnapshot();
     _loading = false;
@@ -225,6 +255,7 @@ class OutlineListenController extends ChangeNotifier {
       s.dispose();
     }
     segments = rebuilt;
+    _invalidateSpeechPlans();
     if (segments.isEmpty) {
       activeIndex = -1;
     } else if (activeIndex >= segments.length) {
@@ -276,19 +307,34 @@ class OutlineListenController extends ChangeNotifier {
 
   // ---- 设置 ----
 
-  /// 改朗读设置。卡片本身与事件一一对应，所以改设置（含朗读范围）**不用重建
-  /// 列表**——朗读范围只影响 [OutlineListenSegment.speechText]。
+  /// 改朗读设置。
+  ///
+  /// 卡片本身与事件一一对应，所以改设置（含朗读范围 / 事件范围）**不用重建
+  /// 列表**——朗读范围只影响 [OutlineListenSegment.speechText]/句子计划。
   ///
   /// 例外：**语速改了要立刻生效**——正在读的这一条直接从开头重读一遍，否则用户
   /// 拖了 3.0x 还得等当前这条读完（几十秒）才听出新速度，等于没改成。
-  /// 其它设置（音调 / 朗读范围 / 连读 / 循环）仍然「下一条生效」，中途重读更烦。
+  /// 其它设置（音调 / 朗读范围 / 事件范围 / 连读 / 循环）仍然「下一条生效」，
+  /// 中途重读更烦；但「事件范围」把当前事件排除掉时，必须跳到范围内下一个事件，
+  /// 否则会出现「设置说只听大事件、却在读小事件」的错位。
   void updateSettings(OutlineSpeechSettings next) {
     if (next == settings) return;
     final rateChanged = next.rate != settings.rate;
+    final modeChanged = next.mode != settings.mode;
+    final scopeChanged = next.scope != settings.scope;
     settings = next;
+    if (modeChanged) {
+      // 句子计划跟着朗读范围变：旧计划作废，当前句序号按新计划夹紧
+      _invalidateSpeechPlans();
+    }
     notifyListeners();
     if (rateChanged && playing && activeIndex >= 0) {
       unawaited(replayCurrent());
+      return;
+    }
+    if (scopeChanged && playing && activeIndex >= 0 && !isPlayableAt(activeIndex)) {
+      final nextIndex = _nextPlayableIndex(activeIndex);
+      unawaited(nextIndex >= 0 ? playFrom(nextIndex) : pause());
     }
   }
 
@@ -306,15 +352,140 @@ class OutlineListenController extends ChangeNotifier {
       ? segments[activeIndex]
       : null;
 
-  /// 朗读进度文案，如「第 3/28 个事件」
-  String get progressLabel => segments.isEmpty
-      ? '暂无内容'
-      : (activeIndex < 0
-            ? '共 ${segments.length} 个事件'
-            : '第 ${activeIndex + 1}/${segments.length} 个事件');
+  /// 朗读进度文案，如「第 3/28 个事件」。
+  ///
+  /// 「只听大 / 小事件」时只数范围内的事件：开了范围还拿全篇事件数当分母，
+  /// 用户会以为「读了一半就到底了」。
+  String get progressLabel {
+    if (segments.isEmpty) return '暂无内容';
+    final playable = playableIndices;
+    if (playable.isEmpty) return '当前范围内没有可朗读的事件';
+    if (activeIndex < 0) {
+      return settings.scope == OutlineListenScope.all
+          ? '共 ${segments.length} 个事件'
+          : '共 ${playable.length} 个事件 · ${settings.scope.label}';
+    }
+    return '第 $activePlayableOrdinal/${playable.length} 个事件';
+  }
 
   /// 已读完的事件数（暂停 / 停止后保留，作为「听到哪儿了」的粗略进度）
   int get spokenCount => _spokenCount;
+
+  // ---- 句子级朗读（高亮 / 拖动进度共用） ----
+
+  /// 某个事件的朗读计划（懒算 + 缓存）
+  SpeechPlan planForIndex(int index) {
+    if (index < 0 || index >= segments.length) return SpeechPlan.empty;
+    return _planCache.putIfAbsent(
+      index,
+      () => buildSpeechPlan(segments[index], settings.mode),
+    );
+  }
+
+  /// 某个事件可朗读的句数（拖动进度条的分母；0 = 没有可读内容）
+  int sentenceCountForIndex(int index) => planForIndex(index).length;
+
+  /// 当前事件可朗读的句数
+  int get activeSentenceCount =>
+      activeIndex < 0 ? 0 : sentenceCountForIndex(activeIndex);
+
+  /// 当前正在读的句子（null = 没在读 / 已停下 / 当前事件读完）
+  SpeechPiece? get activePiece {
+    if (activeIndex < 0) return null;
+    return planForIndex(activeIndex).pieceAt(activeSentenceIndex);
+  }
+
+  /// 当前句文本（播放器提示条 / 通知副文本用）
+  String get activeSentenceText => activePiece?.text ?? '';
+
+  /// 当前句序号（1 起；0 = 没有当前句）
+  int get activeSentenceOrdinal =>
+      activeSentenceIndex >= 0 ? activeSentenceIndex + 1 : 0;
+
+  /// 当前事件内的句子进度（0~1，单事件拖动条用）
+  double get activeSentenceProgress {
+    final total = activeSentenceCount;
+    if (total <= 0 || activeSentenceIndex < 0) return 0;
+    return ((activeSentenceIndex + 1) / total).clamp(0.0, 1.0);
+  }
+
+  /// 整篇朗读进度（0~1）：范围内事件序号 + 事件内句子占比。
+  ///
+  /// 注意：**通知栏进度条不用它**——长篇大纲里全书百分比一整个事件只动不到 1%，
+  /// 看起来像没有进度条；通知栏改用「当前事件内句子进度」（见
+  /// `OutlineListeningNotificationContent`）。这里保留给统计 / 测试使用。
+  double get overallProgress {
+    final playable = playableIndices;
+    if (playable.isEmpty) return 0;
+    final pos = playable.indexOf(activeIndex);
+    if (pos < 0) return 0;
+    final total = planForIndex(activeIndex).length;
+    final done = activeSentenceIndex < 0 ? 0 : activeSentenceIndex;
+    final frac = total <= 0 ? 0.0 : done / total;
+    return ((pos + frac) / playable.length).clamp(0.0, 1.0);
+  }
+
+  /// 范围过滤后参与朗读的事件下标（升序）
+  List<int> get playableIndices => [
+    for (var i = 0; i < segments.length; i++)
+      if (isPlayableAt(i)) i,
+  ];
+
+  /// 这条事件在当前朗读范围里读不读
+  bool isPlayableAt(int index) =>
+      index >= 0 &&
+      index < segments.length &&
+      settings.scope.matches(segments[index].isMajor);
+
+  int get playableCount => playableIndices.length;
+
+  /// 当前事件在范围内是第几个（1 起；0 = 不在范围内 / 没开始）
+  int get activePlayableOrdinal {
+    if (activeIndex < 0) return 0;
+    final idx = playableIndices.indexOf(activeIndex);
+    return idx < 0 ? 0 : idx + 1;
+  }
+
+  /// 会话是否还有「值得保留」的状态：有朗读位置（含暂停 / 听完停在末尾）。
+  ///
+  /// 页面关闭时用它决定 controller 是转到后台会话里继续活着，还是直接释放。
+  bool get isSessionNeeded => activeIndex >= 0;
+
+  int _firstPlayableIndex() {
+    for (var i = 0; i < segments.length; i++) {
+      if (isPlayableAt(i)) return i;
+    }
+    return -1;
+  }
+
+  int _nextPlayableIndex(int after) {
+    for (var i = after + 1; i < segments.length; i++) {
+      if (isPlayableAt(i)) return i;
+    }
+    return -1;
+  }
+
+  int _previousPlayableIndex(int before) {
+    for (var i = before - 1; i >= 0; i--) {
+      if (isPlayableAt(i)) return i;
+    }
+    return -1;
+  }
+
+  void _invalidateSpeechPlans() {
+    _planCache.clear();
+    _clampSentenceIndex();
+  }
+
+  void _clampSentenceIndex() {
+    final count = activeSentenceCount;
+    if (count <= 0) {
+      activeSentenceIndex = -1;
+      return;
+    }
+    if (activeSentenceIndex < 0) activeSentenceIndex = 0;
+    if (activeSentenceIndex >= count) activeSentenceIndex = count - 1;
+  }
 
   /// 播放 / 暂停
   Future<void> toggle() async {
@@ -325,25 +496,50 @@ class OutlineListenController extends ChangeNotifier {
     await play();
   }
 
-  /// 从 [activeIndex]（未开始时从第一个事件）开始朗读
+  /// 播放（暂停后继续从当前句读；未开始时从范围内第一个事件开始）
   Future<void> play() async {
     if (segments.isEmpty) return;
-    if (activeIndex < 0 || activeIndex >= segments.length) activeIndex = 0;
+    var target = activeIndex;
+    if (target < 0 || target >= segments.length || !isPlayableAt(target)) {
+      target = _firstPlayableIndex();
+    }
+    if (target < 0) {
+      errorMessage = '当前朗读范围内没有可播放的事件';
+      playing = false;
+      notifyListeners();
+      return;
+    }
+    activeIndex = target;
+    final plan = planForIndex(activeIndex);
+    if (plan.isEmpty) {
+      // 空事件不占朗读时间：算它读完，直接走连读逻辑（与旧行为一致）
+      playing = true;
+      _handleSegmentDone();
+      return;
+    }
+    if (activeSentenceIndex < 0 || activeSentenceIndex >= plan.length) {
+      activeSentenceIndex = 0;
+    }
     finished = false;
     playing = true;
     errorMessage = '';
+    // 先把「后台继续朗读」标志立起来再发朗读请求：用户可能点完播放立刻按 Home，
+    // 若等 speak 返回再设置，Activity onStop 可能先到一步把第一句停掉。
+    unawaited(_setBackgroundPlayback(true));
     final started = await _speakCurrent();
     if (_disposed) return;
     if (!started) playing = false;
+    unawaited(_setBackgroundPlayback(playing));
     notifyListeners();
   }
 
-  /// 暂停：停掉引擎但**保留当前位置**（再点播放从这一个事件开头重听）
+  /// 暂停：停掉引擎但**保留当前位置**（事件 + 句子都保留，再点播放从当前句继续）
   Future<void> pause() async {
     if (!playing) return;
     _speechSeq++;
     playing = false;
     await _engine.stop();
+    unawaited(_setBackgroundPlayback(false));
     notifyListeners();
   }
 
@@ -353,47 +549,109 @@ class OutlineListenController extends ChangeNotifier {
     playing = false;
     finished = false;
     activeIndex = -1;
+    activeSentenceIndex = -1;
     _spokenCount = 0;
     await _engine.stop();
+    unawaited(_setBackgroundPlayback(false));
     notifyListeners();
   }
 
-  /// 从第 [index] 个事件开始读（点卡片上的播放按钮）
-  Future<void> playFrom(int index) async {
+  /// 从第 [index] 个事件开始读（点卡片上的播放按钮）。
+  ///
+  /// [sentenceIndex] 用于单事件拖动条：从该事件的第几句开始读。
+  Future<void> playFrom(int index, {int sentenceIndex = 0}) async {
     if (index < 0 || index >= segments.length) return;
+    var target = index;
+    if (!isPlayableAt(target)) {
+      // 点到了范围外的事件：优先从它后面最近的可读事件开始
+      final next = _nextPlayableIndex(target - 1);
+      target = next >= 0 ? next : _firstPlayableIndex();
+    }
+    if (target < 0) return;
     _speechSeq++;
     playing = false;
     await _engine.stop();
-    activeIndex = index;
+    activeIndex = target;
+    final count = sentenceCountForIndex(target);
+    activeSentenceIndex = count <= 0 ? 0 : sentenceIndex.clamp(0, count - 1);
     finished = false;
     notifyListeners();
     await play();
   }
 
-  /// 下一个事件（到末尾：开了循环就回到第一个，否则停下并置 [finished]）
+  /// 从指定事件的指定句子开始朗读（每事件拖动进度条松手时调用）
+  Future<void> playFromSentence(int index, int sentenceIndex) =>
+      playFrom(index, sentenceIndex: sentenceIndex);
+
+  /// 跳到当前事件内的第 [sentenceIndex] 句（媒体通知 seekbar 拖动 / 外部调用）。
+  ///
+  /// 语义与页面上的句子进度条一致：
+  /// - 正在朗读：从落点句继续读（停掉当前 utterance，从该句重新发声）；
+  /// - 已暂停：只把位置移过去（高亮 / 通知 / 进度同步），等用户点播放再从该句继续；
+  /// - 没有朗读位置、或当前事件没有句子：什么都不做。
+  Future<void> seekToSentence(int sentenceIndex) async {
+    if (activeIndex < 0 || activeIndex >= segments.length) return;
+    final count = sentenceCountForIndex(activeIndex);
+    if (count <= 0) return;
+    final target = sentenceIndex.clamp(0, count - 1);
+    if (playing) {
+      await playFrom(activeIndex, sentenceIndex: target);
+      return;
+    }
+    activeSentenceIndex = target;
+    notifyListeners();
+  }
+
+  /// 按当前事件内的相对进度（0~1）跳句——通知进度条点击分区的事件用它。
+  Future<void> seekToFraction(double fraction) async {
+    if (activeIndex < 0 || activeIndex >= segments.length) return;
+    final count = sentenceCountForIndex(activeIndex);
+    if (count <= 0) return;
+    final normalized = fraction.clamp(0.0, 1.0);
+    final target = (normalized * count).floor().clamp(0, count - 1);
+    await seekToSentence(target);
+  }
+
+  /// 在当前事件内相对跳 [delta] 句（通知展开视图「退 3 句 / 进 3 句」按钮）。
+  ///
+  /// 越界由 [seekToSentence] 统一夹紧：退到事件开头 / 进到事件最后一句为止，
+  /// 不跨事件（跨事件交给上一个 / 下一个按钮，避免两个动作语义混在一起）。
+  Future<void> seekBy(int delta) async {
+    if (activeIndex < 0 || activeIndex >= segments.length) return;
+    if (activeSentenceIndex < 0) return;
+    await seekToSentence(activeSentenceIndex + delta);
+  }
+
+  /// 下一个范围内事件（到末尾：开了循环就回到第一个，否则停下并置 [finished]）
   Future<void> next() async {
     if (segments.isEmpty) return;
-    final last = activeIndex >= segments.length - 1;
-    if (last) {
+    final nextIndex = _nextPlayableIndex(activeIndex);
+    if (nextIndex < 0) {
       if (!settings.repeat) {
         await pause();
         finished = true;
+        activeSentenceIndex = -1;
         notifyListeners();
         return;
       }
-      await playFrom(0);
+      final first = _firstPlayableIndex();
+      if (first < 0) return;
+      await playFrom(first);
       return;
     }
-    await playFrom(activeIndex + 1);
+    await playFrom(nextIndex);
   }
 
-  /// 上一个事件（在第一个时回到第一个重读）
+  /// 上一个范围内事件（在第一个时回到第一个重读）
   Future<void> previous() async {
     if (segments.isEmpty) return;
-    await playFrom(activeIndex <= 0 ? 0 : activeIndex - 1);
+    final first = _firstPlayableIndex();
+    if (first < 0) return;
+    final prev = _previousPlayableIndex(activeIndex);
+    await playFrom(prev >= 0 ? prev : first);
   }
 
-  /// 重读当前这一个事件
+  /// 重读当前这一个事件（从它的第一句开始）
   Future<void> replayCurrent() async {
     if (activeIndex < 0) {
       await play();
@@ -402,17 +660,28 @@ class OutlineListenController extends ChangeNotifier {
     await playFrom(activeIndex);
   }
 
-  /// 发送朗读请求；返回是否成功开始
+  /// 发送朗读请求（只读当前这一句）；返回是否成功开始。
   ///
-  /// 每次都从头读当前这一个事件：系统 TTS 没有「从中间继续」的能力，而且用户点
-  /// 暂停多半是想改点什么，回来后从事件开头重听一遍才符合预期。
+  /// 逐句朗读是「高亮当前句 / 单事件拖动进度」的基础：引擎没有「读到第几个字」
+  /// 的回调，把事件拆成句子依次读，每句结束时推进高亮与进度，天然精确。
+  /// 句子之间的间隔对系统 TTS 只有几十毫秒，听感上就是正常的句间停顿。
   Future<bool> _speakCurrent() async {
     final segment = activeSegment;
     if (segment == null) return false;
-    final text = segment.speechText(settings.mode).trim();
-    if (text.isEmpty) {
-      // 空卡片（标题与概要都空）不占朗读时间：算它读完，立刻往下走
+    final plan = planForIndex(activeIndex);
+    if (plan.isEmpty) {
+      // 空卡片（标题、概要、正文都空）不占朗读时间：算它读完，立刻往下走
       _handleSegmentDone();
+      return true;
+    }
+    if (activeSentenceIndex < 0) activeSentenceIndex = 0;
+    if (activeSentenceIndex >= plan.length) {
+      _handleSegmentDone();
+      return true;
+    }
+    final text = plan.pieces[activeSentenceIndex].text.trim();
+    if (text.isEmpty) {
+      _handleSentenceDone();
       return true;
     }
     if (!_engineReady) {
@@ -451,30 +720,59 @@ class OutlineListenController extends ChangeNotifier {
     return true;
   }
 
-  /// 引擎报「读完了」：记进度，并按设置自动读下一个事件
+  /// 引擎报「这一句读完了」：还有下一句就继续，读完整个事件再交给连读逻辑。
+  void _handleSentenceDone() {
+    if (_disposed) return;
+    if (!playing) {
+      notifyListeners();
+      return;
+    }
+    final plan = activeIndex >= 0 ? planForIndex(activeIndex) : SpeechPlan.empty;
+    if (activeSentenceIndex + 1 < plan.length) {
+      activeSentenceIndex++;
+      notifyListeners();
+      unawaited(_continueSpeaking());
+      return;
+    }
+    _handleSegmentDone();
+  }
+
+  /// 引擎报「这个事件读完了」：记进度，并按设置自动读下一个事件
   void _handleSegmentDone() {
     if (_disposed) return;
     // 只有「本次播放真的读完了这一个事件」才计数：用户点下一个 / 暂停时原生
     // stop 可能刚好把它读完，那种收尾不该记进「已听 N 个」
     if (playing) _spokenCount++;
+    activeSentenceIndex = -1;
     if (!playing) {
       notifyListeners();
       return;
     }
     if (!settings.autoNext) {
       playing = false;
-      finished = activeIndex >= segments.length - 1;
+      final lastIndex = playableIndices.isEmpty ? -1 : playableIndices.last;
+      finished = activeIndex >= lastIndex;
+      unawaited(_setBackgroundPlayback(false));
       notifyListeners();
       return;
     }
-    final last = activeIndex >= segments.length - 1;
+    final lastIndex = playableIndices.isEmpty ? -1 : playableIndices.last;
+    final last = activeIndex >= lastIndex;
     if (last && !settings.repeat) {
+      playing = false;
+      finished = true;
+      unawaited(_setBackgroundPlayback(false));
+      notifyListeners();
+      return;
+    }
+    activeIndex = last ? _firstPlayableIndex() : _nextPlayableIndex(activeIndex);
+    if (activeIndex < 0) {
       playing = false;
       finished = true;
       notifyListeners();
       return;
     }
-    activeIndex = last ? 0 : activeIndex + 1;
+    activeSentenceIndex = 0;
     notifyListeners();
     unawaited(_continueSpeaking());
   }
@@ -485,6 +783,7 @@ class OutlineListenController extends ChangeNotifier {
     if (_disposed) return;
     if (!ok) {
       playing = false;
+      unawaited(_setBackgroundPlayback(false));
       notifyListeners();
     }
   }
@@ -493,7 +792,126 @@ class OutlineListenController extends ChangeNotifier {
     if (_disposed) return;
     errorMessage = message;
     playing = false;
+    unawaited(_setBackgroundPlayback(false));
     notifyListeners();
+  }
+
+  Future<void> _setBackgroundPlayback(bool enabled) async {
+    try {
+      await _engine.setBackgroundPlayback(enabled);
+    } catch (_) {
+      // 后台开关是加分项：失败不影响前台朗读
+    }
+  }
+
+  // ---- 后台朗读通知（Android 前台服务 + 通知栏进度） ----
+
+  /// 每次状态变化顺带同步一次后台通知与朗读高亮。
+  ///
+  /// 和「一键生成大纲」一样放在 notifyListeners 这一层：播放、暂停、句子推进、
+  /// 停止、听完、出错、事件范围切换都从这一个出口走，不会漏状态。
+  @override
+  void notifyListeners() {
+    if (_disposed) return;
+    _applySpeechHighlight();
+    _syncListenNotification();
+    super.notifyListeners();
+  }
+
+  /// 把「当前正在读的句子」高亮同步到卡片的标题 / 概要输入框。
+  ///
+  /// 只设置 TextEditingController 上的高亮区间（不会触发文本变更回调），
+  /// 页面在这一轮重建时 EditableText 会按新区间重绘。
+  void _applySpeechHighlight() {
+    final active = activeIndex;
+    final piece = active >= 0 ? activePiece : null;
+    for (var i = 0; i < segments.length; i++) {
+      final segment = segments[i];
+      TextRange? titleRange;
+      TextRange? summaryRange;
+      if (i == active && piece != null) {
+        switch (piece.part) {
+          case SpeechPiecePart.title:
+            if (segment.titleCtrl.text.isNotEmpty) {
+              titleRange = TextRange(
+                start: 0,
+                end: segment.titleCtrl.text.length,
+              );
+            }
+            break;
+          case SpeechPiecePart.summary:
+            summaryRange = TextRange(start: piece.start, end: piece.end);
+            break;
+          case SpeechPiecePart.content:
+            // 正文没有编辑框：当前句显示在播放器提示条 / 通知栏里
+            break;
+        }
+      }
+      segment.titleCtrl.setHighlight(titleRange);
+      segment.summaryCtrl.setHighlight(summaryRange);
+    }
+  }
+
+  /// 通知栏文案：播放中 / 暂停 / 听完，以及「停在第几个事件第几句」。
+  void _syncListenNotification() {
+    try {
+      if (finished) {
+        if (!_listenTaskActive) return;
+        _listenTaskActive = false;
+        _listenTaskNotified = true;
+        final content = OutlineListeningNotificationContent.finished(
+          bookTitle: outline.title,
+          eventCount: playableCount > 0 ? playableCount : segments.length,
+        );
+        unawaited(_notification.finish(content, success: true));
+        return;
+      }
+      if (activeIndex < 0 || activeIndex >= segments.length) {
+        if (!_listenTaskActive) return;
+        _listenTaskActive = false;
+        _listenTaskNotified = false;
+        unawaited(_notification.cancel());
+        return;
+      }
+      final segment = segments[activeIndex];
+      final eventOrdinal = activePlayableOrdinal > 0
+          ? activePlayableOrdinal
+          : activeIndex + 1;
+      final eventTotal = playableCount > 0 ? playableCount : segments.length;
+      final sentenceTotal = activeSentenceCount;
+      final sentenceOrdinal = activeSentenceOrdinal;
+      final content = playing
+          ? OutlineListeningNotificationContent.playing(
+              bookTitle: outline.title,
+              eventLabel: segment.typeLabel,
+              eventOrdinal: eventOrdinal,
+              eventTotal: eventTotal,
+              sentenceOrdinal: sentenceOrdinal,
+              sentenceTotal: sentenceTotal,
+              sentence: activeSentenceText,
+            )
+          : OutlineListeningNotificationContent.paused(
+              bookTitle: outline.title,
+              eventLabel: segment.typeLabel,
+              eventOrdinal: eventOrdinal,
+              eventTotal: eventTotal,
+              sentenceOrdinal: sentenceOrdinal,
+              sentenceTotal: sentenceTotal,
+              sentence: activeSentenceText,
+              errorMessage: errorMessage,
+            );
+      _listenTaskNotified = true;
+      if (!_listenTaskActive) {
+        _listenTaskActive = true;
+        unawaited(_notification.ensurePermission());
+        unawaited(_notification.start(content));
+      } else {
+        _notification.update(content);
+      }
+    } catch (error) {
+      // 通知同步是加分项：任何异常都不能反过来影响朗读
+      debugPrint('[outline-listen] 同步后台通知失败：$error');
+    }
   }
 
   /// 清掉错误提示（用户点了重试 / 关掉提示）
@@ -610,6 +1028,9 @@ class OutlineListenController extends ChangeNotifier {
   /// [_flushHistory] 里按「上一份提交状态 + 这些卡片的旧文本」现算。
   void _onSegmentChanged(OutlineListenSegment segment) {
     if (_disposed) return;
+    // 文本改了：这个事件的句子计划作废（正在读的句子保持原 utterance，
+    // 高亮区间按新计划在下一句推进时自然对齐）
+    _invalidateSpeechPlans();
     notifyListeners();
     if (_applyingHistory) return;
     _editingKeys.add(segment.eventIndex);
@@ -780,6 +1201,8 @@ class OutlineListenController extends ChangeNotifier {
     }
     outlineContent = snapshot.outlineContent;
     foreshadows = snapshot.foreshadows;
+    // 撤回 / 取消撤回会把卡片文本整段换掉：句子计划与高亮区间跟着重算
+    _invalidateSpeechPlans();
   }
 
   /// 清理历史合并计时器（页面退出前调用，免得 Timer 挂在已销毁的控制器上）
@@ -1044,6 +1467,8 @@ class OutlineListenController extends ChangeNotifier {
         s.renameAll((text) => _replaceAll(text, mapping));
         s.markSaved();
       }
+      // 文本整体变了：句子计划与高亮区间都要按新文本重算
+      _invalidateSpeechPlans();
     }
 
     // 小说设定：类型 / 主题 / 主角简介 / 世界观 / 人物档案
@@ -1115,6 +1540,15 @@ class OutlineListenController extends ChangeNotifier {
       s.dispose();
     }
     segments = [];
+    _planCache.clear();
+    // 控制器被丢弃（页面关闭且没有后台会话）时：关掉「后台继续朗读」开关、
+    // 停掉 TTS、清掉通知，避免留下没有主人的声音 / 通知。
+    unawaited(_engine.setBackgroundPlayback(false));
+    _listenTaskActive = false;
+    if (_listenTaskNotified) {
+      _listenTaskNotified = false;
+      unawaited(_notification.cancel());
+    }
     unawaited(_engine.dispose());
     super.dispose();
   }

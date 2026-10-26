@@ -1,0 +1,383 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 「听大纲」通知的**展开态**自定义大视图（setCustomBigContentView）。
+     为什么需要它：Android 10 / EMUI 等 SystemUI 的媒体通知模板不渲染系统 seekbar，
+     媒体样式还会把普通进度条盖掉；所以退回到「普通进度通知 + 自定义展开视图」：
+     collapsed 仍由系统标准模板显示标题/正文/副文本/进度条，展开后换成这份 RemoteViews，
+     让用户可以直接点进度条上的分段跳句，或「退 3 句 / 进 3 句」。
+
+     为什么播控按钮也要画进来：EMUI 把自定义大视图当**完整**展开内容，系统不会再渲染
+     通知的 action 行（真机实测三个系统 action 在展开态不显示），所以这里自带一行
+     「上一个 / 暂停-继续 / 停止」；collapsed 态仍用通知自身的 3 个 action。
+     点标题/正文区域 = 回到朗读页（与点通知主体的行为一致）。
+
+     RemoteViews 限制：只能使用系统白名单里的 View（LinearLayout / FrameLayout /
+     ProgressBar / TextView / Button 都在白名单内；不能用普通 View/自定义 View）。
+
+     颜色：文字用系统主题属性，跟随通知背景的深浅色；进度条用 App 主色 #4D6BFE。 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingStart="16dp"
+    android:paddingEnd="16dp"
+    android:paddingTop="4dp"
+    android:paddingBottom="4dp">
+
+    <!-- 文字区域整体可点（回朗读页）：把标题/正文/副文本包在一起，点空白处也算点文字，
+         比只给标题 TextView 挂点击更好按；不会和下方进度条分区/按钮冲突（兄弟 View 各自消费触摸）。 -->
+    <LinearLayout
+        android:id="@+id/listen_expanded_text_area"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <!-- 标题：与 collapsed 的 setContentTitle 保持一致 -->
+        <TextView
+            android:id="@+id/listen_expanded_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textColor="?android:attr/textColorPrimary"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+
+        <!-- 正文：第几个事件 / 事件类型 / 第几句（与 collapsed 的 setContentText 一致） -->
+        <TextView
+            android:id="@+id/listen_expanded_content"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textColor="?android:attr/textColorSecondary"
+            android:textSize="13sp" />
+
+        <!-- 副文本：当前正在读的句子（通知栏展开时能直接看到读到哪一句） -->
+        <TextView
+            android:id="@+id/listen_expanded_subtext"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="1dp"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textColor="?android:attr/textColorSecondary"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <!-- 进度条区域：ProgressBar 只负责显示；上面盖一层等宽的 10 个透明 LinearLayout
+         作为点击分区（0dp + weight=1 均分宽度、高度撑满做成好点的触摸目标），
+         点第 i 格 = 跳到当前事件约 (i+0.5)/10 的位置（Dart 换算成句）。
+         每个分区里放一个滑块圆点（视觉 thumb）：分区容器 gravity=end 让圆点**右边缘**
+         贴着分区右缘（即 (bucket+1)/10 处）；进度填充也按档位填到同一位置（见
+         OutlineListenService 的 (bucket+1)*10），蓝条终点与圆点重合、不再穿过圆点。
+         注意：子 View 的横向 layout_gravity 在横向 LinearLayout 里不生效，横向对齐
+         必须靠容器自己的 android:gravity（这里用 end|center_vertical）。 -->
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="28dp"
+        android:layout_marginTop="6dp">
+
+        <ProgressBar
+            android:id="@+id/listen_expanded_progress"
+            style="@android:style/Widget.ProgressBar.Horizontal"
+            android:layout_width="match_parent"
+            android:layout_height="5dp"
+            android:layout_gravity="center_vertical"
+            android:indeterminate="false"
+            android:max="100"
+            android:progress="0"
+            android:progressBackgroundTint="#334D6BFE"
+            android:progressTint="#FF4D6BFE" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="horizontal">
+
+            <LinearLayout
+                android:id="@+id/listen_seek_0"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:background="@android:color/transparent"
+                android:gravity="end|center_vertical">
+
+                <ImageView
+                    android:id="@+id/listen_knob_0"
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:layout_gravity="end|center_vertical"
+                    android:clickable="false"
+                    android:focusable="false"
+                    android:importantForAccessibility="no"
+                    android:src="@drawable/notification_listen_knob"
+                    android:visibility="gone" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/listen_seek_1"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:background="@android:color/transparent"
+                android:gravity="end|center_vertical">
+
+                <ImageView
+                    android:id="@+id/listen_knob_1"
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:layout_gravity="end|center_vertical"
+                    android:clickable="false"
+                    android:focusable="false"
+                    android:importantForAccessibility="no"
+                    android:src="@drawable/notification_listen_knob"
+                    android:visibility="gone" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/listen_seek_2"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:background="@android:color/transparent"
+                android:gravity="end|center_vertical">
+
+                <ImageView
+                    android:id="@+id/listen_knob_2"
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:layout_gravity="end|center_vertical"
+                    android:clickable="false"
+                    android:focusable="false"
+                    android:importantForAccessibility="no"
+                    android:src="@drawable/notification_listen_knob"
+                    android:visibility="gone" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/listen_seek_3"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:background="@android:color/transparent"
+                android:gravity="end|center_vertical">
+
+                <ImageView
+                    android:id="@+id/listen_knob_3"
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:layout_gravity="end|center_vertical"
+                    android:clickable="false"
+                    android:focusable="false"
+                    android:importantForAccessibility="no"
+                    android:src="@drawable/notification_listen_knob"
+                    android:visibility="gone" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/listen_seek_4"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:background="@android:color/transparent"
+                android:gravity="end|center_vertical">
+
+                <ImageView
+                    android:id="@+id/listen_knob_4"
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:layout_gravity="end|center_vertical"
+                    android:clickable="false"
+                    android:focusable="false"
+                    android:importantForAccessibility="no"
+                    android:src="@drawable/notification_listen_knob"
+                    android:visibility="gone" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/listen_seek_5"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:background="@android:color/transparent"
+                android:gravity="end|center_vertical">
+
+                <ImageView
+                    android:id="@+id/listen_knob_5"
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:layout_gravity="end|center_vertical"
+                    android:clickable="false"
+                    android:focusable="false"
+                    android:importantForAccessibility="no"
+                    android:src="@drawable/notification_listen_knob"
+                    android:visibility="gone" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/listen_seek_6"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:background="@android:color/transparent"
+                android:gravity="end|center_vertical">
+
+                <ImageView
+                    android:id="@+id/listen_knob_6"
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:layout_gravity="end|center_vertical"
+                    android:clickable="false"
+                    android:focusable="false"
+                    android:importantForAccessibility="no"
+                    android:src="@drawable/notification_listen_knob"
+                    android:visibility="gone" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/listen_seek_7"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:background="@android:color/transparent"
+                android:gravity="end|center_vertical">
+
+                <ImageView
+                    android:id="@+id/listen_knob_7"
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:layout_gravity="end|center_vertical"
+                    android:clickable="false"
+                    android:focusable="false"
+                    android:importantForAccessibility="no"
+                    android:src="@drawable/notification_listen_knob"
+                    android:visibility="gone" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/listen_seek_8"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:background="@android:color/transparent"
+                android:gravity="end|center_vertical">
+
+                <ImageView
+                    android:id="@+id/listen_knob_8"
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:layout_gravity="end|center_vertical"
+                    android:clickable="false"
+                    android:focusable="false"
+                    android:importantForAccessibility="no"
+                    android:src="@drawable/notification_listen_knob"
+                    android:visibility="gone" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/listen_seek_9"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:background="@android:color/transparent"
+                android:gravity="end|center_vertical">
+
+                <ImageView
+                    android:id="@+id/listen_knob_9"
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:layout_gravity="end|center_vertical"
+                    android:clickable="false"
+                    android:focusable="false"
+                    android:importantForAccessibility="no"
+                    android:src="@drawable/notification_listen_knob"
+                    android:visibility="gone" />
+            </LinearLayout>
+        </LinearLayout>
+    </FrameLayout>
+
+    <!-- 逐句微调行：点进度条是粗定位，退/进 3 句用来快速回听或跳过一小段。
+         背景用系统 borderless 涟漪，不额外画实心按钮，避免在深色通知上突兀。 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/listen_expanded_rewind"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:minHeight="0dp"
+            android:minWidth="0dp"
+            android:text="退 3 句"
+            android:textAllCaps="false"
+            android:textColor="?android:attr/textColorPrimary"
+            android:textSize="12sp" />
+
+        <Button
+            android:id="@+id/listen_expanded_forward"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:minHeight="0dp"
+            android:minWidth="0dp"
+            android:text="进 3 句"
+            android:textAllCaps="false"
+            android:textColor="?android:attr/textColorPrimary"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <!-- 播控行：EMUI 展开自定义大视图后不再渲染通知 action 行，这里补上
+         「上一个 / 暂停-继续 / 停止」；中间按钮文字由原生按 paused 动态设置
+         （setTextViewText，布局里的「暂停」只是默认文案）。 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/listen_expanded_prev"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:minHeight="0dp"
+            android:minWidth="0dp"
+            android:text="上一个"
+            android:textAllCaps="false"
+            android:textColor="?android:attr/textColorPrimary"
+            android:textSize="12sp" />
+
+        <Button
+            android:id="@+id/listen_expanded_toggle"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:minHeight="0dp"
+            android:minWidth="0dp"
+            android:text="暂停"
+            android:textAllCaps="false"
+            android:textColor="?android:attr/textColorPrimary"
+            android:textSize="12sp" />
+
+        <Button
+            android:id="@+id/listen_expanded_stop"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:minHeight="0dp"
+            android:minWidth="0dp"
+            android:text="停止"
+            android:textAllCaps="false"
+            android:textColor="?android:attr/textColorPrimary"
+            android:textSize="12sp" />
+    </LinearLayout>
+</LinearLayout>

@@ -154,6 +154,11 @@ class _WebTtsEngine implements TtsEngine {
     }
   }
 
+  /// 浏览器朗读本来就不受 App 生命周期影响（切标签页/最小化仍由浏览器播），
+  /// 无需额外处理。
+  @override
+  Future<void> setBackgroundPlayback(bool enabled) async {}
+
   @override
   void setCallbacks({
     required VoidCallback onDone,

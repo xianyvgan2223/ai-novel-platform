@@ -108,8 +108,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(err ?? '数据库已导出'),
-        backgroundColor:
-            err != null ? const Color(0xFFFF4D4F) : kSettingsPrimary,
+        backgroundColor: err != null
+            ? const Color(0xFFFF4D4F)
+            : kSettingsPrimary,
         duration: const Duration(seconds: 2),
       ),
     );
@@ -141,32 +142,46 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(err ?? '数据导入成功，请重启应用生效'),
-        backgroundColor:
-            err != null ? const Color(0xFFFF4D4F) : kSettingsPrimary,
+        backgroundColor: err != null
+            ? const Color(0xFFFF4D4F)
+            : kSettingsPrimary,
         duration: const Duration(seconds: 2),
       ),
     );
   }
 
   void _openSync() {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => const SyncPage()),
-    );
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => const SyncPage()));
   }
 
   @override
   Widget build(BuildContext context) {
-    final ctrl = ref.watch(settingProvider);
-    if (!ctrl.isLoaded) {
+    // 只订阅「决定页面结构」的三个值：是否加载完成、联网搜索来源、流式开关。
+    //
+    // 其余参数值不要 watch：文本 / 开关的值由各行自己的 StatefulWidget 持有
+    // （initialValue 只在首次挂载时读一次）。若像以前那样 watch 整个控制器，
+    // 每敲一个字符、每切一次开关都会把整页（600+ widget）重建一遍。
+    final form = ref.watch(
+      settingProvider.select(
+        (c) => (
+          isLoaded: c.isLoaded,
+          engine: _normalizeEngine(c.searchEngine),
+          stream: c.stream,
+        ),
+      ),
+    );
+    if (!form.isLoaded) {
       return const Scaffold(
         backgroundColor: kSettingsPageBg,
-        body: Center(
-          child: CircularProgressIndicator(color: kSettingsPrimary),
-        ),
+        body: Center(child: CircularProgressIndicator(color: kSettingsPrimary)),
       );
     }
 
-    final engine = _normalizeEngine(ctrl.searchEngine);
+    // 一次性读取当前值：只用来填各行的 initialValue，不建立依赖。
+    final ctrl = ref.read(settingProvider);
+    final engine = form.engine;
 
     return Scaffold(
       backgroundColor: kSettingsPageBg,
@@ -191,10 +206,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           ),
           SettingsCard(
             children: [
-              _ApiKeyCard(
-                initialValue: ctrl.apiKey,
-                onChanged: ctrl.setApiKey,
-              ),
+              _ApiKeyCard(initialValue: ctrl.apiKey, onChanged: ctrl.setApiKey),
             ],
           ),
 
@@ -341,7 +353,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 onChanged: ctrl.setStream,
               ),
               // stream_options 仅在流式开启时显示
-              if (ctrl.stream)
+              if (form.stream)
                 SettingsTextRow(
                   key: _k('stream_options'),
                   label: 'stream_options',
@@ -501,7 +513,10 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             child: Center(
               child: Text(
                 '当前版本 v$kAppVersion',
-                style: const TextStyle(fontSize: 11, color: kSettingsFooterText),
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: kSettingsFooterText,
+                ),
               ),
             ),
           ),
@@ -620,7 +635,10 @@ class _ApiKeyCardState extends State<_ApiKeyCard> {
                     enableSuggestions: false,
                     textInputAction: TextInputAction.done,
                     cursorColor: kSettingsPrimary,
-                    style: const TextStyle(fontSize: 13.5, color: kSettingsValue),
+                    style: const TextStyle(
+                      fontSize: 13.5,
+                      color: kSettingsValue,
+                    ),
                     onChanged: (v) {
                       // 首字符输入/清空时要刷新「已配置」徽标，所以这里 setState。
                       setState(() {});
@@ -649,8 +667,10 @@ class _ApiKeyCardState extends State<_ApiKeyCard> {
                   ),
                   tooltip: _obscured ? '显示 API Key' : '隐藏 API Key',
                   padding: EdgeInsets.zero,
-                  constraints:
-                      const BoxConstraints(minWidth: 34, minHeight: 34),
+                  constraints: const BoxConstraints(
+                    minWidth: 34,
+                    minHeight: 34,
+                  ),
                   visualDensity: VisualDensity.compact,
                 ),
               ],
@@ -735,14 +755,13 @@ class _ModelSelectorState extends State<_ModelSelector> {
 
   /// 下拉项文案：只显示简称（flash / pro）。
   /// 真实 API 标识由选项的 value 承载，不占界面位置。
-  static String _labelFor(String id) =>
-      DeepSeekModels.toDisplayName(id) ?? id;
+  static String _labelFor(String id) => DeepSeekModels.toDisplayName(id) ?? id;
 
   List<SettingsSelectOption> get _options => [
-        for (final id in DeepSeekModels.selectableIds)
-          SettingsSelectOption(id, _labelFor(id)),
-        const SettingsSelectOption('custom', '自定义模型…'),
-      ];
+    for (final id in DeepSeekModels.selectableIds)
+      SettingsSelectOption(id, _labelFor(id)),
+    const SettingsSelectOption('custom', '自定义模型…'),
+  ];
 
   @override
   Widget build(BuildContext context) {

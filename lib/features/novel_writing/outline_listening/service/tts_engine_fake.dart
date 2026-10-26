@@ -133,6 +133,14 @@ class FakeTtsEngine implements TtsEngine {
     _speaking = false;
   }
 
+  /// 最近一次设置的后台朗读开关（null = 还没设置过）
+  bool? backgroundPlayback;
+
+  @override
+  Future<void> setBackgroundPlayback(bool enabled) async {
+    backgroundPlayback = enabled;
+  }
+
   @override
   void setCallbacks({
     required VoidCallback onDone,

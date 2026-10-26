@@ -1,4 +1,4 @@
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 
 /// 「听大纲改名」的朗读模式：决定每个事件读多少内容。
 ///
@@ -31,6 +31,40 @@ enum OutlineListenMode {
   }
 }
 
+/// 朗读事件范围：全部事件 / 只听大事件 / 只听小事件。
+///
+/// 长篇小说动辄上百个事件，用户可能只想把「大事件」这条主线顺一遍，
+/// 或者反过来只补听小事件细节。范围只影响**朗读推进**（播放 / 上一个 / 下一个 /
+/// 自动连读），不影响卡片列表本身——边听边改时仍然能看到并编辑所有事件。
+enum OutlineListenScope {
+  /// 全部事件
+  all('全部事件'),
+
+  /// 只听大事件
+  majorOnly('只听大事件'),
+
+  /// 只听小事件
+  minorOnly('只听小事件');
+
+  final String label;
+
+  const OutlineListenScope(this.label);
+
+  /// 这条事件在当前范围里读不读
+  bool matches(bool isMajor) => switch (this) {
+    OutlineListenScope.all => true,
+    OutlineListenScope.majorOnly => isMajor,
+    OutlineListenScope.minorOnly => !isMajor,
+  };
+
+  static OutlineListenScope fromName(String? name) {
+    for (final s in OutlineListenScope.values) {
+      if (s.name == name) return s;
+    }
+    return OutlineListenScope.all;
+  }
+}
+
 /// 朗读参数（语速 / 音调 / 语言 / 模式）。不可变，改动即换一份，
 /// 便于「正在读的内容不受设置改动影响」这类判断。
 @immutable
@@ -48,6 +82,9 @@ class OutlineSpeechSettings {
   /// 朗读模式
   final OutlineListenMode mode;
 
+  /// 朗读事件范围（全部 / 只听大事件 / 只听小事件）
+  final OutlineListenScope scope;
+
   /// 一个事件读完后是否自动接着读下一个
   final bool autoNext;
 
@@ -59,6 +96,7 @@ class OutlineSpeechSettings {
     this.pitch = 1.0,
     this.language = 'zh-CN',
     this.mode = OutlineListenMode.titleAndSummary,
+    this.scope = OutlineListenScope.all,
     this.autoNext = true,
     this.repeat = false,
   });
@@ -75,6 +113,7 @@ class OutlineSpeechSettings {
     double? pitch,
     String? language,
     OutlineListenMode? mode,
+    OutlineListenScope? scope,
     bool? autoNext,
     bool? repeat,
   }) => OutlineSpeechSettings(
@@ -82,6 +121,7 @@ class OutlineSpeechSettings {
     pitch: pitch ?? this.pitch,
     language: language ?? this.language,
     mode: mode ?? this.mode,
+    scope: scope ?? this.scope,
     autoNext: autoNext ?? this.autoNext,
     repeat: repeat ?? this.repeat,
   );
@@ -96,15 +136,87 @@ class OutlineSpeechSettings {
       other.pitch == pitch &&
       other.language == language &&
       other.mode == mode &&
+      other.scope == scope &&
       other.autoNext == autoNext &&
       other.repeat == repeat;
 
   @override
   int get hashCode =>
-      Object.hash(rate, pitch, language, mode, autoNext, repeat);
+      Object.hash(rate, pitch, language, mode, scope, autoNext, repeat);
 }
 
-/// **一个事件 = 一个框**（V4.8.4 起）。
+/// 可高亮的文本编辑控制器：朗读时给「当前正在读的句子」加一层背景色。
+///
+/// 为什么继承 [TextEditingController] 而不是在页面里用 RichText 覆盖：
+/// 卡片上的标题 / 概要是可编辑的 TextField，用户边听边改是这页的核心用法；
+/// 用控制器重写 [buildTextSpan]，高亮与编辑就落在同一个控件里，不会出现
+/// 「高亮层和输入层错位」或「朗读时不能改字」的问题。
+///
+/// 高亮范围只影响绘制，不触发 [TextEditingController] 的通知——否则
+/// 「朗读推进」会被误判成「用户改了文本」，把撤回历史和未保存标记搅乱。
+class OutlineListenTextController extends TextEditingController {
+  OutlineListenTextController({super.text});
+
+  TextRange? _highlightRange;
+
+  /// 当前需要高亮的字符区间（null = 不高亮）
+  TextRange? get highlightRange => _highlightRange;
+
+  /// 高亮底色（浅主色，深色文字上仍清晰）
+  Color highlightColor = const Color(0x334D6BFE);
+
+  /// 设置高亮区间（会按当前文本长度夹紧；相同区间不重复设置）。
+  ///
+  /// 刻意**不调用** notifyListeners：页面下一次由控制器统一重建时
+  /// [buildTextSpan] 会自然读到新值；若这里通知，会被当作文本改动。
+  void setHighlight(TextRange? range) {
+    final len = text.length;
+    TextRange? normalized;
+    if (range != null) {
+      final start = range.start.clamp(0, len);
+      final end = range.end.clamp(0, len);
+      if (end > start) normalized = TextRange(start: start, end: end);
+    }
+    if (normalized == _highlightRange) return;
+    _highlightRange = normalized;
+  }
+
+  @override
+  TextSpan buildTextSpan({
+    required BuildContext context,
+    TextStyle? style,
+    required bool withComposing,
+  }) {
+    final range = _highlightRange;
+    // 输入法组合中（正在拼音选字）交回默认实现，避免把 composing 下划线弄丢
+    if (range == null || withComposing && value.composing.isValid) {
+      return super.buildTextSpan(
+        context: context,
+        style: style,
+        withComposing: withComposing,
+      );
+    }
+    final base = style ?? const TextStyle();
+    final before = text.substring(0, range.start);
+    final mid = text.substring(range.start, range.end);
+    final after = text.substring(range.end);
+    return TextSpan(
+      style: base,
+      children: [
+        if (before.isNotEmpty) TextSpan(text: before),
+        TextSpan(
+          text: mid,
+          style: base.copyWith(
+            backgroundColor: highlightColor,
+            color: const Color(0xFF1A1A1A),
+          ),
+        ),
+        if (after.isNotEmpty) TextSpan(text: after),
+      ],
+    );
+  }
+}
+
 ///
 /// 与上一版的区别：上一版把事件拆成「标题一段 + 概要逐行 N 段 + 正文一段」，
 /// 列表里一行一个框、读的时候一行一停；用户要的是**一个事件一个框**——
@@ -133,11 +245,11 @@ class OutlineListenSegment {
   /// 一致）；大事件为 null
   final int? minorNumber;
 
-  /// 事件标题
-  final TextEditingController titleCtrl;
+  /// 事件标题（带朗读高亮能力）
+  final OutlineListenTextController titleCtrl;
 
-  /// 事件概要整段（多行保留换行）
-  final TextEditingController summaryCtrl;
+  /// 事件概要整段（多行保留换行，带朗读高亮能力）
+  final OutlineListenTextController summaryCtrl;
 
   /// 事件当前完整正文（只读，只在「标题 + 概要 + 正文」模式下读出来）
   String content;
@@ -155,8 +267,8 @@ class OutlineListenSegment {
     required String title,
     required String summary,
     required this.content,
-  })  : titleCtrl = TextEditingController(text: title),
-        summaryCtrl = TextEditingController(text: summary),
+  })  : titleCtrl = OutlineListenTextController(text: title),
+        summaryCtrl = OutlineListenTextController(text: summary),
         savedTitle = title,
         savedSummary = summary {
     titleCtrl.addListener(_notifyChanged);
@@ -275,4 +387,245 @@ class OutlineListenSegment {
     titleCtrl.dispose();
     summaryCtrl.dispose();
   }
+}
+
+// ─── 句子级朗读计划（高亮 + 单事件拖动进度共用） ─────────────────
+
+/// 一个可朗读片段属于哪种内容：标题 / 概要 / 正文。
+///
+/// 高亮时按它决定把区间画在哪个文本控制器上（正文没有编辑框，
+/// 由播放器上的「当前句」提示条展示）。
+enum SpeechPiecePart { title, summary, content }
+
+/// 朗读计划中的一句：属于哪部分、在这部分文本里的区间、真正发给引擎的文本。
+@immutable
+class SpeechPiece {
+  final SpeechPiecePart part;
+
+  /// 在对应字段文本内的起始偏移（title: 0；summary: 概要文本内偏移；
+  /// content: 正文内偏移）
+  final int start;
+
+  /// 结束偏移（不含）
+  final int end;
+
+  /// 实际朗读的文本（标题句带「大事件N，」前缀；正文首句前有「正文」提示词）
+  final String text;
+
+  const SpeechPiece({
+    required this.part,
+    required this.start,
+    required this.end,
+    required this.text,
+  });
+
+  @override
+  String toString() =>
+      'SpeechPiece(${part.name}, $start..$end, "$text")';
+}
+
+/// 一个事件的完整朗读计划：按「标题句 → 概要逐句 → 正文逐句」排好序。
+@immutable
+class SpeechPlan {
+  final List<SpeechPiece> pieces;
+
+  const SpeechPlan(this.pieces);
+
+  static const SpeechPlan empty = SpeechPlan(<SpeechPiece>[]);
+
+  int get length => pieces.length;
+
+  bool get isEmpty => pieces.isEmpty;
+
+  SpeechPiece? pieceAt(int index) =>
+      index >= 0 && index < pieces.length ? pieces[index] : null;
+}
+
+/// 把一段文本切成适合「逐句朗读 / 高亮 / 拖动定位」的句子区间。
+///
+/// 规则：
+/// 1. 在句末标点（。！？!?；;… 换行）处断开，紧随其后的闭引号 / 括号并入本句；
+/// 2. 超长句（默认 >80 字，一口气读太久、高亮也不好看）再按逗号 / 顿号 / 冒号
+///    切短，实在没有标点就按 80 字硬切；
+/// 3. 返回的是**原文偏移**（已去掉首尾空白），调用方可以直接拿去做 TextRange 高亮。
+List<({int start, int end})> splitSentenceRanges(
+  String text, {
+  int maxLength = 80,
+}) {
+  final firstPass = <({int start, int end})>[];
+  if (text.isEmpty) return firstPass;
+
+  bool isTerminator(int code) =>
+      code == 0x3002 || // 。
+      code == 0xFF01 || // ！
+      code == 0xFF1F || // ？
+      code == 0x21 || // !
+      code == 0x3F || // ?
+      code == 0xFF1B || // ；
+      code == 0x3B || // ;
+      code == 0x2026 || // …
+      code == 0x0A ||
+      code == 0x0D;
+
+  bool isSoftBreak(int code) =>
+      code == 0xFF0C || // ，
+      code == 0x2C || // ,
+      code == 0x3001 || // 、
+      code == 0xFF1A || // ：
+      code == 0x3A; // :
+
+  bool isSpace(int code) =>
+      code == 0x20 ||
+      code == 0x09 ||
+      code == 0x3000 ||
+      code == 0x0A ||
+      code == 0x0D;
+
+  bool isCloser(int code) =>
+      code == 0x300D || // 」
+      code == 0x300F || // 』
+      code == 0x201D || // ”
+      code == 0x2019 || // ’
+      code == 0x22 || // "
+      code == 0x27 || // '
+      code == 0xFF09 || // ）
+      code == 0x29 || // )
+      code == 0x300B || // 》
+      code == 0x3011 || // 】
+      code == 0x3009; // 〉
+
+  var start = 0;
+  var i = 0;
+
+  void emit(int endExclusive) {
+    var s = start;
+    var e = endExclusive;
+    while (s < e && isSpace(text.codeUnitAt(s))) {
+      s++;
+    }
+    while (e > s && isSpace(text.codeUnitAt(e - 1))) {
+      e--;
+    }
+    if (e > s) firstPass.add((start: s, end: e));
+    start = endExclusive;
+  }
+
+  while (i < text.length) {
+    final code = text.codeUnitAt(i);
+    if (isTerminator(code)) {
+      var j = i + 1;
+      while (j < text.length && isCloser(text.codeUnitAt(j))) {
+        j++;
+      }
+      emit(j);
+      i = j;
+      continue;
+    }
+    i++;
+  }
+  if (start < text.length) emit(text.length);
+
+  // 第二遍：超长句再切短
+  final out = <({int start, int end})>[];
+  for (final r in firstPass) {
+    final length = r.end - r.start;
+    if (length <= maxLength) {
+      out.add(r);
+      continue;
+    }
+    var s = r.start;
+    while (s < r.end) {
+      var e = s + maxLength;
+      if (e >= r.end) {
+        out.add((start: s, end: r.end));
+        break;
+      }
+      var cut = -1;
+      for (var k = e - 1; k > s; k--) {
+        if (isSoftBreak(text.codeUnitAt(k))) {
+          cut = k + 1;
+          break;
+        }
+      }
+      var end = cut > s ? cut : e;
+      // 别把代理对（emoji / 生僻扩展字）劈成两半
+      if (end > s + 1 &&
+          end < r.end &&
+          (text.codeUnitAt(end) & 0xFC00) == 0xDC00) {
+        end--;
+      }
+      out.add((start: s, end: end));
+      s = end;
+    }
+  }
+  return out;
+}
+
+/// 为一个事件生成朗读计划（读什么、按什么顺序、每句对应原文哪里）。
+///
+/// 与旧的 `OutlineListenSegment.speechText` 的关系：文案顺序保持一致
+/// （类型标签 + 标题 → 概要 → 正文），只是拆成逐句，方便高亮与拖动定位。
+SpeechPlan buildSpeechPlan(
+  OutlineListenSegment segment,
+  OutlineListenMode mode,
+) {
+  final pieces = <SpeechPiece>[];
+
+  // 标题整句：语音把「大事件3下山」连读成一个词，加逗号断开更清楚；
+  // 高亮时整段标题一起亮（标题一般很短，逐字高亮反而闪）。
+  if (segment.title.isNotEmpty) {
+    pieces.add(
+      SpeechPiece(
+        part: SpeechPiecePart.title,
+        start: 0,
+        end: segment.titleCtrl.text.length,
+        text: '${segment.typeLabel}，${segment.title}',
+      ),
+    );
+  }
+
+  // 概要逐句
+  if (mode.includesSummary) {
+    final source = segment.summaryCtrl.text;
+    for (final r in splitSentenceRanges(source)) {
+      final sentence = source.substring(r.start, r.end).trim();
+      if (sentence.isEmpty) continue;
+      pieces.add(
+        SpeechPiece(
+          part: SpeechPiecePart.summary,
+          start: r.start,
+          end: r.end,
+          text: sentence,
+        ),
+      );
+    }
+  }
+
+  // 正文逐句（只有「标题 + 概要 + 正文」模式才读）：先读一句「正文」做分界，
+  // 让听觉上知道标题概要已经结束。
+  if (mode.includesContent && segment.hasContent) {
+    pieces.add(
+      const SpeechPiece(
+        part: SpeechPiecePart.content,
+        start: 0,
+        end: 0,
+        text: '正文',
+      ),
+    );
+    final content = segment.content;
+    for (final r in splitSentenceRanges(content)) {
+      final sentence = content.substring(r.start, r.end).trim();
+      if (sentence.isEmpty) continue;
+      pieces.add(
+        SpeechPiece(
+          part: SpeechPiecePart.content,
+          start: r.start,
+          end: r.end,
+          text: sentence,
+        ),
+      );
+    }
+  }
+
+  return SpeechPlan(pieces);
 }

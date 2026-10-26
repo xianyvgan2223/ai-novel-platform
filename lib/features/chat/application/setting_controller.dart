@@ -36,8 +36,20 @@ class SettingController extends ChangeNotifier {
   String get searchEngine => _setting.searchEngine;
   bool get searchNeedContent => _setting.searchNeedContent;
 
+  /// 正在进行的加载（同一时刻只查一次库）
+  Future<void>? _loading;
+
   /// 从数据库加载配置
-  Future<void> loadSettings() async {
+  ///
+  /// 幂等：App 启动时已被预热（见 ChatPage.initState），设置页打开时再调用
+  /// 只是立即返回。否则会在页面推入动画中途 notify 一次，让整页从「转圈」
+  /// 重建成完整表单——那次切换正是打开设置页掉帧的主因。
+  Future<void> loadSettings() {
+    if (_loaded) return Future<void>.value();
+    return _loading ??= _load();
+  }
+
+  Future<void> _load() async {
     try {
       _setting = await UserSettingService.getSettings();
     } catch (_) {

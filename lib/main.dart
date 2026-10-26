@@ -12,6 +12,9 @@ import 'features/chat/presentation/chat_page.dart';
 import 'features/chat/presentation/widgets/chat_floating_ball.dart';
 import 'features/novel_writing/outline_generation/background/outline_background_notification.dart';
 import 'features/novel_writing/outline_generation/view/page/outline_generation_page.dart';
+import 'features/novel_writing/outline_listening/background/outline_listen_session.dart';
+import 'features/novel_writing/outline_listening/background/outline_listening_notification.dart';
+import 'features/novel_writing/outline_listening/view/page/outline_listen_page.dart';
 import 'features/sync/application/sync_poller.dart';
 
 void main() async {
@@ -80,10 +83,19 @@ class _MyAppState extends State<MyApp> {
   /// 防止冷启动 pending 标记 + 点击事件同时到达时 push 出两个生成页。
   bool _openingOutlinePage = false;
 
+  /// 「听大纲」后台朗读通知的点击 / 操作按钮 / 媒体 seekbar 拖动订阅。
+  StreamSubscription<void>? _listenTapSubscription;
+  StreamSubscription<String>? _listenActionSubscription;
+  StreamSubscription<double>? _listenSeekSubscription;
+
+  /// 防止重复 push 朗读页（点通知与冷启动 pending 可能同时到达）。
+  bool _openingListenPage = false;
+
   @override
   void initState() {
     super.initState();
     _installOutlineNotificationHandler();
+    _installListenNotificationHandler();
   }
 
   /// 通知栏「大纲生成进度」点击 → 回到「一键生成大纲」页面查看当前生成详情。
@@ -131,9 +143,68 @@ class _MyAppState extends State<MyApp> {
     });
   }
 
+  /// 通知栏「听大纲」的点击与操作按钮。
+  ///
+  /// 与大纲生成的差异：朗读通知上带「上一个 / 暂停继续 / 停止」三个操作，
+  /// 这些动作不需要打开页面，直接转给后台会话里的 controller；点击通知主体
+  /// 才导航回朗读页（页面会挂回同一个 controller，当前句/高亮/进度都还在）。
+  Future<void> _installListenNotificationHandler() async {
+    final notification = OutlineListeningNotification.instance;
+    _listenTapSubscription = notification.onTap.listen(
+      (_) => _openOutlineListenPage(),
+    );
+    _listenActionSubscription = notification.onAction.listen(
+      (action) => OutlineListenSession.instance.handleNotificationAction(action),
+    );
+    // 媒体样式通知的系统 seekbar 被拖动后：按当前事件内相对进度跳到对应句子。
+    // 这个动作不需要打开页面，直接转给后台会话里的 controller，手机在兜里也能调。
+    _listenSeekSubscription = notification.onSeek.listen(
+      (fraction) => OutlineListenSession.instance.seekToFraction(fraction),
+    );
+    final launchedByTap = await notification.consumeLaunchTap();
+    if (launchedByTap) _openOutlineListenPage();
+  }
+
+  /// 点「听大纲」通知 → 回到正在朗读的那条大纲（会话里有记录才可能导航）。
+  void _openOutlineListenPage() {
+    if (_openingListenPage) return;
+    // 朗读页已经在前台：只把 App 拉到前面，不重复 push
+    if (OutlineListenPage.openInstanceCount > 0) return;
+    final record = OutlineListenSession.instance.activeRecord;
+    if (record == null) return; // 没有会话（例如进程被杀后）：通知不该存在
+    _openingListenPage = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      void push() {
+        if (!mounted) {
+          _openingListenPage = false;
+          return;
+        }
+        final navigator = _navigatorKey.currentState;
+        if (navigator == null) {
+          WidgetsBinding.instance.addPostFrameCallback((_) => push());
+          return;
+        }
+        navigator.push(
+          MaterialPageRoute(
+            builder: (_) => OutlineListenPage(
+              outline: record,
+              fromNotification: true,
+            ),
+          ),
+        );
+        _openingListenPage = false;
+      }
+
+      push();
+    });
+  }
+
   @override
   void dispose() {
     _outlineTapSubscription?.cancel();
+    _listenTapSubscription?.cancel();
+    _listenActionSubscription?.cancel();
+    _listenSeekSubscription?.cancel();
     super.dispose();
   }
 

@@ -64,6 +64,9 @@ class UnsupportedTtsEngine implements TtsEngine {
   Future<void> stop() async {}
 
   @override
+  Future<void> setBackgroundPlayback(bool enabled) async {}
+
+  @override
   void setCallbacks({
     required VoidCallback onDone,
     void Function(String message)? onError,
@@ -272,6 +275,17 @@ class _AndroidTtsEngine implements TtsEngine {
       await _methods.invokeMethod<bool>('stop');
     } catch (_) {
       // 停止失败不该打断界面（本来就只是「别再读了」）
+    }
+  }
+
+  @override
+  Future<void> setBackgroundPlayback(bool enabled) async {
+    try {
+      await _methods.invokeMethod<bool>('setBackgroundPlayback', {
+        'enabled': enabled,
+      });
+    } catch (_) {
+      // 旧安装包没有这个方法：退化为「退后台停止朗读」，不影响朗读本身
     }
   }
 
