@@ -11,6 +11,9 @@ data/*
 # npm run seed 生成的演示数据（可随时重新生成）
 data-demo/
 
+# Spring Boot 版发布的 APK（体积大，属于运行时数据，不提交）
+server/data/app-update/
+
 # 本机配置
 .env
 .env.local

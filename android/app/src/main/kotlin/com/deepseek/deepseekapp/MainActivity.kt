@@ -72,6 +72,9 @@ class MainActivity : FlutterActivity() {
     /** 内置离线朗读（sherpa-onnx）：系统没有 TTS 引擎时兜底，见 LocalTtsChannel */
     private var localTts: LocalTtsChannel? = null
 
+    /** 应用内更新：读取 versionCode、调起 APK 安装器，见 AppUpdateChannel */
+    private var appUpdate: AppUpdateChannel? = null
+
     /** 「一键生成大纲」的后台进度通道（前台服务 + 通知点击回传），见 OutlineBackgroundChannel */
     private var outlineBackground: OutlineBackgroundChannel? = null
 
@@ -94,6 +97,10 @@ class MainActivity : FlutterActivity() {
         // Dart 侧一套回调就能同时接住系统引擎与内置引擎的「读完了」
         localTts = LocalTtsChannel(applicationContext)
         localTts?.register(flutterEngine.dartExecutor.binaryMessenger)
+
+        // 应用内更新通道：读 versionCode / 检查安装权限 / 调起安装器
+        appUpdate = AppUpdateChannel(applicationContext)
+        appUpdate?.register(flutterEngine.dartExecutor.binaryMessenger)
 
         // 大纲生成的后台通道：生成离开页面后继续跑、通知栏显示进度、点通知回到大纲页。
         // 和 TTS 通道一样挂在引擎上：引擎销毁时通道一起失效（Dart 侧也不可能再有生成回调）。

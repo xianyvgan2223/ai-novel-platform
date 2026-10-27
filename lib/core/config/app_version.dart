@@ -7,4 +7,4 @@
 /// 由 `test/app_version_test.dart` 保证两者一致——只改一处时单测会先红。
 ///
 /// 发版时改 `pubspec.yaml` 的 `version:`，同步改这里。
-const String kAppVersion = '4.11.7';
+const String kAppVersion = '5.1.1';

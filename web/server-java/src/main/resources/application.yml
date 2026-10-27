@@ -1,0 +1,31 @@
+server:
+  port: ${PORT:3210}
+  address: ${HOST:0.0.0.0}
+  tomcat:
+    # 导入 .db 时请求体可能很大，交给业务层自己限制体积
+    max-swallow-size: -1
+
+spring:
+  application:
+    name: deepseekapp-web-sync
+  mvc:
+    throw-exception-if-no-handler-found: false
+
+logging:
+  charset:
+    # 与 System.out 保持一致：Windows 控制台/IDE 都能正常显示中文
+    console: ${stdout.encoding:UTF-8}
+
+app:
+  # 默认复用 Node 版的数据目录（web/server/data），升级后数据无缝可见
+  data-dir: ${DATA_DIR:../server/data}
+  # 前端构建产物（web/app/dist），存在时由本服务同源托管
+  web-dist: ${WEB_DIST:../app/dist}
+  # APK 发布目录；留空 = <data-dir>/app-update
+  app-update-dir: ${APP_UPDATE_DIR:}
+  api-token: ${API_TOKEN:}
+  max-upload-mb: ${MAX_UPLOAD_MB:512}
+  default-page-size: ${PAGE_SIZE:50}
+  max-page-size: ${MAX_PAGE_SIZE:500}
+  web-device-id: ${WEB_DEVICE_ID:web-console}
+  web-id-base: ${WEB_ID_BASE:1000000000}

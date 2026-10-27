@@ -10,7 +10,7 @@
 //   改成两行堆叠，保证 frequency_penalty 这类参数名不被省略号截断；
 // - 除 API Key 这一处「焦点输入」外不再画灰底输入框：文本参数是一行无框、
 //   右对齐的输入，聚焦时只出现一条 1px 主色下划线；
-// - 数据管理是三条动作行（导出 / 导入 / 数据同步），危险操作只用红色
+// - 数据管理是四条动作行（导出 / 导入 / 数据同步 / 检查更新），危险操作只用红色
 //   图标 chip 提示，不用整块浅红/浅蓝的马卡龙按钮；
 // - 条件行显隐时整张卡片用 AnimatedSize 做 180ms 平滑过渡。
 //
@@ -25,6 +25,7 @@ import '../../../core/config/deepseek_models.dart';
 import '../../../core/db/data_manager.dart';
 import '../../../core/widgets/settings_kit.dart';
 import '../../sync/presentation/sync_page.dart';
+import '../../update/presentation/update_page.dart';
 import '../application/chat_controller.dart'; // chatProvider
 import '../application/setting_controller.dart';
 
@@ -154,6 +155,12 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     Navigator.of(
       context,
     ).push(MaterialPageRoute<void>(builder: (_) => const SyncPage()));
+  }
+
+  void _openUpdate() {
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => const UpdatePage()));
   }
 
   @override
@@ -474,7 +481,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           const SettingsSectionHeader(
             icon: Icons.storage_rounded,
             title: '数据管理',
-            subtitle: '本地数据库备份与多端同步',
+            subtitle: '本地数据库备份、多端同步与 App 更新',
           ),
           SettingsCard(
             children: [
@@ -502,6 +509,14 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 title: '数据同步',
                 subtitle: '与电脑 Web 服务双向同步',
                 onTap: _openSync,
+              ),
+              SettingsActionRow(
+                icon: Icons.system_update_rounded,
+                iconColor: kSettingsPrimary,
+                softColor: kSettingsPrimarySoft,
+                title: '检查更新',
+                subtitle: '从电脑同步服务下载并安装新版本',
+                onTap: _openUpdate,
               ),
             ],
           ),

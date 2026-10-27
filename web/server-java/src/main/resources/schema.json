@@ -1,0 +1,1426 @@
+{
+  "appDbVersion": 38,
+  "novelDbVersion": 1,
+  "webIdBase": 1000000000,
+  "localOnlyTables": [
+    "android_metadata",
+    "sqlite_sequence",
+    "sync_state",
+    "sync_kv"
+  ],
+  "databases": {
+    "deepseek": {
+      "key": "deepseek",
+      "file": "deepseek.db",
+      "appVersion": 38,
+      "label": "主库 · 对话 / 小说 / 角色扮演 / 跑团",
+      "tables": {
+        "user_settings": {
+          "label": "全局设置",
+          "module": "settings",
+          "singleton": true,
+          "sensitive": [
+            "apiKey",
+            "baidu_api_key"
+          ],
+          "columns": [
+            {
+              "name": "id",
+              "type": "INTEGER",
+              "pk": true
+            },
+            {
+              "name": "model",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "'deepseek-flash'"
+            },
+            {
+              "name": "apiKey",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "temperature",
+              "type": "REAL",
+              "notNull": true,
+              "default": "1.0"
+            },
+            {
+              "name": "top_p",
+              "type": "REAL",
+              "notNull": true,
+              "default": "1.0"
+            },
+            {
+              "name": "max_tokens",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "4096"
+            },
+            {
+              "name": "stop",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "stream",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "1"
+            },
+            {
+              "name": "stream_options",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "frequency_penalty",
+              "type": "REAL",
+              "notNull": true,
+              "default": "0.0"
+            },
+            {
+              "name": "presence_penalty",
+              "type": "REAL",
+              "notNull": true,
+              "default": "0.0"
+            },
+            {
+              "name": "response_format",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "'text'"
+            },
+            {
+              "name": "thinking",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "0"
+            },
+            {
+              "name": "logprobs",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "0"
+            },
+            {
+              "name": "top_logprobs",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "0"
+            },
+            {
+              "name": "logit_bias",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "n",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "1"
+            },
+            {
+              "name": "reasoning_content",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "context_rounds",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "10"
+            },
+            {
+              "name": "system_prompt",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "web_search",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "0"
+            },
+            {
+              "name": "baidu_api_key",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "search_count",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "5"
+            },
+            {
+              "name": "search_freshness",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "search_engine",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "'off'"
+            },
+            {
+              "name": "search_need_content",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "1"
+            },
+            {
+              "name": "history_query",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "0"
+            }
+          ],
+          "searchColumns": [
+            "model",
+            "system_prompt"
+          ]
+        },
+        "chat_sessions": {
+          "label": "对话会话",
+          "module": "chat",
+          "columns": [
+            {
+              "name": "id",
+              "type": "INTEGER",
+              "pk": true,
+              "autoincrement": true
+            },
+            {
+              "name": "title",
+              "type": "TEXT",
+              "notNull": true
+            },
+            {
+              "name": "create_time",
+              "type": "TEXT",
+              "notNull": true
+            },
+            {
+              "name": "last_message",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "system_prompt",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "summary",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            }
+          ],
+          "searchColumns": [
+            "title",
+            "last_message",
+            "summary"
+          ],
+          "orderBy": "create_time DESC"
+        },
+        "chat_messages": {
+          "label": "对话消息",
+          "module": "chat",
+          "columns": [
+            {
+              "name": "id",
+              "type": "INTEGER",
+              "pk": true,
+              "autoincrement": true
+            },
+            {
+              "name": "session_id",
+              "type": "INTEGER",
+              "notNull": true,
+              "ref": "chat_sessions.id",
+              "onDelete": "CASCADE"
+            },
+            {
+              "name": "role",
+              "type": "TEXT",
+              "notNull": true
+            },
+            {
+              "name": "content",
+              "type": "TEXT",
+              "notNull": true
+            },
+            {
+              "name": "thinking_text",
+              "type": "TEXT"
+            },
+            {
+              "name": "search_results",
+              "type": "TEXT"
+            },
+            {
+              "name": "timestamp",
+              "type": "TEXT",
+              "notNull": true
+            }
+          ],
+          "searchColumns": [
+            "content",
+            "thinking_text"
+          ],
+          "orderBy": "id ASC"
+        },
+        "battle_scenes": {
+          "label": "战斗场景",
+          "module": "novel_writing",
+          "columns": [
+            {
+              "name": "id",
+              "type": "INTEGER",
+              "pk": true,
+              "autoincrement": true
+            },
+            {
+              "name": "user_input",
+              "type": "TEXT",
+              "notNull": true
+            },
+            {
+              "name": "ai_result",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "character_skills",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "battle_scene_desc",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "battle_result",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "status",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "'completed'"
+            },
+            {
+              "name": "created_at",
+              "type": "TEXT",
+              "notNull": true
+            }
+          ],
+          "searchColumns": [
+            "user_input",
+            "ai_result",
+            "battle_result"
+          ],
+          "orderBy": "created_at DESC"
+        },
+        "battle_settings": {
+          "label": "战斗设置",
+          "module": "novel_writing",
+          "singleton": true,
+          "columns": [
+            {
+              "name": "id",
+              "type": "INTEGER",
+              "pk": true
+            },
+            {
+              "name": "temperature",
+              "type": "REAL",
+              "notNull": true,
+              "default": "0.8"
+            },
+            {
+              "name": "max_tokens",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "4096"
+            },
+            {
+              "name": "model",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "'deepseek-flash'"
+            },
+            {
+              "name": "system_prompt",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            }
+          ],
+          "searchColumns": [
+            "model",
+            "system_prompt"
+          ]
+        },
+        "outline_settings": {
+          "label": "大纲生成设置",
+          "module": "novel_writing",
+          "singleton": true,
+          "columns": [
+            {
+              "name": "id",
+              "type": "INTEGER",
+              "pk": true
+            },
+            {
+              "name": "temperature",
+              "type": "REAL",
+              "notNull": true,
+              "default": "0.8"
+            },
+            {
+              "name": "max_tokens",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "4096"
+            },
+            {
+              "name": "model",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "'deepseek-flash'"
+            },
+            {
+              "name": "system_prompt",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "enable_thinking",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "1"
+            },
+            {
+              "name": "pause_after_skeleton",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "0"
+            },
+            {
+              "name": "pause_after_events",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "0"
+            },
+            {
+              "name": "pause_after_minor",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "0",
+              "appMissingOnCreate": true
+            }
+          ],
+          "searchColumns": [
+            "model",
+            "system_prompt"
+          ]
+        },
+        "chapter_settings": {
+          "label": "章节写作设置",
+          "module": "novel_writing",
+          "singleton": true,
+          "columns": [
+            {
+              "name": "id",
+              "type": "INTEGER",
+              "pk": true
+            },
+            {
+              "name": "temperature",
+              "type": "REAL",
+              "notNull": true,
+              "default": "0.8"
+            },
+            {
+              "name": "max_tokens",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "4096"
+            },
+            {
+              "name": "model",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "'deepseek-flash'"
+            },
+            {
+              "name": "chapter_system_prompt",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "enable_thinking",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "1"
+            },
+            {
+              "name": "enable_story_state",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "1"
+            },
+            {
+              "name": "chapter_min_words",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "2000"
+            },
+            {
+              "name": "chapter_max_words",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "3000"
+            }
+          ],
+          "searchColumns": [
+            "model",
+            "chapter_system_prompt"
+          ]
+        },
+        "outline_records": {
+          "label": "大纲 / 作品",
+          "module": "novel_writing",
+          "columns": [
+            {
+              "name": "id",
+              "type": "INTEGER",
+              "pk": true,
+              "autoincrement": true
+            },
+            {
+              "name": "title",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "genre",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "theme",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "protagonist",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "worldview",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "content",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "skeleton",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "foreshadows",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "story_state",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "characters",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "created_at",
+              "type": "TEXT",
+              "notNull": true
+            }
+          ],
+          "searchColumns": [
+            "title",
+            "genre",
+            "theme",
+            "protagonist",
+            "worldview"
+          ],
+          "orderBy": "created_at DESC"
+        },
+        "outline_chapters": {
+          "label": "章节",
+          "module": "novel_writing",
+          "columns": [
+            {
+              "name": "id",
+              "type": "INTEGER",
+              "pk": true,
+              "autoincrement": true
+            },
+            {
+              "name": "outline_id",
+              "type": "INTEGER",
+              "notNull": true,
+              "ref": "outline_records.id",
+              "onDelete": "CASCADE"
+            },
+            {
+              "name": "event_index",
+              "type": "INTEGER",
+              "notNull": true
+            },
+            {
+              "name": "event_type",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "'major'"
+            },
+            {
+              "name": "event_title",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "event_summary",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "content",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "status",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "'pending'"
+            },
+            {
+              "name": "ai_summary",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "story_state",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "created_at",
+              "type": "TEXT",
+              "notNull": true
+            },
+            {
+              "name": "updated_at",
+              "type": "TEXT",
+              "notNull": true
+            }
+          ],
+          "searchColumns": [
+            "event_title",
+            "event_summary",
+            "content"
+          ],
+          "orderBy": "outline_id ASC, event_index ASC"
+        },
+        "character_chat_sessions": {
+          "label": "角色扮演会话",
+          "module": "character_chat",
+          "columns": [
+            {
+              "name": "id",
+              "type": "INTEGER",
+              "pk": true,
+              "autoincrement": true
+            },
+            {
+              "name": "character_name",
+              "type": "TEXT",
+              "notNull": true
+            },
+            {
+              "name": "description",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "personality",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "scenario",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "system_prompt",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "summary",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "created_at",
+              "type": "TEXT",
+              "notNull": true
+            },
+            {
+              "name": "updated_at",
+              "type": "TEXT",
+              "notNull": true
+            }
+          ],
+          "searchColumns": [
+            "character_name",
+            "description",
+            "personality",
+            "scenario"
+          ],
+          "orderBy": "updated_at DESC"
+        },
+        "character_chat_messages": {
+          "label": "角色扮演消息",
+          "module": "character_chat",
+          "columns": [
+            {
+              "name": "id",
+              "type": "INTEGER",
+              "pk": true,
+              "autoincrement": true
+            },
+            {
+              "name": "session_id",
+              "type": "INTEGER",
+              "notNull": true,
+              "ref": "character_chat_sessions.id",
+              "onDelete": "CASCADE"
+            },
+            {
+              "name": "is_user",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "1"
+            },
+            {
+              "name": "content",
+              "type": "TEXT",
+              "notNull": true
+            },
+            {
+              "name": "timestamp",
+              "type": "TEXT",
+              "notNull": true
+            }
+          ],
+          "searchColumns": [
+            "content"
+          ],
+          "orderBy": "id ASC"
+        },
+        "character_tags": {
+          "label": "角色标签",
+          "module": "character_chat",
+          "columns": [
+            {
+              "name": "id",
+              "type": "INTEGER",
+              "pk": true,
+              "autoincrement": true
+            },
+            {
+              "name": "character_name",
+              "type": "TEXT",
+              "notNull": true,
+              "unique": true
+            },
+            {
+              "name": "tags",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "'[]'"
+            }
+          ],
+          "searchColumns": [
+            "character_name",
+            "tags"
+          ]
+        },
+        "world_info_entries": {
+          "label": "世界书条目",
+          "module": "character_chat",
+          "columns": [
+            {
+              "name": "id",
+              "type": "INTEGER",
+              "pk": true,
+              "autoincrement": true
+            },
+            {
+              "name": "session_id",
+              "type": "INTEGER",
+              "notNull": true,
+              "ref": "character_chat_sessions.id",
+              "onDelete": "CASCADE"
+            },
+            {
+              "name": "title",
+              "type": "TEXT",
+              "notNull": true
+            },
+            {
+              "name": "content",
+              "type": "TEXT",
+              "notNull": true
+            },
+            {
+              "name": "keywords",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "'[]'"
+            },
+            {
+              "name": "enabled",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "1"
+            },
+            {
+              "name": "created_at",
+              "type": "TEXT",
+              "notNull": true
+            }
+          ],
+          "searchColumns": [
+            "title",
+            "content",
+            "keywords"
+          ]
+        },
+        "character_memories": {
+          "label": "角色记忆",
+          "module": "character_chat",
+          "columns": [
+            {
+              "name": "id",
+              "type": "INTEGER",
+              "pk": true,
+              "autoincrement": true
+            },
+            {
+              "name": "session_id",
+              "type": "INTEGER",
+              "notNull": true,
+              "ref": "character_chat_sessions.id",
+              "onDelete": "CASCADE"
+            },
+            {
+              "name": "content",
+              "type": "TEXT",
+              "notNull": true
+            },
+            {
+              "name": "category",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "'general'"
+            },
+            {
+              "name": "importance",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "1"
+            },
+            {
+              "name": "created_at",
+              "type": "TEXT",
+              "notNull": true
+            }
+          ],
+          "searchColumns": [
+            "content",
+            "category"
+          ]
+        },
+        "trpg_campaigns": {
+          "label": "跑团战役",
+          "module": "trpg",
+          "columns": [
+            {
+              "name": "id",
+              "type": "INTEGER",
+              "pk": true,
+              "autoincrement": true
+            },
+            {
+              "name": "name",
+              "type": "TEXT",
+              "notNull": true
+            },
+            {
+              "name": "dm_prompt",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "scene",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "flags",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "'{}'"
+            },
+            {
+              "name": "summary",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "created_at",
+              "type": "TEXT",
+              "notNull": true
+            },
+            {
+              "name": "updated_at",
+              "type": "TEXT",
+              "notNull": true
+            }
+          ],
+          "searchColumns": [
+            "name",
+            "scene",
+            "summary"
+          ],
+          "orderBy": "updated_at DESC"
+        },
+        "trpg_characters": {
+          "label": "跑团角色卡",
+          "module": "trpg",
+          "columns": [
+            {
+              "name": "id",
+              "type": "INTEGER",
+              "pk": true,
+              "autoincrement": true
+            },
+            {
+              "name": "campaign_id",
+              "type": "INTEGER",
+              "notNull": true,
+              "ref": "trpg_campaigns.id",
+              "onDelete": "CASCADE"
+            },
+            {
+              "name": "name",
+              "type": "TEXT",
+              "notNull": true
+            },
+            {
+              "name": "race",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "char_class",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "level",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "1"
+            },
+            {
+              "name": "str",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "10"
+            },
+            {
+              "name": "dex",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "10"
+            },
+            {
+              "name": "con",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "10"
+            },
+            {
+              "name": "intl",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "10"
+            },
+            {
+              "name": "wis",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "10"
+            },
+            {
+              "name": "cha",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "10"
+            },
+            {
+              "name": "max_hp",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "10"
+            },
+            {
+              "name": "current_hp",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "10"
+            },
+            {
+              "name": "armor_bonus",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "0"
+            },
+            {
+              "name": "skilled_skills",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "'[]'"
+            },
+            {
+              "name": "inventory",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "'[]'"
+            },
+            {
+              "name": "background",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "is_player",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "0"
+            }
+          ],
+          "searchColumns": [
+            "name",
+            "race",
+            "char_class",
+            "background"
+          ]
+        },
+        "trpg_messages": {
+          "label": "跑团日志",
+          "module": "trpg",
+          "columns": [
+            {
+              "name": "id",
+              "type": "INTEGER",
+              "pk": true,
+              "autoincrement": true
+            },
+            {
+              "name": "campaign_id",
+              "type": "INTEGER",
+              "notNull": true,
+              "ref": "trpg_campaigns.id",
+              "onDelete": "CASCADE"
+            },
+            {
+              "name": "is_user",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "1"
+            },
+            {
+              "name": "content",
+              "type": "TEXT",
+              "notNull": true
+            },
+            {
+              "name": "meta",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "'{}'"
+            },
+            {
+              "name": "timestamp",
+              "type": "TEXT",
+              "notNull": true
+            }
+          ],
+          "searchColumns": [
+            "content"
+          ],
+          "orderBy": "id ASC"
+        }
+      }
+    },
+    "novel": {
+      "key": "novel",
+      "file": "novel.db",
+      "appVersion": 1,
+      "label": "小说游戏库 · 副本 / 角色 / 技能",
+      "tables": {
+        "copy_table": {
+          "label": "副本",
+          "module": "novel_game",
+          "columns": [
+            {
+              "name": "id",
+              "type": "INTEGER",
+              "pk": true,
+              "autoincrement": true
+            },
+            {
+              "name": "copy_name",
+              "type": "TEXT",
+              "notNull": true
+            },
+            {
+              "name": "model_config",
+              "type": "TEXT"
+            },
+            {
+              "name": "create_time",
+              "type": "INTEGER",
+              "notNull": true
+            },
+            {
+              "name": "is_running",
+              "type": "INTEGER",
+              "default": "0"
+            },
+            {
+              "name": "unread_record",
+              "type": "INTEGER",
+              "default": "0"
+            }
+          ],
+          "searchColumns": [
+            "copy_name"
+          ],
+          "orderBy": "create_time DESC",
+          "timeColumns": [
+            "create_time"
+          ]
+        },
+        "character_table": {
+          "label": "角色",
+          "module": "novel_game",
+          "columns": [
+            {
+              "name": "id",
+              "type": "INTEGER",
+              "pk": true,
+              "autoincrement": true
+            },
+            {
+              "name": "char_name",
+              "type": "TEXT",
+              "notNull": true
+            },
+            {
+              "name": "base_desc",
+              "type": "TEXT"
+            },
+            {
+              "name": "create_time",
+              "type": "INTEGER",
+              "notNull": true
+            }
+          ],
+          "searchColumns": [
+            "char_name",
+            "base_desc"
+          ],
+          "orderBy": "create_time DESC",
+          "timeColumns": [
+            "create_time"
+          ]
+        },
+        "skill_table": {
+          "label": "技能",
+          "module": "novel_game",
+          "columns": [
+            {
+              "name": "id",
+              "type": "INTEGER",
+              "pk": true,
+              "autoincrement": true
+            },
+            {
+              "name": "char_id",
+              "type": "INTEGER",
+              "notNull": true,
+              "ref": "character_table.id",
+              "onDelete": "CASCADE"
+            },
+            {
+              "name": "skill_name",
+              "type": "TEXT",
+              "notNull": true
+            },
+            {
+              "name": "skill_desc",
+              "type": "TEXT"
+            },
+            {
+              "name": "source_copy_id",
+              "type": "INTEGER",
+              "ref": "copy_table.id",
+              "onDelete": "SET NULL"
+            }
+          ],
+          "searchColumns": [
+            "skill_name",
+            "skill_desc"
+          ],
+          "indexes": [
+            "CREATE INDEX IF NOT EXISTS idx_skill_char_id ON skill_table(char_id)"
+          ]
+        },
+        "equipment_table": {
+          "label": "装备",
+          "module": "novel_game",
+          "columns": [
+            {
+              "name": "id",
+              "type": "INTEGER",
+              "pk": true,
+              "autoincrement": true
+            },
+            {
+              "name": "char_id",
+              "type": "INTEGER",
+              "notNull": true,
+              "ref": "character_table.id",
+              "onDelete": "CASCADE"
+            },
+            {
+              "name": "equip_name",
+              "type": "TEXT",
+              "notNull": true
+            },
+            {
+              "name": "equip_attr",
+              "type": "TEXT"
+            },
+            {
+              "name": "source_copy_id",
+              "type": "INTEGER",
+              "ref": "copy_table.id",
+              "onDelete": "SET NULL"
+            }
+          ],
+          "searchColumns": [
+            "equip_name",
+            "equip_attr"
+          ],
+          "indexes": [
+            "CREATE INDEX IF NOT EXISTS idx_equip_char_id ON equipment_table(char_id)"
+          ]
+        },
+        "character_intersection_table": {
+          "label": "角色交集",
+          "module": "novel_game",
+          "columns": [
+            {
+              "name": "id",
+              "type": "INTEGER",
+              "pk": true,
+              "autoincrement": true
+            },
+            {
+              "name": "char_a_id",
+              "type": "INTEGER",
+              "notNull": true,
+              "ref": "character_table.id",
+              "onDelete": "CASCADE"
+            },
+            {
+              "name": "char_b_id",
+              "type": "INTEGER",
+              "notNull": true,
+              "ref": "character_table.id",
+              "onDelete": "CASCADE"
+            },
+            {
+              "name": "intersection_desc",
+              "type": "TEXT"
+            },
+            {
+              "name": "update_time",
+              "type": "INTEGER",
+              "notNull": true
+            }
+          ],
+          "searchColumns": [
+            "intersection_desc"
+          ],
+          "timeColumns": [
+            "update_time"
+          ],
+          "indexes": [
+            "CREATE INDEX IF NOT EXISTS idx_intersection_char_a ON character_intersection_table(char_a_id)",
+            "CREATE INDEX IF NOT EXISTS idx_intersection_char_b ON character_intersection_table(char_b_id)"
+          ]
+        },
+        "copy_record_table": {
+          "label": "副本记录",
+          "module": "novel_game",
+          "columns": [
+            {
+              "name": "id",
+              "type": "INTEGER",
+              "pk": true,
+              "autoincrement": true
+            },
+            {
+              "name": "copy_id",
+              "type": "INTEGER",
+              "notNull": true,
+              "ref": "copy_table.id",
+              "onDelete": "CASCADE"
+            },
+            {
+              "name": "total_story",
+              "type": "TEXT"
+            },
+            {
+              "name": "create_time",
+              "type": "INTEGER",
+              "notNull": true
+            }
+          ],
+          "searchColumns": [
+            "total_story"
+          ],
+          "orderBy": "create_time DESC",
+          "timeColumns": [
+            "create_time"
+          ],
+          "indexes": [
+            "CREATE INDEX IF NOT EXISTS idx_copy_record_copy_id ON copy_record_table(copy_id)"
+          ]
+        },
+        "char_copy_story_table": {
+          "label": "角色副本剧情",
+          "module": "novel_game",
+          "columns": [
+            {
+              "name": "id",
+              "type": "INTEGER",
+              "pk": true,
+              "autoincrement": true
+            },
+            {
+              "name": "copy_id",
+              "type": "INTEGER",
+              "notNull": true,
+              "ref": "copy_table.id",
+              "onDelete": "CASCADE"
+            },
+            {
+              "name": "char_id",
+              "type": "INTEGER",
+              "notNull": true,
+              "ref": "character_table.id",
+              "onDelete": "CASCADE"
+            },
+            {
+              "name": "single_story",
+              "type": "TEXT"
+            }
+          ],
+          "searchColumns": [
+            "single_story"
+          ],
+          "indexes": [
+            "CREATE INDEX IF NOT EXISTS idx_char_story_copy_id ON char_copy_story_table(copy_id)",
+            "CREATE INDEX IF NOT EXISTS idx_char_story_char_id ON char_copy_story_table(char_id)"
+          ]
+        }
+      }
+    }
+  }
+}

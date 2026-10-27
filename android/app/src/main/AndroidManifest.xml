@@ -17,10 +17,13 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <!-- 生成期间持 PARTIAL_WAKE_LOCK：锁屏后 CPU 不休眠，流式请求不会被挂起 -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- 应用内更新：允许本 App 调起 APK 安装器（用户仍需在系统里允许「安装未知应用」） -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <application
         android:label="deepseekapp"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:usesCleartextTraffic="true">
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -79,6 +82,17 @@
                 <action android:name="com.deepseek.deepseekapp.outline.LISTEN_ACTION" />
             </intent-filter>
         </receiver>
+        <!-- 应用内更新：把下载到 files/update/ 下的 APK 通过 content:// 交给系统安装器。
+             路径映射见 res/xml/file_paths.xml（external-files-path path="update/"）。 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
@@ -91,6 +105,10 @@
 
          In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
     <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:mimeType="application/vnd.android.package-archive"/>
+        </intent>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
