@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:deepseekapp/core/theme/app_palette.dart';
 import '../../../shared/dialog_utils.dart';
 import '../../../shared/domain/outline_chapter.dart';
 import '../../../shared/domain/outline_record.dart';
@@ -92,6 +93,7 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
       return;
     }
     if (!mounted) return;
+    final p = context.palette;
     final structure = _controller.hasStructureChanges;
     final action = await showDialog<String>(
       context: context,
@@ -105,9 +107,9 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
         actions: [
           TextButton(
             onPressed: () => closeDialogSafely(ctx, result: 'discard'),
-            child: const Text(
+            child: Text(
               '不保存',
-              style: TextStyle(color: Color(0xFF999999)),
+              style: TextStyle(color: p.textTertiary),
             ),
           ),
           TextButton(
@@ -210,6 +212,7 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
     required bool above,
     required String title,
   }) {
+    final p = context.palette;
     return InkWell(
       onTap: () => closeDialogSafely(ctx, result: above),
       child: Padding(
@@ -219,7 +222,7 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
             Icon(
               above ? Icons.vertical_align_top : Icons.vertical_align_bottom,
               size: 18,
-              color: const Color(0xFF4D6BFE),
+              color: p.accent,
             ),
             const SizedBox(width: 10),
             Expanded(
@@ -228,18 +231,18 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
                 children: [
                   Text(
                     title,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
-                      color: Color(0xFF333333),
+                      color: p.textPrimary,
                     ),
                   ),
                   Text(
                     above ? '排在它前面' : '排在它后面',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 10,
                       height: 1.4,
-                      color: Color(0xFF999999),
+                      color: p.textTertiary,
                     ),
                   ),
                 ],
@@ -290,6 +293,7 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
     required bool first,
     required String sub,
   }) {
+    final p = context.palette;
     return InkWell(
       onTap: () => closeDialogSafely(ctx, result: isMajor),
       child: Padding(
@@ -298,10 +302,8 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
           children: [
             EventTypeTag(
               isMajor: isMajor,
-              background: isMajor
-                  ? const Color(0xFF4D6BFE)
-                  : const Color(0xFFEFF3FF),
-              foreground: isMajor ? Colors.white : const Color(0xFF4D6BFE),
+              background: isMajor ? p.accent : p.accentSoft,
+              foreground: isMajor ? p.onAccent : p.accent,
             ),
             const SizedBox(width: 8),
             Expanded(
@@ -310,27 +312,27 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
                 children: [
                   Text(
                     isMajor ? '大事件' : '小事件',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
-                      color: Color(0xFF333333),
+                      color: p.textPrimary,
                     ),
                   ),
                   Text(
                     sub,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 10,
                       height: 1.4,
-                      color: Color(0xFF999999),
+                      color: p.textTertiary,
                     ),
                   ),
                 ],
               ),
             ),
             if (first)
-              const Text(
+              Text(
                 '默认',
-                style: TextStyle(fontSize: 10, color: Color(0xFFBBBBBB)),
+                style: TextStyle(fontSize: 10, color: p.textTertiary),
               ),
           ],
         ),
@@ -395,6 +397,7 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
 
   /// 删除事件：先按控制器给出的「影响面」如实告知，确认后才删
   Future<void> _deleteEvent(OutlineEditDraft draft) async {
+    final p = context.palette;
     final impact = _controller.deleteImpact(draft);
     final name = draft.title.isEmpty ? '（未命名事件）' : draft.title;
     final lines = <String>[];
@@ -425,8 +428,8 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
           ElevatedButton(
             onPressed: () => closeDialogSafely(ctx, result: true),
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFE53935),
-              foregroundColor: Colors.white,
+              backgroundColor: p.danger,
+              foregroundColor: p.onAccent,
             ),
             child: const Text('删除'),
           ),
@@ -446,6 +449,7 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return ListenableBuilder(
       listenable: _controller,
       builder: (context, _) {
@@ -457,7 +461,7 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
             _handleExit();
           },
           child: Scaffold(
-            backgroundColor: Colors.white,
+            backgroundColor: p.background,
             appBar: _buildAppBar(),
             bottomNavigationBar: _controller.drafts.isEmpty
                 ? null
@@ -474,13 +478,14 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
   /// 没有可编辑章节时的兜底：仍然允许「添加事件」，否则一卷大纲都没解析出来时
   /// 连一条都建不了，只能回上一页。这时没有「上一条」可选，直接追加成第一条。
   Widget _buildEmptyBody() {
+    final p = context.palette;
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Text(
+          Text(
             '没有可编辑的事件',
-            style: TextStyle(fontSize: 14, color: Color(0xFF999999)),
+            style: TextStyle(fontSize: 14, color: p.textTertiary),
           ),
           const SizedBox(height: 10),
           OutlinedButton.icon(
@@ -488,8 +493,8 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
             icon: const Icon(Icons.add, size: 16),
             label: const Text('添加一个大事件'),
             style: OutlinedButton.styleFrom(
-              foregroundColor: const Color(0xFF4D6BFE),
-              side: const BorderSide(color: Color(0xFFC7D2FE)),
+              foregroundColor: p.accent,
+              side: BorderSide(color: p.borderStrong),
               textStyle: const TextStyle(fontSize: 13),
             ),
           ),
@@ -499,8 +504,9 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
   }
 
   PreferredSizeWidget _buildAppBar() {
+    final p = context.palette;
     return AppBar(
-      backgroundColor: Colors.white,
+      backgroundColor: p.surface,
       elevation: 0.5,
       // 标题**左对齐**（不用 centerTitle）：右侧有撤销 / 反撤销 / 保存
       // 三个操作项，居中标题只剩很窄的可用宽度，连「大纲编辑」四个字都会被
@@ -512,14 +518,14 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
         style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
       ),
       leading: IconButton(
-        icon: const Icon(Icons.arrow_back, color: Color(0xFF333333)),
+        icon: Icon(Icons.arrow_back, color: p.textPrimary),
         onPressed: _handleExit,
       ),
       actions: [
         IconButton(
           icon: const Icon(Icons.undo, size: 20),
-          color: const Color(0xFF4D6BFE),
-          disabledColor: const Color(0xFFCCCCCC),
+          color: p.accent,
+          disabledColor: p.textTertiary,
           tooltip: '撤销',
           onPressed: (!_controller.saving && _controller.canUndo)
               ? _controller.undo
@@ -527,8 +533,8 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
         ),
         IconButton(
           icon: const Icon(Icons.redo, size: 20),
-          color: const Color(0xFF4D6BFE),
-          disabledColor: const Color(0xFFCCCCCC),
+          color: p.accent,
+          disabledColor: p.textTertiary,
           tooltip: '反撤销',
           onPressed: (!_controller.saving && _controller.canRedo)
               ? _controller.redo
@@ -542,9 +548,9 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
                   height: 14,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-              : const Text(
+              : Text(
                   '保存',
-                  style: TextStyle(fontSize: 14, color: Color(0xFF4D6BFE)),
+                  style: TextStyle(fontSize: 14, color: p.accent),
                 ),
         ),
       ],
@@ -552,6 +558,7 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
   }
 
   Widget _buildBody() {
+    final p = context.palette;
     final drafts = _controller.drafts;
     return Column(
       children: [
@@ -561,16 +568,16 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
         Container(
           width: double.infinity,
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-          color: const Color(0xFFF8F9FF),
+          color: p.accentSoft,
           child: Row(
             children: [
               Expanded(
                 child: Text(
                   _novelTitle,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
-                    color: Color(0xFF333333),
+                    color: p.textPrimary,
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -579,9 +586,9 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
               const SizedBox(width: 8),
               Text(
                 '${drafts.length} 个事件',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 11,
-                  color: Color(0xFF999999),
+                  color: p.textTertiary,
                 ),
               ),
               const SizedBox(width: 8),
@@ -622,6 +629,7 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
   /// 用户看大纲时最常问的一句就是「这里到底埋没埋那条伏笔」。此前只能退出去到
   /// 剧情账本页翻，断了「边看大纲边核对伏笔」这个动作。
   Widget _buildForeshadowsButton() {
+    final p = context.palette;
     // 条数按非空行现算：清单是「每条一行」的文本，空行不算一条
     final count = _foreshadowLines(_controller.foreshadows).length;
     return InkWell(
@@ -630,26 +638,26 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: BoxDecoration(
-          color: const Color(0xFFEFF3FF),
+          color: p.accentSoft,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFFDCE4FF)),
+          border: Border.all(color: p.borderStrong),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(
+            Icon(
               Icons.bookmark_border,
               size: 13,
-              color: Color(0xFF4D6BFE),
+              color: p.accent,
             ),
             const SizedBox(width: 4),
             Text(
               // 上下文还没读回来时不显示条数：开页一瞬间的「0」会让人误以为清单是空的
               _controller.contextLoaded ? '伏笔 $count' : '伏笔',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w600,
-                color: Color(0xFF4D6BFE),
+                color: p.accent,
               ),
             ),
           ],
@@ -683,18 +691,17 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
   /// 悬空的 ＋🗑——分不清点的是哪一条，删除这种破坏性操作尤其危险。
   /// 现在按钮贴在标题行右侧，指哪打哪。
   Widget _buildDraftCard(int index, OutlineEditDraft draft) {
+    final p = context.palette;
     final key = _cardKeys.putIfAbsent(draft.localId, () => GlobalKey());
     return Container(
       key: key,
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.fromLTRB(12, 8, 8, 10),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: p.surface,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: draft.isDirty
-              ? const Color(0xFFB9C8FF)
-              : const Color(0xFFE8ECF4),
+          color: draft.isDirty ? p.accent.withValues(alpha: 0.5) : p.border,
         ),
       ),
       child: Column(
@@ -707,21 +714,21 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
               Expanded(
                 child: TextField(
                   controller: draft.titleCtrl,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     hintText: '事件标题',
                     hintStyle: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
-                      color: Color(0xFFBBBBBB),
+                      color: p.textTertiary,
                     ),
                     isDense: true,
                     border: InputBorder.none,
                     contentPadding: EdgeInsets.zero,
                   ),
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
-                    color: Color(0xFF333333),
+                    color: p.textPrimary,
                   ),
                 ),
               ),
@@ -729,7 +736,7 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
               _cardAction(
                 icon: Icons.add,
                 tooltip: '在它上方 / 下方添加事件',
-                color: const Color(0xFF4D6BFE),
+                color: p.accent,
                 onPressed: _controller.saving
                     ? null
                     : () => _addEvent(draft),
@@ -737,7 +744,7 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
               _cardAction(
                 icon: Icons.delete_outline,
                 tooltip: '删除该事件',
-                color: const Color(0xFFE53935),
+                color: p.danger,
                 onPressed: _controller.saving
                     ? null
                     : () => _deleteEvent(draft),
@@ -750,7 +757,7 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
                   style: TextStyle(fontSize: 12),
                 ),
                 style: TextButton.styleFrom(
-                  foregroundColor: const Color(0xFF4D6BFE),
+                  foregroundColor: p.accent,
                   visualDensity: VisualDensity.compact,
                   padding: const EdgeInsets.symmetric(horizontal: 6),
                   minimumSize: Size.zero,
@@ -769,12 +776,8 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
                   isMajor: draft.isMajor,
                   majorNumber: _controller.majorNumberOfDraft(draft),
                   minorNumber: _controller.minorNumberOfDraft(draft),
-                  background: draft.isMajor
-                      ? const Color(0xFF4D6BFE)
-                      : const Color(0xFFEFF3FF),
-                  foreground: draft.isMajor
-                      ? Colors.white
-                      : const Color(0xFF4D6BFE),
+                  background: draft.isMajor ? p.accent : p.accentSoft,
+                  foreground: draft.isMajor ? p.onAccent : p.accent,
                 ),
                 const SizedBox(width: 6),
                 Text(
@@ -782,22 +785,22 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
                   style: TextStyle(
                     fontSize: 10,
                     color: draft.hasContent
-                        ? const Color(0xFF4CAF50)
-                        : const Color(0xFFBBBBBB),
+                        ? p.success
+                        : p.textTertiary,
                   ),
                 ),
                 if (draft.isNew) ...[
                   const SizedBox(width: 6),
-                  const Text(
+                  Text(
                     '新增',
-                    style: TextStyle(fontSize: 10, color: Color(0xFF4D6BFE)),
+                    style: TextStyle(fontSize: 10, color: p.accent),
                   ),
                 ],
                 if (draft.isDirty) ...[
                   const SizedBox(width: 6),
-                  const Text(
+                  Text(
                     '已修改',
-                    style: TextStyle(fontSize: 10, color: Color(0xFFFF9800)),
+                    style: TextStyle(fontSize: 10, color: p.warning),
                   ),
                 ],
               ],
@@ -811,21 +814,21 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
               minLines: 2,
               maxLines: null,
               keyboardType: TextInputType.multiline,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 hintText: '事件概要（大纲内容）',
                 hintStyle: TextStyle(
                   fontSize: 12,
                   height: 1.6,
-                  color: Color(0xFFBBBBBB),
+                  color: p.textTertiary,
                 ),
                 isDense: true,
                 border: InputBorder.none,
                 contentPadding: EdgeInsets.zero,
               ),
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 12.5,
                 height: 1.6,
-                color: Color(0xFF666666),
+                color: p.textSecondary,
               ),
             ),
           ),
@@ -842,10 +845,11 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
     required Color color,
     required VoidCallback? onPressed,
   }) {
+    final p = context.palette;
     return IconButton(
       icon: Icon(icon, size: 16),
       color: color,
-      disabledColor: const Color(0xFFCCCCCC),
+      disabledColor: p.textTertiary,
       tooltip: tooltip,
       onPressed: onPressed,
       visualDensity: VisualDensity.compact,
@@ -856,32 +860,31 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
   }
 
   Widget _buildBottomBar() {
+    final p = context.palette;
     final dirty = _controller.dirtyCount;
     final structure = _controller.hasStructureChanges;
     final pending = dirty > 0 || structure;
     return SafeArea(
       child: Container(
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          border: Border(top: BorderSide(color: Color(0xFFEEEEEE))),
+        decoration: BoxDecoration(
+          color: p.surface,
+          border: Border(top: BorderSide(color: p.border)),
         ),
         child: Row(
           children: [
             Icon(
               pending ? Icons.info_outline : Icons.check_circle_outline,
               size: 14,
-              color: pending
-                  ? const Color(0xFFFF9800)
-                  : const Color(0xFF4CAF50),
+              color: pending ? p.warning : p.success,
             ),
             const SizedBox(width: 6),
             Expanded(
               child: Text(
                 _pendingText(dirty, structure),
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 12,
-                  color: Color(0xFF666666),
+                  color: p.textSecondary,
                 ),
               ),
             ),
@@ -891,10 +894,10 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
                   ? null
                   : () => _save(),
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF4D6BFE),
-                foregroundColor: Colors.white,
-                disabledBackgroundColor: const Color(0xFFE8ECF4),
-                disabledForegroundColor: const Color(0xFF999999),
+                backgroundColor: p.accent,
+                foregroundColor: p.onAccent,
+                disabledBackgroundColor: p.surfaceMuted,
+                disabledForegroundColor: p.textTertiary,
                 padding: const EdgeInsets.symmetric(
                   horizontal: 18,
                   vertical: 10,
@@ -955,6 +958,7 @@ class _ForeshadowsSheetState extends State<_ForeshadowsSheet> {
   late String _text = widget.controller.foreshadows;
 
   Future<void> _edit() async {
+    final p = context.palette;
     final editCtrl = TextEditingController(text: _text);
     final saved = await showDialog<bool>(
       context: context,
@@ -979,12 +983,12 @@ class _ForeshadowsSheetState extends State<_ForeshadowsSheet> {
             expands: true,
             textAlignVertical: TextAlignVertical.top,
             autofocus: true,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               hintText: '每条伏笔一行，形如：伏笔内容（埋设位置 / 计划回收时机）',
               border: InputBorder.none,
-              contentPadding: EdgeInsets.fromLTRB(4, 2, 4, 2),
+              contentPadding: const EdgeInsets.fromLTRB(4, 2, 4, 2),
               filled: true,
-              fillColor: Color(0xFFFAFAFA),
+              fillColor: p.surfaceMuted,
             ),
             style: const TextStyle(fontSize: 12, height: 1.6),
           ),
@@ -1013,9 +1017,9 @@ class _ForeshadowsSheetState extends State<_ForeshadowsSheet> {
               if (!closeDialogSafely(ctx, result: true)) return;
               scheduleControllerDispose(editCtrl);
             },
-            child: const Text(
+            child: Text(
               '保存',
-              style: TextStyle(fontSize: 12, color: Color(0xFF4D6BFE)),
+              style: TextStyle(fontSize: 12, color: p.accent),
             ),
           ),
         ],
@@ -1039,15 +1043,16 @@ class _ForeshadowsSheetState extends State<_ForeshadowsSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     final lines = _foreshadowLines(_text);
     return Container(
       // 不用满屏高度：上方编辑页仍可见，方便对着大纲看伏笔
       constraints: BoxConstraints(
         maxHeight: MediaQuery.heightOf(context) * 0.78,
       ),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(14)),
+      decoration: BoxDecoration(
+        color: p.surfaceElevated,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -1058,10 +1063,10 @@ class _ForeshadowsSheetState extends State<_ForeshadowsSheet> {
             child: Row(
               children: [
                 const SizedBox(width: 2),
-                const Icon(
+                Icon(
                   Icons.bookmark_border,
                   size: 16,
-                  color: Color(0xFF4D6BFE),
+                  color: p.accent,
                 ),
                 const SizedBox(width: 6),
                 const Text(
@@ -1072,9 +1077,9 @@ class _ForeshadowsSheetState extends State<_ForeshadowsSheet> {
                 if (lines.isNotEmpty)
                   Text(
                     '${lines.length} 条',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 11,
-                      color: Color(0xFF999999),
+                      color: p.textTertiary,
                     ),
                   ),
                 const Spacer(),
@@ -1083,7 +1088,7 @@ class _ForeshadowsSheetState extends State<_ForeshadowsSheet> {
                   icon: const Icon(Icons.edit_outlined, size: 14),
                   label: const Text('编辑', style: TextStyle(fontSize: 12)),
                   style: TextButton.styleFrom(
-                    foregroundColor: const Color(0xFF4D6BFE),
+                    foregroundColor: p.accent,
                     visualDensity: VisualDensity.compact,
                     padding: const EdgeInsets.symmetric(horizontal: 8),
                     minimumSize: Size.zero,
@@ -1092,7 +1097,7 @@ class _ForeshadowsSheetState extends State<_ForeshadowsSheet> {
                 ),
                 IconButton(
                   icon: const Icon(Icons.close, size: 18),
-                  color: const Color(0xFF999999),
+                  color: p.textTertiary,
                   tooltip: '关闭',
                   visualDensity: VisualDensity.compact,
                   onPressed: () => closeDialogSafely(context),
@@ -1101,8 +1106,8 @@ class _ForeshadowsSheetState extends State<_ForeshadowsSheet> {
             ),
           ),
           // 说明这份清单是干什么用的：改完直接生效，不用再点底部「保存」
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 2, 16, 0),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 2, 16, 0),
             child: Align(
               alignment: Alignment.centerLeft,
               child: Text(
@@ -1110,13 +1115,13 @@ class _ForeshadowsSheetState extends State<_ForeshadowsSheet> {
                 style: TextStyle(
                   fontSize: 10,
                   height: 1.5,
-                  color: Color(0xFFBBBBBB),
+                  color: p.textTertiary,
                 ),
               ),
             ),
           ),
           const SizedBox(height: 6),
-          Divider(height: 1, color: Colors.grey.shade200),
+          Divider(height: 1, color: p.border),
           Flexible(
             child: lines.isEmpty
                 ? _empty()
@@ -1129,22 +1134,22 @@ class _ForeshadowsSheetState extends State<_ForeshadowsSheet> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           // 与剧情账本的伏笔清单同一个样式（小圆点 + 正文）
-                          const Padding(
-                            padding: EdgeInsets.only(top: 5),
+                          Padding(
+                            padding: const EdgeInsets.only(top: 5),
                             child: Icon(
                               Icons.circle,
                               size: 6,
-                              color: Color(0xFF4D6BFE),
+                              color: p.accent,
                             ),
                           ),
                           const SizedBox(width: 8),
                           Expanded(
                             child: SelectableText(
                               lines[index],
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 12.5,
                                 height: 1.6,
-                                color: Color(0xFF333333),
+                                color: p.textPrimary,
                               ),
                             ),
                           ),
@@ -1160,19 +1165,20 @@ class _ForeshadowsSheetState extends State<_ForeshadowsSheet> {
 
   /// 空态：说清「为什么空」与「去哪儿生成」，而不是只给一片白
   Widget _empty() {
+    final p = context.palette;
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 24, 20, 32),
       child: Column(
         children: [
           Text(
             '（暂无伏笔清单）',
-            style: TextStyle(fontSize: 13, color: Colors.grey[400]),
+            style: TextStyle(fontSize: 13, color: p.textTertiary),
           ),
           const SizedBox(height: 6),
           Text(
             '可在「剧情账本」页点「重新提炼」由 AI 从大纲生成，或点上方「编辑」手动填写',
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 11, height: 1.6, color: Colors.grey[400]),
+            style: TextStyle(fontSize: 11, height: 1.6, color: p.textTertiary),
           ),
         ],
       ),

@@ -23,6 +23,8 @@ app:
   web-dist: ${WEB_DIST:../app/dist}
   # APK 发布目录；留空 = <data-dir>/app-update
   app-update-dir: ${APP_UPDATE_DIR:}
+  # 后端启动后自动为已授权 USB 设备建立 adb reverse 隧道
+  usb-auto: ${USB_AUTO:true}
   api-token: ${API_TOKEN:}
   max-upload-mb: ${MAX_UPLOAD_MB:512}
   default-page-size: ${PAGE_SIZE:50}

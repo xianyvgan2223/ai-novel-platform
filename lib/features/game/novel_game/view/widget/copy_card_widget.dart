@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:deepseekapp/core/theme/app_palette.dart';
 import 'package:deepseekapp/features/game/novel_game/model/entity/copy_entity.dart';
 import 'package:deepseekapp/features/game/novel_game/model/entity/character_entity.dart';
 
@@ -69,15 +70,21 @@ class CopyCardWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     final config = _parseModelConfig(copy.modelConfig);
     final background = config['background'];
     final style = config['style'];
 
     final content = Card(
-      color: Colors.white,
-      elevation: 1,
+      color: p.surface,
+      elevation: p.isDark ? 0 : 1,
       margin: EdgeInsets.zero,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(6),
+        side: BorderSide(
+          color: p.isDark ? p.border : Colors.transparent,
+        ),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(6),
         child: Column(
@@ -89,10 +96,10 @@ class CopyCardWidget extends StatelessWidget {
                 Expanded(
                   child: Text(
                     copy.copyName,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.bold,
-                      color: Color(0xFF333333),
+                      color: p.textPrimary,
                     ),
                   ),
                 ),
@@ -108,10 +115,10 @@ class CopyCardWidget extends StatelessWidget {
                 if (onSetting != null)
                   GestureDetector(
                     onTap: onSetting,
-                    child: const Icon(
+                    child: Icon(
                       Icons.settings,
                       size: 12,
-                      color: Color(0xFF999999),
+                      color: p.textTertiary,
                     ),
                   ),
               ],
@@ -121,7 +128,7 @@ class CopyCardWidget extends StatelessWidget {
                 padding: const EdgeInsets.only(top: 2),
                 child: Text(
                   background,
-                  style: const TextStyle(fontSize: 8, color: Color(0xFF888888)),
+                  style: TextStyle(fontSize: 8, color: p.textSecondary),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -131,21 +138,21 @@ class CopyCardWidget extends StatelessWidget {
                 padding: const EdgeInsets.only(top: 1),
                 child: Text(
                   style,
-                  style: const TextStyle(fontSize: 8, color: Color(0xFF888888)),
+                  style: TextStyle(fontSize: 8, color: p.textSecondary),
                 ),
               ),
             const SizedBox(height: 3),
             Text(
               _formatTime(copy.createTime),
-              style: const TextStyle(fontSize: 8, color: Color(0xFF999999)),
+              style: TextStyle(fontSize: 8, color: p.textTertiary),
             ),
             const SizedBox(height: 4),
             if (characters.isEmpty)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 2),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
                 child: Text(
                   '拖拽人物到此',
-                  style: TextStyle(color: Color(0xFFCCCCCC), fontSize: 9),
+                  style: TextStyle(color: p.textTertiary, fontSize: 9),
                 ),
               )
             else
@@ -158,13 +165,13 @@ class CopyCardWidget extends StatelessWidget {
                         onTap: () => onCharacterTap?.call(char.id ?? 0),
                         child: CircleAvatar(
                           radius: 10,
-                          backgroundColor: const Color(0xFFE8E8E8),
+                          backgroundColor: p.surfaceMuted,
                           child: Text(
                             char.charName.isNotEmpty ? char.charName[0] : '?',
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 8,
                               fontWeight: FontWeight.bold,
-                              color: Color(0xFF666666),
+                              color: p.textSecondary,
                             ),
                           ),
                         ),
@@ -179,9 +186,9 @@ class CopyCardWidget extends StatelessWidget {
               child: ElevatedButton(
                 onPressed: copy.isRunning == 1 ? null : onStart,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF4A90D9),
-                  foregroundColor: Colors.white,
-                  disabledBackgroundColor: const Color(0xFFCCCCCC),
+                  backgroundColor: p.accent,
+                  foregroundColor: p.onAccent,
+                  disabledBackgroundColor: p.switchInactive,
                   padding: EdgeInsets.zero,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(3),
@@ -214,7 +221,9 @@ class CopyCardWidget extends StatelessWidget {
               Positioned.fill(
                 child: Container(
                   decoration: BoxDecoration(
-                    color: Colors.black26,
+                    color: p.overlay.withValues(
+                      alpha: p.isDark ? 0.55 : 0.26,
+                    ),
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: const Center(

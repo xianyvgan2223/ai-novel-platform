@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:deepseekapp/core/theme/app_palette.dart';
 import '../../controller/battle_controller.dart';
 import '../../model/battle_model.dart';
 import '../../model/db/battle_db_helper.dart';
@@ -77,26 +78,27 @@ class _BattleEditPageState extends State<BattleEditPage> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: p.background,
       appBar: AppBar(
         title: const Text(
           '编辑战斗场景',
           style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
         ),
-        backgroundColor: Colors.white,
+        backgroundColor: p.surface,
         elevation: 0.5,
         centerTitle: true,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Color(0xFF333333)),
+          icon: Icon(Icons.arrow_back, color: p.textPrimary),
           onPressed: () => Navigator.of(context).pop(),
         ),
         actions: [
           TextButton(
             onPressed: _loading ? null : _save,
-            child: const Text(
+            child: Text(
               '保存',
-              style: TextStyle(fontSize: 14, color: Color(0xFFFF5722)),
+              style: TextStyle(fontSize: 14, color: p.accent),
             ),
           ),
         ],
@@ -114,7 +116,7 @@ class _BattleEditPageState extends State<BattleEditPage> {
                   TextField(
                     controller: _skillsCtrl,
                     maxLines: 3,
-                    decoration: _editDecoration(),
+                    decoration: _editDecoration(context),
                   ),
                   const SizedBox(height: 16),
 
@@ -124,7 +126,7 @@ class _BattleEditPageState extends State<BattleEditPage> {
                   TextField(
                     controller: _sceneCtrl,
                     maxLines: 3,
-                    decoration: _editDecoration(),
+                    decoration: _editDecoration(context),
                   ),
                   const SizedBox(height: 16),
 
@@ -134,7 +136,7 @@ class _BattleEditPageState extends State<BattleEditPage> {
                   TextField(
                     controller: _resultCtrl,
                     maxLines: 2,
-                    decoration: _editDecoration(),
+                    decoration: _editDecoration(context),
                   ),
                   const SizedBox(height: 24),
 
@@ -150,7 +152,7 @@ class _BattleEditPageState extends State<BattleEditPage> {
                         icon: const Icon(Icons.clear, size: 14),
                         label: const Text('清空', style: TextStyle(fontSize: 12)),
                         style: TextButton.styleFrom(
-                          foregroundColor: const Color(0xFF999999),
+                          foregroundColor: p.textTertiary,
                           padding: const EdgeInsets.symmetric(horizontal: 8),
                           minimumSize: Size.zero,
                           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -162,13 +164,13 @@ class _BattleEditPageState extends State<BattleEditPage> {
                   TextField(
                     controller: _aiResultCtrl,
                     maxLines: 20,
-                    decoration: _editDecoration().copyWith(
+                    decoration: _editDecoration(context).copyWith(
                       hintText: 'AI 生成的内容，可手动修改...',
                     ),
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 14,
                       height: 1.7,
-                      color: Color(0xFF222222),
+                      color: p.textPrimary,
                     ),
                   ),
                   const SizedBox(height: 32),
@@ -178,19 +180,20 @@ class _BattleEditPageState extends State<BattleEditPage> {
     );
   }
 
-  InputDecoration _editDecoration() {
+  InputDecoration _editDecoration(BuildContext context) {
+    final p = context.palette;
     return InputDecoration(
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(8),
-        borderSide: const BorderSide(color: Color(0xFFDDDDDD)),
+        borderSide: BorderSide(color: p.borderStrong),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(8),
-        borderSide: const BorderSide(color: Color(0xFFDDDDDD)),
+        borderSide: BorderSide(color: p.borderStrong),
       ),
       contentPadding: const EdgeInsets.all(12),
       filled: true,
-      fillColor: const Color(0xFFFAFAFA),
+      fillColor: p.surfaceMuted,
       isDense: false,
     );
   }
@@ -202,12 +205,13 @@ class _SectionLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return Text(
       text,
-      style: const TextStyle(
+      style: TextStyle(
         fontSize: 13,
         fontWeight: FontWeight.w600,
-        color: Color(0xFF666666),
+        color: p.textSecondary,
       ),
     );
   }

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:deepseekapp/core/theme/app_palette.dart';
 import '../../../core/config/route_names.dart';
 import '../application/chat_controller.dart';
 import '../domain/chat_message.dart';
@@ -171,9 +172,9 @@ class _ChatPageState extends ConsumerState<ChatPage> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text(
+            child: Text(
               '删除',
-              style: TextStyle(fontSize: 13, color: Colors.red),
+              style: TextStyle(fontSize: 13, color: ctx.palette.danger),
             ),
           ),
         ],
@@ -269,6 +270,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     // 分别 select 非流式字段，流式文本变更时只重建 _StreamingBubble
     final messages = ref.watch(chatProvider.select((p) => p.messages));
     final isStreamingEmpty = ref.watch(
@@ -312,7 +314,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
               ),
               TextButton(
                 onPressed: () => Navigator.pop(ctx, true),
-                child: Text('确定', style: TextStyle(color: Colors.red)),
+                child: Text('确定', style: TextStyle(color: ctx.palette.danger)),
               ),
             ],
           ),
@@ -324,7 +326,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
       },
       child: Scaffold(
         key: _scaffoldKey,
-        backgroundColor: Colors.white,
+        backgroundColor: p.background,
         drawer: const HistoryDrawer(),
         appBar: _isEditMode
             ? _buildEditAppBar()
@@ -333,7 +335,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
           children: [
             Expanded(child: _buildMessageList(messages, isStreamingEmpty)),
             if (!_isEditMode) ...[
-              const Divider(height: 1, color: Color(0xFFEEEEEE)),
+              Divider(height: 1, color: p.border),
               _buildInputArea(isLoading, context),
             ],
           ],
@@ -345,16 +347,17 @@ class _ChatPageState extends ConsumerState<ChatPage> {
 
   /// 普通模式 AppBar
   PreferredSizeWidget _buildAppBar(String title, bool hasSession) {
+    final p = context.palette;
     // 非根路由（悬浮面板展开进入的聊天页）显示返回按钮
     final isRoot = ModalRoute.of(context)?.isFirst ?? true;
     return AppBar(
       toolbarHeight: 44,
-      backgroundColor: Colors.white,
+      backgroundColor: p.surface,
       elevation: 0,
       scrolledUnderElevation: 0,
       leading: isRoot
           ? IconButton(
-              icon: const Icon(Icons.menu, color: Color(0xFF333333), size: 20),
+              icon: Icon(Icons.menu, color: p.textPrimary, size: 20),
               constraints: BoxConstraints(minWidth: 36, minHeight: 36),
               tooltip: '历史会话',
               // 打开历史抽屉前先收起输入法：抽屉只是覆盖在聊天页之上、
@@ -366,7 +369,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
               },
             )
           : BackButton(
-              color: const Color(0xFF333333),
+              color: p.textPrimary,
               onPressed: () => Navigator.of(context).pop(),
             ),
       title: GestureDetector(
@@ -386,18 +389,18 @@ class _ChatPageState extends ConsumerState<ChatPage> {
             Flexible(
               child: Text(
                 title,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
-                  color: Color(0xFF333333),
+                  color: p.textPrimary,
                 ),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-            const Icon(
+            Icon(
               Icons.arrow_drop_down,
               size: 18,
-              color: Color(0xFF999999),
+              color: p.textTertiary,
             ),
           ],
         ),
@@ -405,9 +408,9 @@ class _ChatPageState extends ConsumerState<ChatPage> {
       centerTitle: true,
       actions: [
         IconButton(
-          icon: const Icon(
+          icon: Icon(
             Icons.auto_stories,
-            color: Color(0xFF333333),
+            color: p.textPrimary,
             size: 20,
           ),
           constraints: BoxConstraints(minWidth: 36, minHeight: 36),
@@ -415,9 +418,9 @@ class _ChatPageState extends ConsumerState<ChatPage> {
           onPressed: () => _pushPage(const NovelWritingPage()),
         ),
         PopupMenuButton<String>(
-          icon: const Icon(
+          icon: Icon(
             Icons.more_horiz,
-            color: Color(0xFF333333),
+            color: p.textPrimary,
             size: 20,
           ),
           constraints: BoxConstraints(minWidth: 36, minHeight: 36),
@@ -433,24 +436,24 @@ class _ChatPageState extends ConsumerState<ChatPage> {
             }
           },
           itemBuilder: (context) => [
-            const PopupMenuItem(
+            PopupMenuItem(
               value: 'settings',
               child: Row(
                 children: [
-                  Icon(Icons.settings, size: 18, color: Color(0xFF666666)),
+                  Icon(Icons.settings, size: 18, color: p.textSecondary),
                   SizedBox(width: 8),
                   Text('设置', style: TextStyle(fontSize: 13)),
                 ],
               ),
             ),
-            const PopupMenuItem(
+            PopupMenuItem(
               value: 'game',
               child: Row(
                 children: [
                   Icon(
                     Icons.videogame_asset,
                     size: 18,
-                    color: Color(0xFF666666),
+                    color: p.textSecondary,
                   ),
                   SizedBox(width: 8),
                   Text('游戏', style: TextStyle(fontSize: 13)),
@@ -460,52 +463,54 @@ class _ChatPageState extends ConsumerState<ChatPage> {
           ],
         ),
       ],
-      bottom: const PreferredSize(
+      bottom: PreferredSize(
         preferredSize: Size.fromHeight(1),
-        child: Divider(height: 1, color: Color(0xFFEEEEEE)),
+        child: Divider(height: 1, color: p.border),
       ),
     );
   }
 
   /// 编辑模式 AppBar（仅保留取消和标题）
   PreferredSizeWidget _buildEditAppBar() {
+    final p = context.palette;
     return AppBar(
       toolbarHeight: 44,
-      backgroundColor: Colors.white,
+      backgroundColor: p.surface,
       elevation: 0,
       scrolledUnderElevation: 0,
       leading: GestureDetector(
         onTap: _exitEditMode,
         child: Container(
           alignment: Alignment.center,
-          child: const Text(
+          child: Text(
             '取消',
-            style: TextStyle(fontSize: 13, color: Color(0xFF4D6BFE)),
+            style: TextStyle(fontSize: 13, color: p.accent),
           ),
         ),
       ),
       title: Text(
         '选择消息 (${_selectedIndices.length})',
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 13,
           fontWeight: FontWeight.w600,
-          color: Color(0xFF333333),
+          color: p.textPrimary,
         ),
       ),
       centerTitle: true,
-      bottom: const PreferredSize(
+      bottom: PreferredSize(
         preferredSize: Size.fromHeight(1),
-        child: Divider(height: 1, color: Color(0xFFEEEEEE)),
+        child: Divider(height: 1, color: p.border),
       ),
     );
   }
 
   /// 编辑模式底部操作栏
   Widget _buildEditBottomBar() {
+    final p = context.palette;
     return Container(
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(top: BorderSide(color: Color(0xFFEEEEEE), width: 1)),
+      decoration: BoxDecoration(
+        color: p.surface,
+        border: Border(top: BorderSide(color: p.border, width: 1)),
       ),
       child: SafeArea(
         top: false,
@@ -519,18 +524,18 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                   onTap: _selectAll,
                   child: Container(
                     alignment: Alignment.center,
-                    child: const Text(
+                    child: Text(
                       '全选',
                       style: TextStyle(
                         fontSize: 14,
-                        color: Color(0xFF4D6BFE),
+                        color: p.accent,
                         fontWeight: FontWeight.w500,
                       ),
                     ),
                   ),
                 ),
               ),
-              Container(width: 1, height: 24, color: const Color(0xFFEEEEEE)),
+              Container(width: 1, height: 24, color: p.border),
               // 复制
               Expanded(
                 child: GestureDetector(
@@ -543,14 +548,14 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                         fontSize: 14,
                         fontWeight: FontWeight.w500,
                         color: _selectedIndices.isEmpty
-                            ? const Color(0xFFCCCCCC)
-                            : const Color(0xFF4D6BFE),
+                            ? p.textTertiary
+                            : p.accent,
                       ),
                     ),
                   ),
                 ),
               ),
-              Container(width: 1, height: 24, color: const Color(0xFFEEEEEE)),
+              Container(width: 1, height: 24, color: p.border),
               // 删除
               Expanded(
                 child: GestureDetector(
@@ -563,8 +568,8 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                         fontSize: 14,
                         fontWeight: FontWeight.w500,
                         color: _selectedIndices.isEmpty
-                            ? const Color(0xFFCCCCCC)
-                            : Colors.redAccent,
+                            ? p.textTertiary
+                            : p.danger,
                       ),
                     ),
                   ),
@@ -627,6 +632,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
       context: context,
       barrierDismissible: false,
       builder: (ctx) {
+        final p = ctx.palette;
         return AlertDialog(
           insetPadding: const EdgeInsets.symmetric(
             horizontal: 12,
@@ -643,10 +649,10 @@ class _ChatPageState extends ConsumerState<ChatPage> {
               ),
               GestureDetector(
                 onTap: () => Navigator.of(ctx).pop(),
-                child: const Icon(
+                child: Icon(
                   Icons.close,
                   size: 16,
-                  color: Color(0xFF999999),
+                  color: p.textTertiary,
                 ),
               ),
             ],
@@ -665,15 +671,15 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                 maxLines: null,
                 expands: true,
                 textAlignVertical: TextAlignVertical.top,
-                style: const TextStyle(fontSize: 12, color: Color(0xFF333333)),
+                style: TextStyle(fontSize: 12, color: p.textPrimary),
                 decoration: InputDecoration(
                   hintText: '输入问题或指令...',
-                  hintStyle: const TextStyle(
-                    color: Color(0xFFBBBBBB),
+                  hintStyle: TextStyle(
+                    color: p.textTertiary,
                     fontSize: 12,
                   ),
                   filled: true,
-                  fillColor: const Color(0xFFF5F5F5),
+                  fillColor: p.surfaceMuted,
                   contentPadding: const EdgeInsets.all(8),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
@@ -696,9 +702,9 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                     borderRadius: BorderRadius.circular(6),
                   ),
                 ),
-                child: const Text(
+                child: Text(
                   '取消',
-                  style: TextStyle(fontSize: 12, color: Color(0xFF666666)),
+                  style: TextStyle(fontSize: 12, color: p.textSecondary),
                 ),
               ),
             ),
@@ -712,8 +718,8 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                   Navigator.of(ctx).pop();
                 },
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF4D6BFE),
-                  foregroundColor: Colors.white,
+                  backgroundColor: p.accent,
+                  foregroundColor: p.onAccent,
                   padding: EdgeInsets.zero,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(8),
@@ -729,24 +735,25 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   }
 
   Widget _buildInputArea(bool isLoading, BuildContext context) {
+    final p = context.palette;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      color: Colors.white,
+      color: p.surface,
       child: SafeArea(
         child: Row(
           children: [
             Expanded(
               child: TextField(
                 controller: _inputCtrl,
-                style: const TextStyle(fontSize: 12, color: Color(0xFF333333)),
+                style: TextStyle(fontSize: 12, color: p.textPrimary),
                 decoration: InputDecoration(
                   hintText: '输入问题或指令...',
-                  hintStyle: const TextStyle(
-                    color: Color(0xFFBBBBBB),
+                  hintStyle: TextStyle(
+                    color: p.textTertiary,
                     fontSize: 12,
                   ),
                   filled: true,
-                  fillColor: const Color(0xFFF5F5F5),
+                  fillColor: p.surfaceMuted,
                   contentPadding: const EdgeInsets.symmetric(
                     horizontal: 12,
                     vertical: 6,
@@ -758,7 +765,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                       child: Icon(
                         Icons.fullscreen,
                         size: 14,
-                        color: Color(0xFF999999),
+                        color: p.textTertiary,
                       ),
                     ),
                   ),
@@ -778,10 +785,8 @@ class _ChatPageState extends ConsumerState<ChatPage> {
               onPressed: isLoading ? () => _chat.cancelRequest() : _onSend,
               icon: Icon(isLoading ? Icons.stop : Icons.arrow_upward, size: 16),
               style: IconButton.styleFrom(
-                backgroundColor: isLoading
-                    ? Colors.redAccent
-                    : const Color(0xFF4D6BFE),
-                foregroundColor: Colors.white,
+                backgroundColor: isLoading ? p.danger : p.accent,
+                foregroundColor: p.onAccent,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(16),
                 ),
@@ -802,6 +807,7 @@ class _StreamingBubble extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final p = context.palette;
     final chat = ref.watch(chatProvider);
 
     final hasPhase1 = chat.phase1Text.isNotEmpty;
@@ -821,7 +827,7 @@ class _StreamingBubble extends ConsumerWidget {
             children: [
               // 流式思考内容
               if (chat.streamingThinking.isNotEmpty)
-                _buildStreamingThinking(chat.streamingThinking),
+                _buildStreamingThinking(chat.streamingThinking, p),
               // Phase 1 正文（搜索期间保持显示）
               if (phase1Visible)
                 Container(
@@ -830,7 +836,7 @@ class _StreamingBubble extends ConsumerWidget {
                     vertical: 8,
                   ),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF5F5F5),
+                    color: p.bubbleAssistant,
                     borderRadius: const BorderRadius.only(
                       topLeft: Radius.circular(12),
                       topRight: Radius.circular(12),
@@ -839,9 +845,9 @@ class _StreamingBubble extends ConsumerWidget {
                   ),
                   child: SelectableText(
                     chat.phase1Text,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 13,
-                      color: Color(0xFF333333),
+                      color: p.bubbleAssistantText,
                       height: 1.5,
                     ),
                   ),
@@ -856,7 +862,7 @@ class _StreamingBubble extends ConsumerWidget {
                     vertical: 8,
                   ),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF5F5F5),
+                    color: p.bubbleAssistant,
                     borderRadius: const BorderRadius.only(
                       topLeft: Radius.circular(12),
                       topRight: Radius.circular(12),
@@ -867,9 +873,9 @@ class _StreamingBubble extends ConsumerWidget {
                     hasPhase1
                         ? '${chat.phase1Text}\n\n${chat.streamingText}'
                         : chat.streamingText,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 13,
-                      color: Color(0xFF333333),
+                      color: p.bubbleAssistantText,
                       height: 1.5,
                     ),
                   ),
@@ -879,27 +885,27 @@ class _StreamingBubble extends ConsumerWidget {
               if (chat.streamingText.isEmpty &&
                   chat.streamingThinking.isEmpty &&
                   !hasPhase1)
-                const Padding(
+                Padding(
                   padding: EdgeInsets.all(12),
                   child: SizedBox(
                     width: 20,
                     height: 20,
                     child: CircularProgressIndicator(
                       strokeWidth: 2,
-                      color: Color(0xFF4D6BFE),
+                      color: p.accent,
                     ),
                   ),
                 ),
               // Phase 1 加载中（搜索进行中）
               if (phase1Visible)
-                const Padding(
+                Padding(
                   padding: EdgeInsets.only(top: 8),
                   child: SizedBox(
                     width: 20,
                     height: 20,
                     child: CircularProgressIndicator(
                       strokeWidth: 2,
-                      color: Color(0xFF4D6BFE),
+                      color: p.accent,
                     ),
                   ),
                 ),
@@ -920,13 +926,13 @@ class _StreamingBubble extends ConsumerWidget {
     );
   }
 
-  Widget _buildStreamingThinking(String thinking) {
+  Widget _buildStreamingThinking(String thinking, AppPalette p) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       decoration: BoxDecoration(
-        color: const Color(0xFFF5F5F5),
+        color: p.surfaceMuted,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFFE8E8E8)),
+        border: Border.all(color: p.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -934,18 +940,18 @@ class _StreamingBubble extends ConsumerWidget {
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.psychology, size: 14, color: Color(0xFF999999)),
+              Icon(Icons.psychology, size: 14, color: p.textTertiary),
               const SizedBox(width: 4),
-              const Text(
+              Text(
                 '思考中...',
-                style: TextStyle(fontSize: 11, color: Color(0xFF999999)),
+                style: TextStyle(fontSize: 11, color: p.textTertiary),
               ),
             ],
           ),
           const SizedBox(height: 6),
           SelectableText(
             thinking,
-            style: const TextStyle(fontSize: 11, color: Color(0xFF666666)),
+            style: TextStyle(fontSize: 11, color: p.textSecondary),
           ),
         ],
       ),

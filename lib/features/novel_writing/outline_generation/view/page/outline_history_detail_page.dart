@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
-import '../../../../../core/widgets/settings_kit.dart';
+import 'package:deepseekapp/core/theme/app_palette.dart';
 import '../../../shared/dialog_utils.dart';
 import '../../../shared/domain/outline_record.dart';
 import '../../../shared/data/outline_record_db_helper.dart';
@@ -76,6 +76,7 @@ class _OutlineHistoryDetailPageState extends State<OutlineHistoryDetailPage> {
   /// 编辑小说设定弹窗（类型 / 主题 / 主角简介 / 世界观）。
   /// 确认后写入本地控制器，随「保存」持久化到记录。
   Future<void> _editSettings() async {
+    final p = context.palette;
     final genreCtrl = TextEditingController(text: _genreCtrl.text);
     final themeCtrl = TextEditingController(text: _themeCtrl.text);
     final protagonistCtrl = TextEditingController(text: _protagonistCtrl.text);
@@ -139,7 +140,7 @@ class _OutlineHistoryDetailPageState extends State<OutlineHistoryDetailPage> {
           ),
           TextButton(
             onPressed: () => closeDialogSafely(ctx, result: true),
-            child: const Text('确定', style: TextStyle(color: kSettingsTitle)),
+            child: Text('确定', style: TextStyle(color: p.textPrimary)),
           ),
         ],
       ),
@@ -274,6 +275,7 @@ class _OutlineHistoryDetailPageState extends State<OutlineHistoryDetailPage> {
       return;
     }
     if (!mounted) return;
+    final p = context.palette;
     final action = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -291,8 +293,8 @@ class _OutlineHistoryDetailPageState extends State<OutlineHistoryDetailPage> {
           ElevatedButton(
             onPressed: () => closeDialogSafely(ctx, result: 'save'),
             style: ElevatedButton.styleFrom(
-              backgroundColor: kSettingsTitle,
-              foregroundColor: Colors.white,
+              backgroundColor: p.textPrimary,
+              foregroundColor: p.onAccent,
               elevation: 0,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(10),
@@ -350,6 +352,7 @@ class _OutlineHistoryDetailPageState extends State<OutlineHistoryDetailPage> {
   /// 返回 true 表示可以继续（已按选择保存或无需保存）；false 表示用户取消。
   Future<bool> _ensureSavedBeforeProceed() async {
     if (!_isDirty) return true;
+    final p = context.palette;
     final choice = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -358,9 +361,9 @@ class _OutlineHistoryDetailPageState extends State<OutlineHistoryDetailPage> {
         actions: [
           TextButton(
             onPressed: () => closeDialogSafely(ctx, result: 'discard'),
-            child: const Text(
+            child: Text(
               '不保存',
-              style: TextStyle(color: Color(0xFF999999)),
+              style: TextStyle(color: p.textTertiary),
             ),
           ),
           TextButton(
@@ -369,7 +372,7 @@ class _OutlineHistoryDetailPageState extends State<OutlineHistoryDetailPage> {
           ),
           TextButton(
             onPressed: () => closeDialogSafely(ctx, result: 'save'),
-            child: const Text('保存并继续', style: TextStyle(color: kSettingsTitle)),
+            child: Text('保存并继续', style: TextStyle(color: p.textPrimary)),
           ),
         ],
       ),
@@ -398,6 +401,7 @@ class _OutlineHistoryDetailPageState extends State<OutlineHistoryDetailPage> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     final r = widget.record;
     return PopScope(
       // 拦截系统返回（Android 返回键/手势）：有未保存修改时先询问是否保存
@@ -407,47 +411,47 @@ class _OutlineHistoryDetailPageState extends State<OutlineHistoryDetailPage> {
         _confirmExitIfDirty();
       },
       child: Scaffold(
-        backgroundColor: Colors.white,
+        backgroundColor: p.background,
         appBar: AppBar(
           title: Text(
             r.title.isNotEmpty ? r.title : '大纲详情',
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w600,
-              color: kSettingsTitle,
+              color: p.textPrimary,
             ),
           ),
-          backgroundColor: Colors.white,
+          backgroundColor: p.surface,
           elevation: 0,
           scrolledUnderElevation: 0,
           centerTitle: true,
           leading: IconButton(
-            icon: const Icon(
+            icon: Icon(
               Icons.arrow_back_ios_new_rounded,
               size: 18,
-              color: kSettingsLabel,
+              color: p.textPrimary,
             ),
             onPressed: _confirmExitIfDirty,
           ),
           actions: [
             TextButton(
               onPressed: _save,
-              child: const Text(
+              child: Text(
                 '保存',
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
-                  color: kSettingsTitle,
+                  color: p.textPrimary,
                 ),
               ),
             ),
           ],
-          bottom: const PreferredSize(
-            preferredSize: Size.fromHeight(1),
+          bottom: PreferredSize(
+            preferredSize: const Size.fromHeight(1),
             child: Divider(
               height: 1,
               thickness: 1,
-              color: kSettingsAppBarDivider,
+              color: p.border,
             ),
           ),
         ),
@@ -497,7 +501,7 @@ class _OutlineHistoryDetailPageState extends State<OutlineHistoryDetailPage> {
                             style: TextStyle(fontSize: 12),
                           ),
                           style: TextButton.styleFrom(
-                            foregroundColor: kSettingsValue,
+                            foregroundColor: p.textSecondary,
                             visualDensity: VisualDensity.compact,
                             padding: EdgeInsets.zero,
                             minimumSize: Size.zero,
@@ -518,8 +522,8 @@ class _OutlineHistoryDetailPageState extends State<OutlineHistoryDetailPage> {
                             ),
                             label: const Text('继续生成'),
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: kSettingsTitle,
-                              foregroundColor: Colors.white,
+                              backgroundColor: p.textPrimary,
+                              foregroundColor: p.onAccent,
                               elevation: 0,
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(12),
@@ -537,9 +541,9 @@ class _OutlineHistoryDetailPageState extends State<OutlineHistoryDetailPage> {
                           icon: const Icon(Icons.auto_awesome, size: 18),
                           label: const Text('重新生成大纲'),
                           style: OutlinedButton.styleFrom(
-                            foregroundColor: kSettingsLabel,
-                            backgroundColor: Colors.white,
-                            side: const BorderSide(color: kSettingsFieldBorder),
+                            foregroundColor: p.textPrimary,
+                            backgroundColor: p.surface,
+                            side: BorderSide(color: p.border),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(12),
                             ),
@@ -558,10 +562,10 @@ class _OutlineHistoryDetailPageState extends State<OutlineHistoryDetailPage> {
                               ),
                               label: const Text('编辑粗骨'),
                               style: OutlinedButton.styleFrom(
-                                foregroundColor: kSettingsLabel,
-                                backgroundColor: Colors.white,
-                                side: const BorderSide(
-                                  color: kSettingsFieldBorder,
+                                foregroundColor: p.textPrimary,
+                                backgroundColor: p.surface,
+                                side: BorderSide(
+                                  color: p.border,
                                 ),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(12),
@@ -579,10 +583,10 @@ class _OutlineHistoryDetailPageState extends State<OutlineHistoryDetailPage> {
                               ),
                               label: const Text('编辑大事件'),
                               style: OutlinedButton.styleFrom(
-                                foregroundColor: kSettingsLabel,
-                                backgroundColor: Colors.white,
-                                side: const BorderSide(
-                                  color: kSettingsFieldBorder,
+                                foregroundColor: p.textPrimary,
+                                backgroundColor: p.surface,
+                                side: BorderSide(
+                                  color: p.border,
                                 ),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(12),
@@ -595,7 +599,7 @@ class _OutlineHistoryDetailPageState extends State<OutlineHistoryDetailPage> {
                       const SizedBox(height: 4),
                       Text(
                         '局部重新生成：编辑粗骨/大事件后仅重写对应下游内容，另存为新大纲',
-                        style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                        style: TextStyle(fontSize: 11, color: p.textTertiary),
                       ),
                     ],
                   ),
@@ -611,10 +615,10 @@ class _OutlineHistoryDetailPageState extends State<OutlineHistoryDetailPage> {
                   focusNode: _editFocusNode,
                   maxLines: null,
                   minLines: 1,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12,
                     height: 1.5,
-                    color: Color(0xFF444444),
+                    color: p.textPrimary,
                   ),
                   decoration: const InputDecoration(
                     border: InputBorder.none,
@@ -636,10 +640,10 @@ class _OutlineHistoryDetailPageState extends State<OutlineHistoryDetailPage> {
                     child: Text(
                       // 空行显示为最小高度行，保证可点击进入编辑
                       text.isEmpty ? '\u00A0' : text,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
                         height: 1.5,
-                        color: Color(0xFF444444),
+                        color: p.textPrimary,
                       ),
                     ),
                   ),
@@ -654,18 +658,19 @@ class _OutlineHistoryDetailPageState extends State<OutlineHistoryDetailPage> {
 
   Widget _infoRow(String label, String value) {
     if (value.isEmpty) return const SizedBox.shrink();
+    final p = context.palette;
     return Padding(
       padding: const EdgeInsets.only(bottom: 4),
       child: Row(
         children: [
           Text(
             '$label：',
-            style: const TextStyle(fontSize: 13, color: Color(0xFF999999)),
+            style: TextStyle(fontSize: 13, color: p.textTertiary),
           ),
           Expanded(
             child: Text(
               value,
-              style: const TextStyle(fontSize: 13, color: Color(0xFF333333)),
+              style: TextStyle(fontSize: 13, color: p.textPrimary),
             ),
           ),
         ],

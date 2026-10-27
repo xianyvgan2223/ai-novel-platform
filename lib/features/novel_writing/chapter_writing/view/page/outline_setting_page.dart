@@ -16,6 +16,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../../../core/config/deepseek_models.dart';
+import 'package:deepseekapp/core/theme/app_palette.dart';
 import '../../../../../core/widgets/settings_kit.dart';
 import '../../../shared/data/outline_db_helper.dart';
 import '../../../shared/domain/chapter_setting.dart';
@@ -141,8 +142,9 @@ class _ChapterSettingPageState extends State<ChapterSettingPage> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return Scaffold(
-      backgroundColor: kSettingsPageBg,
+      backgroundColor: p.background,
       appBar: SettingsAppBar(
         title: '章节写作设置',
         // 加载中保存按钮显示为禁用态（与改造前 AppBar 的禁用语义一致）。
@@ -150,7 +152,7 @@ class _ChapterSettingPageState extends State<ChapterSettingPage> {
         saveEnabled: !_loading,
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator(color: kSettingsPrimary))
+          ? Center(child: CircularProgressIndicator(color: p.accent))
           : ListView(
               padding: EdgeInsets.only(
                 top: 2,

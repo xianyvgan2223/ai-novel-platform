@@ -2,6 +2,7 @@
 // 跑团模拟器主游戏页 — 叙事流 + 骰子判定 + 行动输入
 
 import 'package:flutter/material.dart';
+import 'package:deepseekapp/core/theme/app_palette.dart';
 import '../../controller/trpg_controller.dart';
 import '../../model/character_sheet.dart';
 import '../../model/dm_response.dart';
@@ -72,10 +73,11 @@ class _TrpgGamePageState extends State<TrpgGamePage> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     if (!_loaded) {
-      return const Scaffold(
-        backgroundColor: Color(0xFFF8F8F8),
-        body: Center(
+      return Scaffold(
+        backgroundColor: p.background,
+        body: const Center(
           child: SizedBox(
             width: 24,
             height: 24,
@@ -91,7 +93,7 @@ class _TrpgGamePageState extends State<TrpgGamePage> {
     final error = _controller.error;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF8F8F8),
+      backgroundColor: p.background,
       appBar: _buildAppBar(character),
       body: Column(
         children: [
@@ -106,13 +108,14 @@ class _TrpgGamePageState extends State<TrpgGamePage> {
   }
 
   PreferredSizeWidget _buildAppBar(CharacterSheet? character) {
+    final p = context.palette;
     return AppBar(
       toolbarHeight: 44,
-      backgroundColor: Colors.white,
+      backgroundColor: p.surface,
       elevation: 0,
       scrolledUnderElevation: 0,
       leading: IconButton(
-        icon: const Icon(Icons.arrow_back, size: 20, color: Color(0xFF333333)),
+        icon: Icon(Icons.arrow_back, size: 20, color: p.textPrimary),
         constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
         onPressed: () => Navigator.of(context).pop(),
       ),
@@ -123,16 +126,16 @@ class _TrpgGamePageState extends State<TrpgGamePage> {
             width: 26,
             height: 26,
             decoration: BoxDecoration(
-              color: const Color(0xFF4D6BFE).withValues(alpha: 0.15),
+              color: p.accent.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(13),
             ),
             alignment: Alignment.center,
             child: Text(
               character?.name.characters.first ?? '?',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.bold,
-                color: Color(0xFF4D6BFE),
+                color: p.accent,
               ),
             ),
           ),
@@ -141,10 +144,10 @@ class _TrpgGamePageState extends State<TrpgGamePage> {
             character == null
                 ? '冒险'
                 : '${character.name}（${character.charClass}）',
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w600,
-              color: Color(0xFF333333),
+              color: p.textPrimary,
             ),
           ),
         ],
@@ -152,35 +155,36 @@ class _TrpgGamePageState extends State<TrpgGamePage> {
       centerTitle: true,
       actions: [
         IconButton(
-          icon: const Icon(
+          icon: Icon(
             Icons.badge_outlined,
             size: 20,
-            color: Color(0xFF333333),
+            color: p.textPrimary,
           ),
           constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
           onPressed: () => _showCharacterSheet(character),
         ),
       ],
-      bottom: const PreferredSize(
-        preferredSize: Size.fromHeight(1),
-        child: Divider(height: 1, color: Color(0xFFEEEEEE)),
+      bottom: PreferredSize(
+        preferredSize: const Size.fromHeight(1),
+        child: Divider(height: 1, color: p.border),
       ),
     );
   }
 
   Widget _buildErrorBar(String error) {
+    final p = context.palette;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      color: const Color(0xFFFFEBEE),
+      color: p.dangerSoft,
       child: Row(
         children: [
-          const Icon(Icons.error_outline, size: 14, color: Colors.red),
+          Icon(Icons.error_outline, size: 14, color: p.danger),
           const SizedBox(width: 6),
           Expanded(
             child: Text(
               error,
-              style: const TextStyle(fontSize: 11, color: Colors.red),
+              style: TextStyle(fontSize: 11, color: p.danger),
             ),
           ),
         ],
@@ -189,31 +193,35 @@ class _TrpgGamePageState extends State<TrpgGamePage> {
   }
 
   Widget _buildSceneBar() {
+    final p = context.palette;
     final scene = _controller.campaign?.scene ?? '';
     final hp = _controller.character;
+    final hpColor = p.isDark
+        ? const Color(0xFFFF8A80)
+        : const Color(0xFFE74C3C);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      color: const Color(0xFFF0F2FF),
+      color: p.accentSoft,
       child: Row(
         children: [
-          const Icon(Icons.place_outlined, size: 14, color: Color(0xFF4D6BFE)),
+          Icon(Icons.place_outlined, size: 14, color: p.accent),
           const SizedBox(width: 6),
           Expanded(
             child: Text(
               scene.isEmpty ? '冒险即将开始…' : scene,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 12, color: Color(0xFF4D6BFE)),
+              style: TextStyle(fontSize: 12, color: p.accent),
             ),
           ),
           if (hp != null)
             Text(
               'HP ${hp.currentHp}/${hp.maxHp}',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
-                color: Color(0xFFE74C3C),
+                color: hpColor,
               ),
             ),
         ],
@@ -222,16 +230,17 @@ class _TrpgGamePageState extends State<TrpgGamePage> {
   }
 
   Widget _buildMessageList(List<TrpgMessage> messages, bool isLoading) {
+    final p = context.palette;
     if (messages.isEmpty) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.casino, size: 40, color: Color(0xFFCCCCCC)),
+            Icon(Icons.casino, size: 40, color: p.textTertiary),
             const SizedBox(height: 10),
-            const Text(
+            Text(
               '输入行动，开始你的冒险',
-              style: TextStyle(fontSize: 13, color: Color(0xFF999999)),
+              style: TextStyle(fontSize: 13, color: p.textTertiary),
             ),
           ],
         ),
@@ -252,6 +261,8 @@ class _TrpgGamePageState extends State<TrpgGamePage> {
   }
 
   Widget _buildCheckBar(CheckInfo check) {
+    final p = context.palette;
+    final accentGold = p.isDark ? p.warning : const Color(0xFF997A00);
     final type = check.type;
     final skill = check.skill;
     final dc = check.dc;
@@ -264,10 +275,12 @@ class _TrpgGamePageState extends State<TrpgGamePage> {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      color: const Color(0xFFFFF9E6),
+      color: p.isDark
+          ? p.warning.withValues(alpha: 0.14)
+          : const Color(0xFFFFF9E6),
       child: Row(
         children: [
-          const Icon(Icons.casino, size: 18, color: Color(0xFF997A00)),
+          Icon(Icons.casino, size: 18, color: accentGold),
           const SizedBox(width: 8),
           Expanded(
             child: Column(
@@ -275,18 +288,18 @@ class _TrpgGamePageState extends State<TrpgGamePage> {
               children: [
                 Text(
                   '需要 $abilityName${skillName != null ? '($skillName)' : ''}检定，DC $dc',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
-                    color: Color(0xFF997A00),
+                    color: accentGold,
                   ),
                 ),
                 if (desc.isNotEmpty)
                   Text(
                     desc,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 11,
-                      color: Color(0xFFB08A00),
+                      color: p.isDark ? p.warning : const Color(0xFFB08A00),
                     ),
                   ),
               ],
@@ -296,8 +309,8 @@ class _TrpgGamePageState extends State<TrpgGamePage> {
           ElevatedButton(
             onPressed: _controller.isLoading ? null : _controller.rollCheck,
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF997A00),
-              foregroundColor: Colors.white,
+              backgroundColor: accentGold,
+              foregroundColor: p.isDark ? p.onAccent : Colors.white,
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
               minimumSize: const Size(0, 32),
             ),
@@ -309,10 +322,11 @@ class _TrpgGamePageState extends State<TrpgGamePage> {
   }
 
   Widget _buildInputArea() {
+    final p = context.palette;
     return Container(
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(top: BorderSide(color: Color(0xFFEEEEEE), width: 1)),
+      decoration: BoxDecoration(
+        color: p.surface,
+        border: Border(top: BorderSide(color: p.border, width: 1)),
       ),
       padding: const EdgeInsets.fromLTRB(10, 6, 10, 8),
       child: SafeArea(
@@ -337,18 +351,18 @@ class _TrpgGamePageState extends State<TrpgGamePage> {
                 Expanded(
                   child: TextField(
                     controller: _inputCtrl,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 13,
-                      color: Color(0xFF333333),
+                      color: p.textPrimary,
                     ),
                     decoration: InputDecoration(
                       hintText: '描述你的行动…',
-                      hintStyle: const TextStyle(
-                        color: Color(0xFFBBBBBB),
+                      hintStyle: TextStyle(
+                        color: p.textTertiary,
                         fontSize: 13,
                       ),
                       filled: true,
-                      fillColor: const Color(0xFFF5F5F5),
+                      fillColor: p.surfaceMuted,
                       contentPadding: const EdgeInsets.symmetric(
                         horizontal: 14,
                         vertical: 8,
@@ -373,16 +387,14 @@ class _TrpgGamePageState extends State<TrpgGamePage> {
                     width: 34,
                     height: 34,
                     decoration: BoxDecoration(
-                      color: _controller.isLoading
-                          ? Colors.redAccent
-                          : const Color(0xFF4D6BFE),
+                      color: _controller.isLoading ? p.danger : p.accent,
                       borderRadius: BorderRadius.circular(17),
                     ),
                     alignment: Alignment.center,
                     child: Icon(
                       _controller.isLoading ? Icons.stop : Icons.arrow_upward,
                       size: 16,
-                      color: Colors.white,
+                      color: p.onAccent,
                     ),
                   ),
                 ),
@@ -395,13 +407,14 @@ class _TrpgGamePageState extends State<TrpgGamePage> {
   }
 
   Widget _actionChip(String label, String action) {
+    final p = context.palette;
     return Padding(
       padding: const EdgeInsets.only(right: 6),
       child: ActionChip(
         label: Text(label, style: const TextStyle(fontSize: 12)),
         onPressed: _controller.isLoading ? null : () => _send(action),
-        backgroundColor: const Color(0xFFF0F2FF),
-        labelStyle: const TextStyle(color: Color(0xFF4D6BFE), fontSize: 12),
+        backgroundColor: p.accentSoft,
+        labelStyle: TextStyle(color: p.accent, fontSize: 12),
         visualDensity: VisualDensity.compact,
       ),
     );
@@ -415,6 +428,7 @@ class _TrpgGamePageState extends State<TrpgGamePage> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
       builder: (ctx) {
+        final p = ctx.palette;
         return Padding(
           padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
           child: Column(
@@ -423,10 +437,10 @@ class _TrpgGamePageState extends State<TrpgGamePage> {
             children: [
               Text(
                 '${character.name}（${character.race} ${character.charClass}）',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w600,
-                  color: Color(0xFF333333),
+                  color: p.textPrimary,
                 ),
               ),
               const SizedBox(height: 12),
@@ -453,12 +467,12 @@ class _TrpgGamePageState extends State<TrpgGamePage> {
               ),
               if (character.skilledSkills.isNotEmpty) ...[
                 const SizedBox(height: 16),
-                const Text(
+                Text(
                   '熟练技能',
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
-                    color: Color(0xFF666666),
+                    color: p.textSecondary,
                   ),
                 ),
                 const SizedBox(height: 6),
@@ -466,28 +480,28 @@ class _TrpgGamePageState extends State<TrpgGamePage> {
                   character.skilledSkills
                       .map((s) => CharacterSheet.skillLabels[s] ?? s)
                       .join('、'),
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12,
-                    color: Color(0xFF333333),
+                    color: p.textPrimary,
                   ),
                 ),
               ],
               if (character.inventory.isNotEmpty) ...[
                 const SizedBox(height: 16),
-                const Text(
+                Text(
                   '背包',
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
-                    color: Color(0xFF666666),
+                    color: p.textSecondary,
                   ),
                 ),
                 const SizedBox(height: 6),
                 Text(
                   character.inventory.join('、'),
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12,
-                    color: Color(0xFF333333),
+                    color: p.textPrimary,
                   ),
                 ),
               ],
@@ -518,20 +532,21 @@ class _TrpgGamePageState extends State<TrpgGamePage> {
   }
 
   Widget _statBox(String label, String value) {
+    final p = context.palette;
     return Column(
       children: [
         Text(
           value,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 14,
             fontWeight: FontWeight.bold,
-            color: Color(0xFF333333),
+            color: p.textPrimary,
           ),
         ),
         const SizedBox(height: 2),
         Text(
           label,
-          style: const TextStyle(fontSize: 10, color: Color(0xFF999999)),
+          style: TextStyle(fontSize: 10, color: p.textTertiary),
         ),
       ],
     );
@@ -547,6 +562,7 @@ class _MessageBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     // 骰子判定结果：居中卡片
     if (_isRoll) {
       final roll = message.meta['roll'] as Map<String, dynamic>? ?? {};
@@ -555,17 +571,22 @@ class _MessageBubble extends StatelessWidget {
         margin: const EdgeInsets.symmetric(vertical: 6),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          color: success ? const Color(0xFFE8F5E9) : const Color(0xFFFFEBEE),
+          color: success ? p.successSoft : p.dangerSoft,
           borderRadius: BorderRadius.circular(10),
+          border: p.isDark
+              ? Border.all(
+                  color: success
+                      ? p.success.withValues(alpha: 0.35)
+                      : p.danger.withValues(alpha: 0.35),
+                )
+              : null,
         ),
         child: Row(
           children: [
             Icon(
               success ? Icons.check_circle : Icons.cancel,
               size: 16,
-              color: success
-                  ? const Color(0xFF2E7D32)
-                  : const Color(0xFFC62828),
+              color: success ? p.success : p.danger,
             ),
             const SizedBox(width: 8),
             Expanded(
@@ -573,9 +594,7 @@ class _MessageBubble extends StatelessWidget {
                 message.content,
                 style: TextStyle(
                   fontSize: 12,
-                  color: success
-                      ? const Color(0xFF2E7D32)
-                      : const Color(0xFFC62828),
+                  color: success ? p.success : p.danger,
                 ),
               ),
             ),
@@ -596,14 +615,17 @@ class _MessageBubble extends StatelessWidget {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
-              color: isUser ? const Color(0xFF4D6BFE) : Colors.white,
+              color: isUser ? p.bubbleUser : p.bubbleAssistant,
               borderRadius: BorderRadius.only(
                 topLeft: Radius.circular(isUser ? 14 : 4),
                 topRight: Radius.circular(isUser ? 4 : 14),
                 bottomLeft: const Radius.circular(14),
                 bottomRight: const Radius.circular(14),
               ),
-              boxShadow: isUser
+              border: !isUser && p.isDark
+                  ? Border.all(color: p.border)
+                  : null,
+              boxShadow: isUser || p.isDark
                   ? null
                   : [
                       BoxShadow(
@@ -617,7 +639,7 @@ class _MessageBubble extends StatelessWidget {
               message.content,
               style: TextStyle(
                 fontSize: 13,
-                color: isUser ? Colors.white : const Color(0xFF333333),
+                color: isUser ? p.bubbleUserText : p.bubbleAssistantText,
                 height: 1.5,
               ),
             ),
@@ -633,6 +655,7 @@ class _TypingIndicator extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return Align(
       alignment: Alignment.centerLeft,
       child: Padding(
@@ -642,24 +665,25 @@ class _TypingIndicator extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: p.bubbleAssistant,
                 borderRadius: BorderRadius.circular(16),
+                border: p.isDark ? Border.all(color: p.border) : null,
               ),
-              child: const Row(
+              child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  _Dot(),
-                  SizedBox(width: 4),
-                  _Dot(),
-                  SizedBox(width: 4),
-                  _Dot(),
+                  _Dot(p.textTertiary),
+                  const SizedBox(width: 4),
+                  _Dot(p.textTertiary),
+                  const SizedBox(width: 4),
+                  _Dot(p.textTertiary),
                 ],
               ),
             ),
             const SizedBox(width: 8),
-            const Text(
+            Text(
               '主持人正在叙述…',
-              style: TextStyle(fontSize: 11, color: Color(0xFF999999)),
+              style: TextStyle(fontSize: 11, color: p.textTertiary),
             ),
           ],
         ),
@@ -669,16 +693,18 @@ class _TypingIndicator extends StatelessWidget {
 }
 
 class _Dot extends StatelessWidget {
-  const _Dot();
+  final Color color;
+
+  const _Dot(this.color);
 
   @override
   Widget build(BuildContext context) {
-    return const SizedBox(
+    return SizedBox(
       width: 6,
       height: 6,
       child: DecoratedBox(
         decoration: BoxDecoration(
-          color: Color(0xFF999999),
+          color: color,
           shape: BoxShape.circle,
         ),
       ),

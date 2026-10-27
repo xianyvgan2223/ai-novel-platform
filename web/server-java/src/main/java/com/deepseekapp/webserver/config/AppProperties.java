@@ -12,6 +12,7 @@ public class AppProperties {
     private String dataDir = "../server/data";
     private String webDist = "../app/dist";
     private String appUpdateDir = "";
+    private boolean usbAuto = true;
     private String apiToken = "";
     private int maxUploadMb = 512;
     private int defaultPageSize = 50;
@@ -49,6 +50,14 @@ public class AppProperties {
 
     public void setAppUpdateDir(String appUpdateDir) {
         this.appUpdateDir = appUpdateDir;
+    }
+
+    public boolean isUsbAuto() {
+        return usbAuto;
+    }
+
+    public void setUsbAuto(boolean usbAuto) {
+        this.usbAuto = usbAuto;
     }
 
     /** APK 发布目录；留空时跟随数据目录 */

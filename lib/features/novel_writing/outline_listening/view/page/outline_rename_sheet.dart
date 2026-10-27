@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import 'package:deepseekapp/core/theme/app_palette.dart';
 import '../../controller/outline_listen_controller.dart';
 import '../../service/name_finder.dart';
 import '../../service/outline_rename.dart';
@@ -260,6 +261,7 @@ class _OutlineRenameSheetState extends State<OutlineRenameSheet> {
   }
 
   Widget _sheet(Map<String, OutlineRenameResult> previews) {
+    final p = context.palette;
     final valid = _validRules;
     final outlineTotal = valid.fold(
       0,
@@ -280,9 +282,9 @@ class _OutlineRenameSheetState extends State<OutlineRenameSheet> {
       constraints: BoxConstraints(
         maxHeight: MediaQuery.heightOf(context) * 0.9,
       ),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(14)),
+      decoration: BoxDecoration(
+        color: p.surfaceElevated,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -306,14 +308,15 @@ class _OutlineRenameSheetState extends State<OutlineRenameSheet> {
   }
 
   Widget _header() {
+    final p = context.palette;
     return Padding(
       padding: const EdgeInsets.fromLTRB(14, 10, 6, 6),
       child: Row(
         children: [
-          const Icon(
+          Icon(
             Icons.drive_file_rename_outline,
             size: 17,
-            color: Color(0xFF4D6BFE),
+            color: p.accent,
           ),
           const SizedBox(width: 6),
           const Text(
@@ -321,17 +324,17 @@ class _OutlineRenameSheetState extends State<OutlineRenameSheet> {
             style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
           ),
           const SizedBox(width: 8),
-          const Expanded(
+          Expanded(
             child: Text(
               '人名 / 地名 / 门派名，正文与小说设定一起换',
-              style: TextStyle(fontSize: 11, color: Color(0xFF999999)),
+              style: TextStyle(fontSize: 11, color: p.textTertiary),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
           ),
           IconButton(
             icon: const Icon(Icons.close, size: 18),
-            color: const Color(0xFF999999),
+            color: p.textTertiary,
             tooltip: '关闭',
             visualDensity: VisualDensity.compact,
             onPressed: () => Navigator.of(context).pop(),
@@ -343,24 +346,25 @@ class _OutlineRenameSheetState extends State<OutlineRenameSheet> {
 
   /// 替换表：每行「原名称 → 新名称 + 影响预览」
   Widget _rulesSection(Map<String, OutlineRenameResult> previews) {
+    final p = context.palette;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           children: [
-            const Text(
+            Text(
               '替换表',
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
-                color: Color(0xFF333333),
+                color: p.textPrimary,
               ),
             ),
             const SizedBox(width: 6),
-            const Expanded(
+            Expanded(
               child: Text(
                 '左栏填要改掉的写法，右栏填新名称',
-                style: TextStyle(fontSize: 10.5, color: Color(0xFFBBBBBB)),
+                style: TextStyle(fontSize: 10.5, color: p.textTertiary),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -370,7 +374,7 @@ class _OutlineRenameSheetState extends State<OutlineRenameSheet> {
               icon: const Icon(Icons.add, size: 15),
               label: const Text('加一条', style: TextStyle(fontSize: 12)),
               style: TextButton.styleFrom(
-                foregroundColor: const Color(0xFF4D6BFE),
+                foregroundColor: p.accent,
                 visualDensity: VisualDensity.compact,
                 padding: const EdgeInsets.symmetric(horizontal: 8),
               ),
@@ -389,16 +393,17 @@ class _OutlineRenameSheetState extends State<OutlineRenameSheet> {
     _RenameRule rule,
     OutlineRenameResult? preview,
   ) {
+    final p = context.palette;
     final expanded = _expandedRule == index;
     final bad = rule.source.isNotEmpty && rule.target.isNotEmpty && !rule.isValid;
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.fromLTRB(8, 6, 6, 6),
       decoration: BoxDecoration(
-        color: rule.isValid ? const Color(0xFFF8F9FF) : Colors.white,
+        color: rule.isValid ? p.accentSoft : p.surface,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: bad ? const Color(0xFFFFCC80) : const Color(0xFFE8ECF4),
+          color: bad ? p.warning : p.border,
         ),
       ),
       child: Column(
@@ -411,12 +416,12 @@ class _OutlineRenameSheetState extends State<OutlineRenameSheet> {
                   hint: '原名称，如 李云飞',
                 ),
               ),
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 6),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6),
                 child: Icon(
                   Icons.arrow_forward,
                   size: 15,
-                  color: Color(0xFF4D6BFE),
+                  color: p.accent,
                 ),
               ),
               Expanded(
@@ -427,7 +432,7 @@ class _OutlineRenameSheetState extends State<OutlineRenameSheet> {
               ),
               IconButton(
                 icon: const Icon(Icons.close, size: 16),
-                color: const Color(0xFF999999),
+                color: p.textTertiary,
                 tooltip: '删除这一条',
                 visualDensity: VisualDensity.compact,
                 padding: const EdgeInsets.all(2),
@@ -452,8 +457,8 @@ class _OutlineRenameSheetState extends State<OutlineRenameSheet> {
                           : Icons.find_in_page_outlined,
                       size: 13,
                       color: preview == null || preview.isEmpty
-                          ? const Color(0xFFBBBBBB)
-                          : const Color(0xFF4D6BFE),
+                          ? p.textTertiary
+                          : p.accent,
                     ),
                     const SizedBox(width: 4),
                     Expanded(
@@ -462,17 +467,17 @@ class _OutlineRenameSheetState extends State<OutlineRenameSheet> {
                         style: TextStyle(
                           fontSize: 10.5,
                           color: preview == null || preview.isEmpty
-                              ? const Color(0xFF999999)
-                              : const Color(0xFF4D6BFE),
+                              ? p.textTertiary
+                              : p.accent,
                         ),
                       ),
                     ),
                     if (!rule.isValid && rule.target.isNotEmpty)
-                      const Text(
+                      Text(
                         '原名称与新名称相同',
                         style: TextStyle(
                           fontSize: 10,
-                          color: Color(0xFFE65100),
+                          color: p.warning,
                         ),
                       ),
                   ],
@@ -520,21 +525,22 @@ class _OutlineRenameSheetState extends State<OutlineRenameSheet> {
 
   /// 设定里命中、但「同时改小说设定」没勾时的提示：点一下直接勾上
   Widget _settingsHint(OutlineRenameResult preview) {
+    final p = context.palette;
     return InkWell(
       onTap: () => setState(() => _renameSettings = true),
       child: Padding(
         padding: const EdgeInsets.only(left: 17, top: 1, bottom: 2),
         child: Row(
           children: [
-            const Icon(Icons.tune, size: 12, color: Color(0xFF4D6BFE)),
+            Icon(Icons.tune, size: 12, color: p.accent),
             const SizedBox(width: 4),
             Expanded(
               child: Text(
                 '小说设定里也命中 ${preview.settingCount} 处（点这里勾选「同时改小说设定」一起改）',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 10,
                   height: 1.35,
-                  color: Color(0xFF4D6BFE),
+                  color: p.accent,
                 ),
               ),
             ),
@@ -546,13 +552,14 @@ class _OutlineRenameSheetState extends State<OutlineRenameSheet> {
 
   /// 具体命中位置：改之前先看清楚改的是哪几句
   Widget _hitList(OutlineRenameResult preview) {
+    final p = context.palette;
     final shown = preview.hits.take(OutlineRenameResult.previewLimit).toList();
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.only(top: 4),
       padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
       decoration: BoxDecoration(
-        color: const Color(0xFFF5F7FB),
+        color: p.surfaceMuted,
         borderRadius: BorderRadius.circular(8),
       ),
       child: Column(
@@ -566,20 +573,20 @@ class _OutlineRenameSheetState extends State<OutlineRenameSheet> {
                 children: [
                   Text(
                     hit.where,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 10,
                       fontWeight: FontWeight.w600,
-                      color: Color(0xFF4D6BFE),
+                      color: p.accent,
                     ),
                   ),
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
                       '${hit.context}（${hit.count} 处）',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 10.5,
                         height: 1.35,
-                        color: Color(0xFF666666),
+                        color: p.textSecondary,
                       ),
                     ),
                   ),
@@ -589,7 +596,7 @@ class _OutlineRenameSheetState extends State<OutlineRenameSheet> {
           if (preview.hits.length > shown.length)
             Text(
               '还有 ${preview.hits.length - shown.length} 处未列出',
-              style: const TextStyle(fontSize: 10, color: Color(0xFF999999)),
+              style: TextStyle(fontSize: 10, color: p.textTertiary),
             ),
           // 小说设定里的命中（类型 / 主题 / 主角简介 / 世界观 / 人物档案）
           for (final hit in preview.settingHits)
@@ -604,10 +611,10 @@ class _OutlineRenameSheetState extends State<OutlineRenameSheet> {
                       hit.label,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.w600,
-                        color: Color(0xFF4D6BFE),
+                        color: p.accent,
                       ),
                     ),
                   ),
@@ -615,10 +622,10 @@ class _OutlineRenameSheetState extends State<OutlineRenameSheet> {
                   Expanded(
                     child: Text(
                       '${hit.context}（${hit.count} 处）',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 10.5,
                         height: 1.35,
-                        color: Color(0xFF666666),
+                        color: p.textSecondary,
                       ),
                     ),
                   ),
@@ -626,14 +633,14 @@ class _OutlineRenameSheetState extends State<OutlineRenameSheet> {
               ),
             ),
           if (preview.hasSettingHits && !_renameSettings)
-            const Padding(
-              padding: EdgeInsets.only(top: 2),
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
               child: Text(
                 '小说设定里的命中要勾选下方「同时改小说设定」才会替换',
                 style: TextStyle(
                   fontSize: 10,
                   height: 1.35,
-                  color: Color(0xFFBBBBBB),
+                  color: p.textTertiary,
                 ),
               ),
             ),
@@ -644,25 +651,26 @@ class _OutlineRenameSheetState extends State<OutlineRenameSheet> {
 
   /// 候选专名：点一下加入替换表
   Widget _candidatesSection() {
+    final p = context.palette;
     final candidates = _candidates;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           children: [
-            const Text(
+            Text(
               '可能的专名',
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
-                color: Color(0xFF333333),
+                color: p.textPrimary,
               ),
             ),
             const SizedBox(width: 6),
             Expanded(
               child: Text(
                 candidates.isEmpty ? '没挑到候选' : '共 ${candidates.length} 个 · 点一下加入替换表',
-                style: const TextStyle(fontSize: 10.5, color: Color(0xFFBBBBBB)),
+                style: TextStyle(fontSize: 10.5, color: p.textTertiary),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -681,7 +689,7 @@ class _OutlineRenameSheetState extends State<OutlineRenameSheet> {
                 style: const TextStyle(fontSize: 12),
               ),
               style: TextButton.styleFrom(
-                foregroundColor: const Color(0xFF4D6BFE),
+                foregroundColor: p.accent,
                 visualDensity: VisualDensity.compact,
                 padding: const EdgeInsets.symmetric(horizontal: 8),
               ),
@@ -690,15 +698,15 @@ class _OutlineRenameSheetState extends State<OutlineRenameSheet> {
         ),
         const SizedBox(height: 4),
         if (candidates.isEmpty)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
             child: Text(
               '没有自动挑出候选（正文太短或名字出现次数太少时会出现）。'
               '可以直接在上面的替换表里手填任何词——不限于人名地名。',
               style: TextStyle(
                 fontSize: 11,
                 height: 1.5,
-                color: Color(0xFF999999),
+                color: p.textTertiary,
               ),
             ),
           )
@@ -715,6 +723,7 @@ class _OutlineRenameSheetState extends State<OutlineRenameSheet> {
   }
 
   Widget _candidateChip(OutlineNameCandidate candidate) {
+    final p = context.palette;
     final used = _rules.any((r) => r.source == candidate.text);
     return InkWell(
       onTap: () => _useCandidate(candidate),
@@ -722,10 +731,10 @@ class _OutlineRenameSheetState extends State<OutlineRenameSheet> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
-          color: used ? const Color(0xFFEFF3FF) : const Color(0xFFF5F7FB),
+          color: used ? p.accentSoft : p.surfaceMuted,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
-            color: used ? const Color(0xFF4D6BFE) : const Color(0xFFE3E8F2),
+            color: used ? p.accent : p.borderStrong,
           ),
         ),
         child: Row(
@@ -736,19 +745,17 @@ class _OutlineRenameSheetState extends State<OutlineRenameSheet> {
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
-                color: used
-                    ? const Color(0xFF4D6BFE)
-                    : const Color(0xFF333333),
+                color: used ? p.accent : p.textPrimary,
               ),
             ),
             const SizedBox(width: 4),
             Text(
               '${candidate.kind.label}·${candidate.count}',
-              style: const TextStyle(fontSize: 9.5, color: Color(0xFF999999)),
+              style: TextStyle(fontSize: 9.5, color: p.textTertiary),
             ),
             if (used) ...[
               const SizedBox(width: 3),
-              const Icon(Icons.check, size: 12, color: Color(0xFF4D6BFE)),
+              Icon(Icons.check, size: 12, color: p.accent),
             ],
           ],
         ),
@@ -762,6 +769,7 @@ class _OutlineRenameSheetState extends State<OutlineRenameSheet> {
     int settingTotal,
     int eventCount,
   ) {
+    final p = context.palette;
     // 实际会替换的处数：勾了「同时改小说设定」才把设定算进来
     final replaceable = outlineTotal + (_renameSettings ? settingTotal : 0);
     final String status;
@@ -783,8 +791,8 @@ class _OutlineRenameSheetState extends State<OutlineRenameSheet> {
       top: false,
       child: Container(
         padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
-        decoration: const BoxDecoration(
-          border: Border(top: BorderSide(color: Color(0xFFEEEEEE))),
+        decoration: BoxDecoration(
+          border: Border(top: BorderSide(color: p.border)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -794,8 +802,8 @@ class _OutlineRenameSheetState extends State<OutlineRenameSheet> {
               style: TextStyle(
                 fontSize: 11.5,
                 color: replaceable > 0
-                    ? const Color(0xFF666666)
-                    : const Color(0xFF999999),
+                    ? p.textSecondary
+                    : p.textTertiary,
               ),
             ),
             // 设定字段里的同名文字要不要一起改，交给用户定：
@@ -815,19 +823,19 @@ class _OutlineRenameSheetState extends State<OutlineRenameSheet> {
                         value: _renameSettings,
                         onChanged: (v) =>
                             setState(() => _renameSettings = v ?? false),
-                        activeColor: const Color(0xFF4D6BFE),
+                        activeColor: p.accent,
                         visualDensity: VisualDensity.compact,
                         materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       ),
                     ),
                     const SizedBox(width: 4),
-                    const Expanded(
+                    Expanded(
                       child: Text(
                         '同时改小说设定（类型 / 主题 / 主角简介 / 世界观 / 人物档案）',
                         style: TextStyle(
                           fontSize: 11,
                           height: 1.35,
-                          color: Color(0xFF666666),
+                          color: p.textSecondary,
                         ),
                       ),
                     ),
@@ -842,8 +850,8 @@ class _OutlineRenameSheetState extends State<OutlineRenameSheet> {
                   child: OutlinedButton(
                     onPressed: () => Navigator.of(context).pop(),
                     style: OutlinedButton.styleFrom(
-                      foregroundColor: const Color(0xFF666666),
-                      side: const BorderSide(color: Color(0xFFDDDDDD)),
+                      foregroundColor: p.textSecondary,
+                      side: BorderSide(color: p.borderStrong),
                       padding: const EdgeInsets.symmetric(vertical: 11),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8),
@@ -860,12 +868,12 @@ class _OutlineRenameSheetState extends State<OutlineRenameSheet> {
                         ? null
                         : _apply,
                     icon: _replacing
-                        ? const SizedBox(
+                        ? SizedBox(
                             width: 14,
                             height: 14,
                             child: CircularProgressIndicator(
                               strokeWidth: 2,
-                              color: Colors.white,
+                              color: p.onAccent,
                             ),
                           )
                         : const Icon(Icons.find_replace, size: 17),
@@ -877,10 +885,10 @@ class _OutlineRenameSheetState extends State<OutlineRenameSheet> {
                       ),
                     ),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF4D6BFE),
-                      foregroundColor: Colors.white,
-                      disabledBackgroundColor: const Color(0xFFE8ECF4),
-                      disabledForegroundColor: const Color(0xFF999999),
+                      backgroundColor: p.accent,
+                      foregroundColor: p.onAccent,
+                      disabledBackgroundColor: p.surfaceMuted,
+                      disabledForegroundColor: p.textTertiary,
                       padding: const EdgeInsets.symmetric(vertical: 11),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8),
@@ -897,29 +905,30 @@ class _OutlineRenameSheetState extends State<OutlineRenameSheet> {
   }
 
   Widget _field({required TextEditingController controller, required String hint}) {
+    final p = context.palette;
     return TextField(
       controller: controller,
       decoration: InputDecoration(
         hintText: hint,
-        hintStyle: const TextStyle(fontSize: 12, color: Color(0xFFBBBBBB)),
+        hintStyle: TextStyle(fontSize: 12, color: p.textTertiary),
         isDense: true,
         filled: true,
-        fillColor: Colors.white,
+        fillColor: p.surface,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: Color(0xFFE3E8F2)),
+          borderSide: BorderSide(color: p.borderStrong),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: Color(0xFFE3E8F2)),
+          borderSide: BorderSide(color: p.borderStrong),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: Color(0xFF4D6BFE)),
+          borderSide: BorderSide(color: p.accent),
         ),
         contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
       ),
-      style: const TextStyle(fontSize: 12.5, color: Color(0xFF333333)),
+      style: TextStyle(fontSize: 12.5, color: p.textPrimary),
     );
   }
 }

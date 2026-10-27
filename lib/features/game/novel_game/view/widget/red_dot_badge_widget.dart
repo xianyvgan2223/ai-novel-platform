@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:deepseekapp/core/theme/app_palette.dart';
 
 class RedDotBadgeWidget extends StatelessWidget {
   final Widget child;
@@ -12,6 +13,7 @@ class RedDotBadgeWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return Stack(
       clipBehavior: Clip.none,
       children: [
@@ -22,15 +24,15 @@ class RedDotBadgeWidget extends StatelessWidget {
             top: -6,
             child: Container(
               padding: const EdgeInsets.all(4),
-              decoration: const BoxDecoration(
-                color: Colors.red,
+              decoration: BoxDecoration(
+                color: p.danger,
                 shape: BoxShape.circle,
               ),
               constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
               child: Text(
                 count > 99 ? '99+' : '$count',
-                style: const TextStyle(
-                  color: Colors.white,
+                style: TextStyle(
+                  color: p.onAccent,
                   fontSize: 10,
                   fontWeight: FontWeight.bold,
                 ),

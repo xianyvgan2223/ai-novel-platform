@@ -8,6 +8,7 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:deepseekapp/core/theme/app_palette.dart';
 
 import '../../../../core/config/route_names.dart';
 import '../../application/chat_controller.dart';
@@ -379,6 +380,7 @@ class _FloatingBallState extends ConsumerState<_FloatingBall>
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     final isLoading = ref.watch(chatProvider.select((p) => p.isLoading));
     return GestureDetector(
       onPanStart: (_) => _snapCtrl.stop(),
@@ -389,20 +391,23 @@ class _FloatingBallState extends ConsumerState<_FloatingBall>
         width: _kBallSize,
         height: _kBallSize,
         decoration: BoxDecoration(
-          color: const Color(0xFF4D6BFE),
+          color: p.surfaceElevated,
           shape: BoxShape.circle,
-          boxShadow: const [
-            BoxShadow(
-              color: Colors.black26,
-              blurRadius: 10,
-              offset: Offset(0, 4),
-            ),
-          ],
+          border: Border.all(color: p.border),
+          boxShadow: p.isDark
+              ? null
+              : const [
+                  BoxShadow(
+                    color: Colors.black26,
+                    blurRadius: 10,
+                    offset: Offset(0, 4),
+                  ),
+                ],
         ),
         child: Stack(
           alignment: Alignment.center,
           children: [
-            const Icon(Icons.chat_bubble, color: Colors.white, size: 24),
+            Icon(Icons.chat_bubble, color: p.accent, size: 24),
             // 回复生成中显示小红点
             if (isLoading)
               Positioned(
@@ -412,9 +417,9 @@ class _FloatingBallState extends ConsumerState<_FloatingBall>
                   width: 11,
                   height: 11,
                   decoration: BoxDecoration(
-                    color: Colors.redAccent,
+                    color: p.danger,
                     shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white, width: 1.5),
+                    border: Border.all(color: p.surfaceElevated, width: 1.5),
                   ),
                 ),
               ),
@@ -591,6 +596,7 @@ class _MiniChatPanelState extends ConsumerState<_MiniChatPanel> {
 
   /// 右下角 2D 缩放把手
   Widget _buildCornerHandle() {
+    final p = context.palette;
     return GestureDetector(
       onPanUpdate: _onResizeCorner,
       child: Container(
@@ -598,18 +604,20 @@ class _MiniChatPanelState extends ConsumerState<_MiniChatPanel> {
         height: 26,
         margin: const EdgeInsets.only(right: 2, bottom: 2),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: p.surfaceElevated,
           shape: BoxShape.circle,
-          border: Border.all(color: const Color(0xFFDDDDDD)),
-          boxShadow: const [
-            BoxShadow(
-              color: Colors.black12,
-              blurRadius: 4,
-              offset: Offset(0, 1),
-            ),
-          ],
+          border: Border.all(color: p.border),
+          boxShadow: p.isDark
+              ? null
+              : const [
+                  BoxShadow(
+                    color: Colors.black12,
+                    blurRadius: 4,
+                    offset: Offset(0, 1),
+                  ),
+                ],
         ),
-        child: const Icon(Icons.crop_free, size: 13, color: Color(0xFF999999)),
+        child: Icon(Icons.crop_free, size: 13, color: p.textTertiary),
       ),
     );
   }
@@ -697,20 +705,27 @@ class _MiniChatPanelState extends ConsumerState<_MiniChatPanel> {
     bool isLoading,
     String title,
   ) {
+    final p = context.palette;
     return Material(
-      color: Colors.white,
-      elevation: 12,
-      shadowColor: Colors.black38,
-      borderRadius: BorderRadius.circular(16),
+      color: p.surfaceElevated,
+      elevation: p.isDark ? 0 : 12,
+      shadowColor: p.shadow,
+      shape: p.isDark
+          ? RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+              side: BorderSide(color: p.border),
+            )
+          : null,
+      borderRadius: p.isDark ? null : BorderRadius.circular(16),
       clipBehavior: Clip.antiAlias,
       child: Column(
         children: [
           _buildHeader(title),
-          const Divider(height: 1, color: Color(0xFFEEEEEE)),
+          Divider(height: 1, color: p.border),
           Expanded(
             child: _buildMessageList(messages, messageCount, isStreamingEmpty),
           ),
-          const Divider(height: 1, color: Color(0xFFEEEEEE)),
+          Divider(height: 1, color: p.border),
           _buildInputArea(isLoading),
         ],
       ),
@@ -718,6 +733,7 @@ class _MiniChatPanelState extends ConsumerState<_MiniChatPanel> {
   }
 
   Widget _buildHeader(String title) {
+    final p = context.palette;
     return GestureDetector(
       // 拖动标题栏移动整个窗口
       onPanUpdate: _onMove,
@@ -726,24 +742,24 @@ class _MiniChatPanelState extends ConsumerState<_MiniChatPanel> {
         padding: const EdgeInsets.only(left: 12, right: 4),
         child: Row(
           children: [
-            const Icon(Icons.chat_bubble, size: 15, color: Color(0xFF4D6BFE)),
+            Icon(Icons.chat_bubble, size: 15, color: p.accent),
             const SizedBox(width: 6),
             Expanded(
               child: Text(
                 title,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
-                  color: Color(0xFF333333),
+                  color: p.textPrimary,
                 ),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
             IconButton(
-              icon: const Icon(
+              icon: Icon(
                 Icons.add_comment_outlined,
                 size: 18,
-                color: Color(0xFF666666),
+                color: p.textSecondary,
               ),
               tooltip: '新开聊天',
               constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
@@ -754,10 +770,10 @@ class _MiniChatPanelState extends ConsumerState<_MiniChatPanel> {
               },
             ),
             IconButton(
-              icon: const Icon(
+              icon: Icon(
                 Icons.keyboard_arrow_down,
                 size: 18,
-                color: Color(0xFF666666),
+                color: p.textSecondary,
               ),
               tooltip: '收起',
               constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
@@ -765,10 +781,10 @@ class _MiniChatPanelState extends ConsumerState<_MiniChatPanel> {
               onPressed: widget.onMinimize,
             ),
             IconButton(
-              icon: const Icon(
+              icon: Icon(
                 Icons.open_in_full,
                 size: 15,
-                color: Color(0xFF666666),
+                color: p.textSecondary,
               ),
               tooltip: '回到聊天页',
               constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
@@ -805,29 +821,30 @@ class _MiniChatPanelState extends ConsumerState<_MiniChatPanel> {
   }
 
   Widget _buildInputArea(bool isLoading) {
+    final p = context.palette;
     return Container(
       // 底部留白给右下角缩放把手让位
       padding: const EdgeInsets.fromLTRB(8, 6, 8, 26),
-      color: Colors.white,
+      color: p.surfaceElevated,
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           Expanded(
             child: TextField(
               controller: _inputCtrl,
-              style: const TextStyle(fontSize: 12, color: Color(0xFF333333)),
+              style: TextStyle(fontSize: 12, color: p.textPrimary),
               maxLines: 3,
               minLines: 1,
               textInputAction: TextInputAction.newline,
               onSubmitted: (_) => _onSend(),
               decoration: InputDecoration(
                 hintText: '输入问题或指令...',
-                hintStyle: const TextStyle(
-                  color: Color(0xFFBBBBBB),
+                hintStyle: TextStyle(
+                  color: p.textTertiary,
                   fontSize: 12,
                 ),
                 filled: true,
-                fillColor: const Color(0xFFF5F5F5),
+                fillColor: p.surfaceMuted,
                 isDense: true,
                 contentPadding: const EdgeInsets.symmetric(
                   horizontal: 12,
@@ -847,10 +864,8 @@ class _MiniChatPanelState extends ConsumerState<_MiniChatPanel> {
                 : _onSend,
             icon: Icon(isLoading ? Icons.stop : Icons.arrow_upward, size: 16),
             style: IconButton.styleFrom(
-              backgroundColor: isLoading
-                  ? Colors.redAccent
-                  : const Color(0xFF4D6BFE),
-              foregroundColor: Colors.white,
+              backgroundColor: isLoading ? p.danger : p.accent,
+              foregroundColor: p.onAccent,
               minimumSize: const Size(32, 32),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16),
@@ -869,6 +884,7 @@ class _MiniStreamingBubble extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final p = context.palette;
     final chat = ref.watch(chatProvider);
     final hasPhase1 = chat.phase1Text.isNotEmpty;
     final phase1Visible = hasPhase1 && chat.streamingText.isEmpty;
@@ -886,13 +902,14 @@ class _MiniStreamingBubble extends ConsumerWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               if (chat.streamingThinking.isNotEmpty)
-                _buildThinkingBox(chat.streamingThinking),
-              if (phase1Visible) _buildContentBox(chat.phase1Text),
+                _buildThinkingBox(chat.streamingThinking, p),
+              if (phase1Visible) _buildContentBox(chat.phase1Text, p),
               if (phase2Visible)
                 _buildContentBox(
                   hasPhase1
                       ? '${chat.phase1Text}\n\n${chat.streamingText}'
                       : chat.streamingText,
+                  p,
                 ),
               if (chat.streamingText.isEmpty &&
                   chat.streamingThinking.isEmpty &&
@@ -906,25 +923,25 @@ class _MiniStreamingBubble extends ConsumerWidget {
     );
   }
 
-  Widget _buildThinkingBox(String thinking) {
+  Widget _buildThinkingBox(String thinking, AppPalette p) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       decoration: BoxDecoration(
-        color: const Color(0xFFF5F5F5),
+        color: p.surfaceMuted,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFFE8E8E8)),
+        border: Border.all(color: p.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(
+          Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.psychology, size: 14, color: Color(0xFF999999)),
-              SizedBox(width: 4),
+              Icon(Icons.psychology, size: 14, color: p.textTertiary),
+              const SizedBox(width: 4),
               Text(
                 '思考中...',
-                style: TextStyle(fontSize: 11, color: Color(0xFF999999)),
+                style: TextStyle(fontSize: 11, color: p.textTertiary),
               ),
             ],
           ),
@@ -932,19 +949,19 @@ class _MiniStreamingBubble extends ConsumerWidget {
           SelectableText(
             thinking,
             maxLines: 8,
-            style: const TextStyle(fontSize: 11, color: Color(0xFF666666)),
+            style: TextStyle(fontSize: 11, color: p.textSecondary),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildContentBox(String text) {
+  Widget _buildContentBox(String text, AppPalette p) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      decoration: const BoxDecoration(
-        color: Color(0xFFF5F5F5),
-        borderRadius: BorderRadius.only(
+      decoration: BoxDecoration(
+        color: p.bubbleAssistant,
+        borderRadius: const BorderRadius.only(
           topLeft: Radius.circular(12),
           topRight: Radius.circular(12),
           bottomRight: Radius.circular(12),
@@ -952,9 +969,9 @@ class _MiniStreamingBubble extends ConsumerWidget {
       ),
       child: SelectableText(
         text,
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 13,
-          color: Color(0xFF333333),
+          color: p.bubbleAssistantText,
           height: 1.5,
         ),
       ),
@@ -967,14 +984,15 @@ class _MiniLoading extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Padding(
-      padding: EdgeInsets.only(top: 8),
+    final p = context.palette;
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
       child: SizedBox(
         width: 20,
         height: 20,
         child: CircularProgressIndicator(
           strokeWidth: 2,
-          color: Color(0xFF4D6BFE),
+          color: p.accent,
         ),
       ),
     );

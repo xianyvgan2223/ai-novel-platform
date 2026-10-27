@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:deepseekapp/core/theme/app_palette.dart';
 import '../../../shared/dialog_utils.dart';
 import '../../../shared/domain/character_profile.dart';
 import '../../../shared/data/outline_record_db_helper.dart';
@@ -159,6 +160,7 @@ class _StoryStatePageState extends State<StoryStatePage> {
 
   /// 剧情状态放大编辑弹窗
   void _showStoryStateEnlargeDialog() {
+    final p = context.palette;
     final editCtrl = TextEditingController(text: _storyStateCtrl.text);
     final screenHeight = MediaQuery.heightOf(context);
     final screenWidth = MediaQuery.widthOf(context);
@@ -183,11 +185,11 @@ class _StoryStatePageState extends State<StoryStatePage> {
             maxLines: null,
             expands: true,
             textAlignVertical: TextAlignVertical.top,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               border: InputBorder.none,
-              contentPadding: EdgeInsets.fromLTRB(4, 2, 4, 2),
+              contentPadding: const EdgeInsets.fromLTRB(4, 2, 4, 2),
               filled: true,
-              fillColor: Color(0xFFFAFAFA),
+              fillColor: p.surfaceMuted,
             ),
             style: const TextStyle(fontSize: 10, height: 1.6),
           ),
@@ -218,9 +220,9 @@ class _StoryStatePageState extends State<StoryStatePage> {
               setState(() {});
               scheduleControllerDispose(editCtrl);
             },
-            child: const Text(
+            child: Text(
               '确定',
-              style: TextStyle(fontSize: 12, color: Color(0xFF4D6BFE)),
+              style: TextStyle(fontSize: 12, color: p.accent),
             ),
           ),
         ],
@@ -230,6 +232,7 @@ class _StoryStatePageState extends State<StoryStatePage> {
 
   /// 伏笔清单按行展示（每条一行，空行跳过）
   List<Widget> _buildForeshadowLines() {
+    final p = context.palette;
     final lines = _foreshadowsCtrl.text.split('\n');
     return [
       for (final line in lines)
@@ -239,18 +242,18 @@ class _StoryStatePageState extends State<StoryStatePage> {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Padding(
-                  padding: EdgeInsets.only(top: 4),
-                  child: Icon(Icons.circle, size: 6, color: Color(0xFF4D6BFE)),
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Icon(Icons.circle, size: 6, color: p.accent),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     line.trim(),
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 11,
                       height: 1.5,
-                      color: Color(0xFF666666),
+                      color: p.textSecondary,
                     ),
                   ),
                 ),
@@ -283,6 +286,7 @@ class _StoryStatePageState extends State<StoryStatePage> {
 
   /// 伏笔清单编辑弹窗：多行文本编辑后写回 _foreshadowsCtrl
   void _showForeshadowsEditDialog() {
+    final p = context.palette;
     final editCtrl = TextEditingController(text: _foreshadowsCtrl.text);
     final screenHeight = MediaQuery.heightOf(context);
     final screenWidth = MediaQuery.widthOf(context);
@@ -307,12 +311,12 @@ class _StoryStatePageState extends State<StoryStatePage> {
             maxLines: null,
             expands: true,
             textAlignVertical: TextAlignVertical.top,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               hintText: '每条伏笔一行，形如：伏笔内容（埋设位置 / 计划回收时机）',
               border: InputBorder.none,
-              contentPadding: EdgeInsets.fromLTRB(4, 2, 4, 2),
+              contentPadding: const EdgeInsets.fromLTRB(4, 2, 4, 2),
               filled: true,
-              fillColor: Color(0xFFFAFAFA),
+              fillColor: p.surfaceMuted,
             ),
             style: const TextStyle(fontSize: 10, height: 1.6),
           ),
@@ -342,9 +346,9 @@ class _StoryStatePageState extends State<StoryStatePage> {
               setState(() {});
               scheduleControllerDispose(editCtrl);
             },
-            child: const Text(
+            child: Text(
               '确定',
-              style: TextStyle(fontSize: 12, color: Color(0xFF4D6BFE)),
+              style: TextStyle(fontSize: 12, color: p.accent),
             ),
           ),
         ],
@@ -355,6 +359,7 @@ class _StoryStatePageState extends State<StoryStatePage> {
   /// 把剧情状态文本按「【分区标题】内容」拆分为带标题和分割的展示行。
   /// 旧数据无分区标记时退化为按行展示，保证每种格式都可读。
   List<Widget> _buildStoryStateSections() {
+    final p = context.palette;
     final lines = _storyStateCtrl.text.split('\n');
     final sectionRe = RegExp(r'^【(.+?)】');
     final sections = <Widget>[];
@@ -375,17 +380,17 @@ class _StoryStatePageState extends State<StoryStatePage> {
                   width: 3,
                   height: 12,
                   decoration: BoxDecoration(
-                    color: const Color(0xFF4D6BFE),
+                    color: p.accent,
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
                 const SizedBox(width: 6),
                 Text(
                   title,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
-                    color: Color(0xFF333333),
+                    color: p.textPrimary,
                   ),
                 ),
               ],
@@ -398,10 +403,10 @@ class _StoryStatePageState extends State<StoryStatePage> {
               padding: const EdgeInsets.only(bottom: 4, left: 10),
               child: Text(
                 rest,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 11,
                   height: 1.5,
-                  color: Color(0xFF666666),
+                  color: p.textSecondary,
                 ),
               ),
             ),
@@ -414,10 +419,10 @@ class _StoryStatePageState extends State<StoryStatePage> {
             padding: const EdgeInsets.only(bottom: 4),
             child: Text(
               t,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 11,
                 height: 1.5,
-                color: Color(0xFF666666),
+                color: p.textSecondary,
               ),
             ),
           ),
@@ -429,18 +434,19 @@ class _StoryStatePageState extends State<StoryStatePage> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return Scaffold(
-      backgroundColor: const Color(0xFFF7F8FA),
+      backgroundColor: p.background,
       appBar: AppBar(
         title: const Text(
           '剧情状态账本',
           style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
         ),
-        backgroundColor: Colors.white,
+        backgroundColor: p.surface,
         elevation: 0.5,
         centerTitle: true,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Color(0xFF333333)),
+          icon: Icon(Icons.arrow_back, color: p.textPrimary),
           onPressed: () => Navigator.of(context).pop(),
         ),
         actions: [
@@ -449,7 +455,7 @@ class _StoryStatePageState extends State<StoryStatePage> {
             child: TextButton(
               onPressed: _loading ? null : _save,
               style: TextButton.styleFrom(
-                foregroundColor: const Color(0xFF4D6BFE),
+                foregroundColor: p.accent,
                 textStyle: const TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
@@ -477,8 +483,8 @@ class _StoryStatePageState extends State<StoryStatePage> {
                     icon: const Icon(Icons.add, size: 16),
                     label: const Text('添加人物'),
                     style: OutlinedButton.styleFrom(
-                      foregroundColor: const Color(0xFF4D6BFE),
-                      side: const BorderSide(color: Color(0xFF4D6BFE)),
+                      foregroundColor: p.accent,
+                      side: BorderSide(color: p.accent),
                       visualDensity: VisualDensity.compact,
                       textStyle: const TextStyle(fontSize: 12),
                     ),
@@ -504,8 +510,8 @@ class _StoryStatePageState extends State<StoryStatePage> {
                         _generatingProtagonist ? '正在生成...' : '从大纲生成主角档案',
                       ),
                       style: OutlinedButton.styleFrom(
-                        foregroundColor: const Color(0xFF4D6BFE),
-                        side: const BorderSide(color: Color(0xFF4D6BFE)),
+                        foregroundColor: p.accent,
+                        side: BorderSide(color: p.accent),
                         visualDensity: VisualDensity.compact,
                         textStyle: const TextStyle(fontSize: 12),
                       ),
@@ -538,9 +544,9 @@ class _StoryStatePageState extends State<StoryStatePage> {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: p.surface,
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: const Color(0xFFE8ECF4)),
+                    border: Border.all(color: p.border),
                   ),
                   child: _storyStateCtrl.text.trim().isEmpty
                       ? Column(
@@ -551,7 +557,7 @@ class _StoryStatePageState extends State<StoryStatePage> {
                                 Icon(
                                   Icons.menu_book_outlined,
                                   size: 18,
-                                  color: Colors.grey[300],
+                                  color: p.textTertiary,
                                 ),
                                 const SizedBox(width: 8),
                                 Expanded(
@@ -559,7 +565,7 @@ class _StoryStatePageState extends State<StoryStatePage> {
                                     '暂无剧情状态，写完第一章后自动生成，也可点击「编辑」手动填写',
                                     style: TextStyle(
                                       fontSize: 11,
-                                      color: Colors.grey[400],
+                                      color: p.textTertiary,
                                     ),
                                   ),
                                 ),
@@ -571,12 +577,12 @@ class _StoryStatePageState extends State<StoryStatePage> {
                               alignment: Alignment.centerRight,
                               child: GestureDetector(
                                 onTap: _showStoryStateEnlargeDialog,
-                                child: const Text(
+                                child: Text(
                                   '编辑',
                                   style: TextStyle(
                                     fontSize: 12,
                                     fontWeight: FontWeight.w600,
-                                    color: Color(0xFF4D6BFE),
+                                    color: p.accent,
                                   ),
                                 ),
                               ),
@@ -593,12 +599,12 @@ class _StoryStatePageState extends State<StoryStatePage> {
                               alignment: Alignment.centerRight,
                               child: GestureDetector(
                                 onTap: _showStoryStateEnlargeDialog,
-                                child: const Text(
+                                child: Text(
                                   '编辑',
                                   style: TextStyle(
                                     fontSize: 12,
                                     fontWeight: FontWeight.w600,
-                                    color: Color(0xFF4D6BFE),
+                                    color: p.accent,
                                   ),
                                 ),
                               ),
@@ -625,7 +631,7 @@ class _StoryStatePageState extends State<StoryStatePage> {
                               '伏笔提炼中...',
                               style: TextStyle(
                                 fontSize: 12,
-                                color: Colors.grey[600],
+                                color: p.textSecondary,
                               ),
                             ),
                           ],
@@ -635,8 +641,8 @@ class _StoryStatePageState extends State<StoryStatePage> {
                         icon: const Icon(Icons.auto_awesome, size: 16),
                         label: const Text('重新提炼'),
                         style: OutlinedButton.styleFrom(
-                          foregroundColor: const Color(0xFF4D6BFE),
-                          side: const BorderSide(color: Color(0xFF4D6BFE)),
+                          foregroundColor: p.accent,
+                          side: BorderSide(color: p.accent),
                           visualDensity: VisualDensity.compact,
                           textStyle: const TextStyle(fontSize: 12),
                         ),
@@ -646,9 +652,9 @@ class _StoryStatePageState extends State<StoryStatePage> {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: p.surface,
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: const Color(0xFFE8ECF4)),
+                    border: Border.all(color: p.border),
                   ),
                   child: _foreshadowsCtrl.text.trim().isEmpty
                       ? Column(
@@ -659,7 +665,7 @@ class _StoryStatePageState extends State<StoryStatePage> {
                                 Icon(
                                   Icons.flag_outlined,
                                   size: 18,
-                                  color: Colors.grey[300],
+                                  color: p.textTertiary,
                                 ),
                                 const SizedBox(width: 8),
                                 Expanded(
@@ -667,7 +673,7 @@ class _StoryStatePageState extends State<StoryStatePage> {
                                     '暂无伏笔清单，可点击「重新提炼」从大纲生成，或点击「编辑」手动填写',
                                     style: TextStyle(
                                       fontSize: 11,
-                                      color: Colors.grey[400],
+                                      color: p.textTertiary,
                                     ),
                                   ),
                                 ),
@@ -682,24 +688,24 @@ class _StoryStatePageState extends State<StoryStatePage> {
                                 children: [
                                   GestureDetector(
                                     onTap: _showForeshadowsEditDialog,
-                                    child: const Text(
+                                    child: Text(
                                       '编辑',
                                       style: TextStyle(
                                         fontSize: 12,
                                         fontWeight: FontWeight.w600,
-                                        color: Color(0xFF4D6BFE),
+                                        color: p.accent,
                                       ),
                                     ),
                                   ),
                                   const SizedBox(width: 16),
                                   GestureDetector(
                                     onTap: _openForeshadowProgress,
-                                    child: const Text(
+                                    child: Text(
                                       '伏笔进度',
                                       style: TextStyle(
                                         fontSize: 12,
                                         fontWeight: FontWeight.w600,
-                                        color: Color(0xFF00897B),
+                                        color: p.success,
                                       ),
                                     ),
                                   ),
@@ -733,24 +739,24 @@ class _StoryStatePageState extends State<StoryStatePage> {
                                 children: [
                                   GestureDetector(
                                     onTap: _showForeshadowsEditDialog,
-                                    child: const Text(
+                                    child: Text(
                                       '编辑',
                                       style: TextStyle(
                                         fontSize: 12,
                                         fontWeight: FontWeight.w600,
-                                        color: Color(0xFF4D6BFE),
+                                        color: p.accent,
                                       ),
                                     ),
                                   ),
                                   const SizedBox(width: 16),
                                   GestureDetector(
                                     onTap: _openForeshadowProgress,
-                                    child: const Text(
+                                    child: Text(
                                       '伏笔进度',
                                       style: TextStyle(
                                         fontSize: 12,
                                         fontWeight: FontWeight.w600,
-                                        color: Color(0xFF00897B),
+                                        color: p.success,
                                       ),
                                     ),
                                   ),
@@ -779,14 +785,15 @@ class _StoryStatePageState extends State<StoryStatePage> {
   }
 
   Widget _buildOverviewCard() {
+    final p = context.palette;
     final charCount = _characters.length;
     final stateLength = _storyStateCtrl.text.trim().length;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: p.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFE8ECF4)),
+        border: Border.all(color: p.border),
       ),
       child: Row(
         children: [
@@ -799,26 +806,28 @@ class _StoryStatePageState extends State<StoryStatePage> {
   }
 
   Widget _buildStat(int value, String label) {
+    final p = context.palette;
     return Expanded(
       child: Column(
         children: [
           Text(
             '$value',
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 22,
               fontWeight: FontWeight.w700,
-              color: Color(0xFF333333),
+              color: p.textPrimary,
             ),
           ),
           const SizedBox(height: 2),
-          Text(label, style: TextStyle(fontSize: 12, color: Colors.grey[500])),
+          Text(label, style: TextStyle(fontSize: 12, color: p.textSecondary)),
         ],
       ),
     );
   }
 
   Widget _buildDivider() {
-    return Container(width: 1, height: 34, color: const Color(0xFFEEEEEE));
+    final p = context.palette;
+    return Container(width: 1, height: 34, color: p.border);
   }
 
   Widget _buildSectionHeader({
@@ -826,6 +835,7 @@ class _StoryStatePageState extends State<StoryStatePage> {
     required String subtitle,
     Widget? trailing,
   }) {
+    final p = context.palette;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
@@ -833,7 +843,7 @@ class _StoryStatePageState extends State<StoryStatePage> {
           width: 3,
           height: 16,
           decoration: BoxDecoration(
-            color: const Color(0xFF4D6BFE),
+            color: p.accent,
             borderRadius: BorderRadius.circular(2),
           ),
         ),
@@ -844,16 +854,16 @@ class _StoryStatePageState extends State<StoryStatePage> {
             children: [
               Text(
                 title,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w600,
-                  color: Color(0xFF333333),
+                  color: p.textPrimary,
                 ),
               ),
               const SizedBox(height: 2),
               Text(
                 subtitle,
-                style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                style: TextStyle(fontSize: 11, color: p.textSecondary),
               ),
             ],
           ),
@@ -864,21 +874,22 @@ class _StoryStatePageState extends State<StoryStatePage> {
   }
 
   Widget _buildEmptyCard(String message) {
+    final p = context.palette;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 28),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: p.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFE8ECF4)),
+        border: Border.all(color: p.border),
       ),
       child: Column(
         children: [
-          Icon(Icons.person_outline, size: 32, color: Colors.grey[300]),
+          Icon(Icons.person_outline, size: 32, color: p.textTertiary),
           const SizedBox(height: 10),
           Text(
             message,
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+            style: TextStyle(fontSize: 12, color: p.textSecondary),
           ),
         ],
       ),
@@ -944,6 +955,7 @@ class _CharacterEditorState extends State<_CharacterEditor> {
     required TextEditingController targetCtrl,
     required String label,
   }) {
+    final p = context.palette;
     final editCtrl = TextEditingController(text: targetCtrl.text);
     final screenHeight = MediaQuery.heightOf(context);
     final screenWidth = MediaQuery.widthOf(context);
@@ -968,11 +980,11 @@ class _CharacterEditorState extends State<_CharacterEditor> {
             maxLines: null,
             expands: true,
             textAlignVertical: TextAlignVertical.top,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               border: InputBorder.none,
-              contentPadding: EdgeInsets.fromLTRB(4, 2, 4, 2),
+              contentPadding: const EdgeInsets.fromLTRB(4, 2, 4, 2),
               filled: true,
-              fillColor: Color(0xFFFAFAFA),
+              fillColor: p.surfaceMuted,
             ),
             style: const TextStyle(fontSize: 10, height: 1.6),
           ),
@@ -1002,9 +1014,9 @@ class _CharacterEditorState extends State<_CharacterEditor> {
               _emit();
               scheduleControllerDispose(editCtrl);
             },
-            child: const Text(
+            child: Text(
               '确定',
-              style: TextStyle(fontSize: 12, color: Color(0xFF4D6BFE)),
+              style: TextStyle(fontSize: 12, color: p.accent),
             ),
           ),
         ],
@@ -1014,22 +1026,25 @@ class _CharacterEditorState extends State<_CharacterEditor> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     final initial = _nameCtrl.text.trim().isEmpty
         ? '?'
         : _nameCtrl.text.trim().characters.first;
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: p.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFE8ECF4)),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0x0D000000),
-            blurRadius: 4,
-            offset: const Offset(0, 1),
-          ),
-        ],
+        border: Border.all(color: p.border),
+        boxShadow: p.isDark
+            ? null
+            : [
+                const BoxShadow(
+                  color: Color(0x0D000000),
+                  blurRadius: 4,
+                  offset: Offset(0, 1),
+                ),
+              ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1038,13 +1053,13 @@ class _CharacterEditorState extends State<_CharacterEditor> {
             children: [
               CircleAvatar(
                 radius: 18,
-                backgroundColor: const Color(0xFFEDF0FF),
+                backgroundColor: p.accentSoft,
                 child: Text(
                   initial,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.w600,
-                    color: Color(0xFF4D6BFE),
+                    color: p.accent,
                   ),
                 ),
               ),
@@ -1053,17 +1068,17 @@ class _CharacterEditorState extends State<_CharacterEditor> {
                 child: TextField(
                   controller: _nameCtrl,
                   onChanged: (_) => _emit(),
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 10,
                     fontWeight: FontWeight.w600,
-                    color: Color(0xFF333333),
+                    color: p.textPrimary,
                   ),
                   decoration: InputDecoration(
                     hintText: '姓名',
                     hintStyle: TextStyle(
                       fontSize: 10,
                       fontWeight: FontWeight.w600,
-                      color: Colors.grey[400],
+                      color: p.textTertiary,
                     ),
                     isDense: true,
                     border: InputBorder.none,
@@ -1073,7 +1088,7 @@ class _CharacterEditorState extends State<_CharacterEditor> {
                         label: '姓名',
                       ),
                       icon: const Icon(Icons.open_in_full, size: 14),
-                      color: const Color(0xFF999999),
+                      color: p.textTertiary,
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(
                         minWidth: 28,
@@ -1093,7 +1108,7 @@ class _CharacterEditorState extends State<_CharacterEditor> {
                 icon: Icon(
                   Icons.delete_outline,
                   size: 20,
-                  color: Colors.grey[400],
+                  color: p.textTertiary,
                 ),
                 tooltip: '删除人物',
                 visualDensity: VisualDensity.compact,
@@ -1105,15 +1120,15 @@ class _CharacterEditorState extends State<_CharacterEditor> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
-                color: const Color(0xFFEDF0FF),
+                color: p.accentSoft,
                 borderRadius: BorderRadius.circular(4),
               ),
-              child: const Text(
+              child: Text(
                 '主角 · 档案直接注入每章',
                 style: TextStyle(
                   fontSize: 10,
                   fontWeight: FontWeight.w600,
-                  color: Color(0xFF4D6BFE),
+                  color: p.accent,
                 ),
               ),
             ),
@@ -1152,6 +1167,7 @@ class _CharacterEditorState extends State<_CharacterEditor> {
     required int maxLines,
     bool accent = false,
   }) {
+    final p = context.palette;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1160,7 +1176,7 @@ class _CharacterEditorState extends State<_CharacterEditor> {
           style: TextStyle(
             fontSize: 10,
             fontWeight: FontWeight.w500,
-            color: accent ? const Color(0xFF4D6BFE) : Colors.grey[600],
+            color: accent ? p.accent : p.textSecondary,
           ),
         ),
         const SizedBox(height: 4),
@@ -1171,27 +1187,27 @@ class _CharacterEditorState extends State<_CharacterEditor> {
           style: const TextStyle(fontSize: 10, height: 1.5),
           decoration: InputDecoration(
             hintText: hint,
-            hintStyle: TextStyle(fontSize: 10, color: Colors.grey[400]),
+            hintStyle: TextStyle(fontSize: 10, color: p.textTertiary),
             isDense: true,
             filled: true,
-            fillColor: const Color(0xFFFAFAFB),
+            fillColor: p.surfaceMuted,
             contentPadding: const EdgeInsets.symmetric(
               horizontal: 10,
               vertical: 8,
             ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
-              borderSide: BorderSide(color: Colors.grey[200]!),
+              borderSide: BorderSide(color: p.border),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: Color(0xFF4D6BFE)),
+              borderSide: BorderSide(color: p.accent),
             ),
             suffixIcon: IconButton(
               onPressed: () =>
                   _showEnlargeDialog(targetCtrl: controller, label: label),
               icon: const Icon(Icons.open_in_full, size: 14),
-              color: const Color(0xFF999999),
+              color: p.textTertiary,
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
               tooltip: '放大编辑',
@@ -1269,18 +1285,19 @@ class _ForeshadowProgressPageState extends State<_ForeshadowProgressPage> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: p.background,
       appBar: AppBar(
         title: const Text(
           '伏笔进度',
           style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
         ),
-        backgroundColor: Colors.white,
+        backgroundColor: p.surface,
         elevation: 0.5,
         centerTitle: true,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Color(0xFF333333)),
+          icon: Icon(Icons.arrow_back, color: p.textPrimary),
           onPressed: () => Navigator.of(context).pop(),
         ),
       ),
@@ -1296,7 +1313,7 @@ class _ForeshadowProgressPageState extends State<_ForeshadowProgressPage> {
                   child: _foreshadows.trim().isEmpty
                       ? Text(
                           '（暂无伏笔清单，可到剧情账本页点击「重新提炼」生成）',
-                          style: TextStyle(fontSize: 12, color: Colors.grey[400]),
+                          style: TextStyle(fontSize: 12, color: p.textTertiary),
                         )
                       : Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1308,22 +1325,22 @@ class _ForeshadowProgressPageState extends State<_ForeshadowProgressPage> {
                                   child: Row(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      const Padding(
-                                        padding: EdgeInsets.only(top: 4),
+                                      Padding(
+                                        padding: const EdgeInsets.only(top: 4),
                                         child: Icon(
                                           Icons.circle,
                                           size: 6,
-                                          color: Color(0xFF4D6BFE),
+                                          color: p.accent,
                                         ),
                                       ),
                                       const SizedBox(width: 8),
                                       Expanded(
                                         child: Text(
                                           line.trim(),
-                                          style: const TextStyle(
+                                          style: TextStyle(
                                             fontSize: 12,
                                             height: 1.5,
-                                            color: Color(0xFF333333),
+                                            color: p.textPrimary,
                                           ),
                                         ),
                                       ),
@@ -1341,7 +1358,7 @@ class _ForeshadowProgressPageState extends State<_ForeshadowProgressPage> {
                   _card(
                     child: Text(
                       '（还没有已完成的章节，完成章节后每章账本会自动记录伏笔进展）',
-                      style: TextStyle(fontSize: 12, color: Colors.grey[400]),
+                      style: TextStyle(fontSize: 12, color: p.textTertiary),
                     ),
                   )
                 else
@@ -1352,19 +1369,19 @@ class _ForeshadowProgressPageState extends State<_ForeshadowProgressPage> {
                         children: [
                           Row(
                             children: [
-                              const Icon(
+                              Icon(
                                 Icons.menu_book_outlined,
                                 size: 16,
-                                color: Color(0xFF4D6BFE),
+                                color: p.accent,
                               ),
                               const SizedBox(width: 6),
                               Expanded(
                                 child: Text(
                                   c.title,
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontSize: 13,
                                     fontWeight: FontWeight.w600,
-                                    color: Color(0xFF333333),
+                                    color: p.textPrimary,
                                   ),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
@@ -1378,15 +1395,15 @@ class _ForeshadowProgressPageState extends State<_ForeshadowProgressPage> {
                                   '（本章账本无伏笔记录）',
                                   style: TextStyle(
                                     fontSize: 12,
-                                    color: Colors.grey[400],
+                                    color: p.textTertiary,
                                   ),
                                 )
                               : Text(
                                 _extractForeshadowSection(c.storyState),
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 12,
                                   height: 1.6,
-                                  color: Color(0xFF666666),
+                                  color: p.textSecondary,
                                 ),
                               ),
                         ],
@@ -1400,34 +1417,36 @@ class _ForeshadowProgressPageState extends State<_ForeshadowProgressPage> {
   }
 
   Widget _sectionHeader(String title, String subtitle) {
+    final p = context.palette;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           title,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 15,
             fontWeight: FontWeight.w600,
-            color: Color(0xFF333333),
+            color: p.textPrimary,
           ),
         ),
         const SizedBox(height: 2),
         Text(
           subtitle,
-          style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+          style: TextStyle(fontSize: 11, color: p.textSecondary),
         ),
       ],
     );
   }
 
   Widget _card({required Widget child}) {
+    final p = context.palette;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: p.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFE8ECF4)),
+        border: Border.all(color: p.border),
       ),
       child: child,
     );
@@ -1489,31 +1508,35 @@ class _ForeshadowDetailPageState extends State<_ForeshadowDetailPage> {
     required String title,
     required String content,
     required String emptyHint,
-    Color color = const Color(0xFFF0F4FF),
-    Color borderColor = const Color(0xFFD8E2FF),
-    Color iconColor = const Color(0xFF4D6BFE),
+    Color? color,
+    Color? borderColor,
+    Color? iconColor,
   }) {
+    final p = context.palette;
+    final bg = color ?? p.accentSoft;
+    final border = borderColor ?? p.borderStrong;
+    final fg = iconColor ?? p.accent;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: color,
+        color: bg,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: borderColor),
+        border: Border.all(color: border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(icon, size: 14, color: iconColor),
+              Icon(icon, size: 14, color: fg),
               const SizedBox(width: 4),
               Text(
                 title,
                 style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w600,
-                  color: iconColor,
+                  color: fg,
                 ),
               ),
             ],
@@ -1521,10 +1544,10 @@ class _ForeshadowDetailPageState extends State<_ForeshadowDetailPage> {
           const SizedBox(height: 6),
           SelectableText(
             content.trim().isEmpty ? emptyHint : content,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 12,
               height: 1.6,
-              color: Color(0xFF666666),
+              color: p.textSecondary,
             ),
           ),
         ],
@@ -1534,6 +1557,7 @@ class _ForeshadowDetailPageState extends State<_ForeshadowDetailPage> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     final c = widget.controller;
     final refreshing = c.isRefreshingForeshadows;
     final thinking = c.foreshadowThinkingText;
@@ -1549,17 +1573,17 @@ class _ForeshadowDetailPageState extends State<_ForeshadowDetailPage> {
       status = '尚未提炼，可点击下方「开始提炼」';
     }
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: p.background,
       appBar: AppBar(
         title: const Text(
           'AI 伏笔生成详情',
           style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
         ),
-        backgroundColor: Colors.white,
+        backgroundColor: p.surface,
         elevation: 0.5,
         centerTitle: true,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Color(0xFF333333)),
+          icon: Icon(Icons.arrow_back, color: p.textPrimary),
           onPressed: () => Navigator.of(context).pop(),
         ),
       ),
@@ -1569,7 +1593,7 @@ class _ForeshadowDetailPageState extends State<_ForeshadowDetailPage> {
           Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            color: const Color(0xFFF8F9FF),
+            color: p.accentSoft,
             child: Row(
               children: [
                 if (refreshing)
@@ -1579,18 +1603,18 @@ class _ForeshadowDetailPageState extends State<_ForeshadowDetailPage> {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 else
-                  const Icon(
+                  Icon(
                     Icons.check_circle,
                     size: 16,
-                    color: Color(0xFF4CAF50),
+                    color: p.success,
                   ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     status,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 13,
-                      color: Color(0xFF666666),
+                      color: p.textSecondary,
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -1600,9 +1624,9 @@ class _ForeshadowDetailPageState extends State<_ForeshadowDetailPage> {
                   Flexible(
                     child: Text(
                       _lastResult,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
-                        color: Color(0xFF00897B),
+                        color: p.success,
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -1629,9 +1653,9 @@ class _ForeshadowDetailPageState extends State<_ForeshadowDetailPage> {
                   title: '生成的伏笔清单',
                   content: output,
                   emptyHint: refreshing ? '正在生成中...' : '（暂无输出）',
-                  color: const Color(0xFFF1F8E9),
-                  borderColor: const Color(0xFFDCEDC8),
-                  iconColor: const Color(0xFF558B2F),
+                  color: p.successSoft,
+                  borderColor: p.success.withValues(alpha: 0.35),
+                  iconColor: p.success,
                 ),
               ],
             ),
@@ -1653,8 +1677,8 @@ class _ForeshadowDetailPageState extends State<_ForeshadowDetailPage> {
                       : const Icon(Icons.auto_awesome, size: 18),
                   label: Text(refreshing ? '提炼中...' : '开始提炼伏笔'),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF4D6BFE),
-                    foregroundColor: Colors.white,
+                    backgroundColor: p.accent,
+                    foregroundColor: p.onAccent,
                   ),
                 ),
               ),

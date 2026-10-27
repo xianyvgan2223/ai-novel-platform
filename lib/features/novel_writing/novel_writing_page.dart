@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:deepseekapp/core/theme/app_palette.dart';
 import '../../../core/widgets/settings_kit.dart';
 import 'ai_battle/view/page/ai_battle_page.dart';
 import 'outline_generation/view/page/outline_generation_page.dart';
@@ -16,36 +17,37 @@ class NovelWritingPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return Scaffold(
-      backgroundColor: kSettingsPageBg,
+      backgroundColor: p.background,
       appBar: AppBar(
-        backgroundColor: kSettingsCardBg,
+        backgroundColor: p.surface,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         scrolledUnderElevation: 0,
         centerTitle: true,
-        title: const Text(
+        title: Text(
           '写小说',
           style: TextStyle(
             fontSize: 16,
             fontWeight: FontWeight.w600,
-            color: kSettingsTitle,
+            color: p.textPrimary,
           ),
         ),
         leading: IconButton(
-          icon: const Icon(
+          icon: Icon(
             Icons.arrow_back_ios_new_rounded,
             size: 18,
-            color: kSettingsLabel,
+            color: p.textPrimary,
           ),
           onPressed: () => Navigator.of(context).pop(),
         ),
-        bottom: const PreferredSize(
-          preferredSize: Size.fromHeight(1),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
           child: Divider(
             height: 1,
             thickness: 1,
-            color: kSettingsAppBarDivider,
+            color: p.border,
           ),
         ),
       ),
@@ -58,15 +60,15 @@ class NovelWritingPage extends StatelessWidget {
           32 + MediaQuery.paddingOf(context).bottom,
         ),
         children: [
-          const Padding(
-            padding: EdgeInsets.fromLTRB(4, 12, 4, 10),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 12, 4, 10),
             child: Text(
               '选择功能',
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w500,
                 letterSpacing: 0.6,
-                color: kSettingsSubtitle,
+                color: p.textTertiary,
               ),
             ),
           ),
@@ -130,10 +132,11 @@ class NovelWritingPage extends StatelessWidget {
     required String subtitle,
     required Widget page,
   }) {
+    final p = context.palette;
     return SettingsActionRow(
       icon: icon,
-      iconColor: kSettingsTitle,
-      softColor: kSettingsChipBg,
+      iconColor: p.textPrimary,
+      softColor: p.surfaceMuted,
       title: title,
       subtitle: subtitle,
       onTap: () {

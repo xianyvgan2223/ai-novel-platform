@@ -27,7 +27,7 @@ import java.util.regex.Pattern;
  * <pre>
  * data/app-update/
  *   latest.json
- *   deepseekapp-5.1.1.apk
+ *   deepseekapp-5.2.0.apk
  * </pre>
  *
  * latest.json 只存业务信息，size / sha256 每次按文件自动计算（按大小 + 修改时间缓存）。

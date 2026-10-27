@@ -57,11 +57,17 @@ public class StartupBanner implements ApplicationListener<ApplicationReadyEvent>
             lines.add("  手机请填:  未发现可用网卡地址，请检查网络连接");
         }
 
-        lines.add("");
-        lines.add("  ── 最稳的连接方式：USB 隧道（手机插着数据线即可，不看 Wi-Fi、不怕防火墙）──");
-        lines.add("  另开一个窗口执行:  .\\mvnw.cmd spring-boot:run \"-Dspring-boot.run.arguments=--usb\"");
-        lines.add("  或:                java -jar target/web-server-0.1.0.jar --usb");
-        lines.add("  手机端服务地址填:  http://127.0.0.1:" + port);
+        if (props.isUsbAuto()) {
+            lines.add("");
+            lines.add("  ── USB 隧道已自动开启（手机插着数据线并授权 USB 调试即可）──");
+            lines.add("  手机端服务地址填:  http://127.0.0.1:" + port);
+        } else {
+            lines.add("");
+            lines.add("  ── USB 隧道未自动开启（可用 --usb 模式单独守护）──");
+            lines.add("  另开一个窗口执行:  .\\mvnw.cmd spring-boot:run \"-Dspring-boot.run.arguments=--usb\"");
+            lines.add("  或:                java -jar target/web-server-0.1.0.jar --usb");
+            lines.add("  手机端服务地址填:  http://127.0.0.1:" + port);
+        }
 
         List<NetworkUtil.LanAddress> virtuals = new ArrayList<>();
         for (NetworkUtil.LanAddress address : networkUtil.lanAddresses()) {

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:deepseekapp/core/theme/app_palette.dart';
 import 'package:deepseekapp/features/game/novel_game/model/entity/copy_entity.dart';
 import 'package:deepseekapp/features/game/novel_game/model/entity/character_entity.dart';
 import 'package:deepseekapp/features/game/novel_game/model/repo/copy_repository.dart';
@@ -150,12 +151,13 @@ class _CopyEditPageState extends State<CopyEditPage> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
+      backgroundColor: p.background,
       appBar: AppBar(
         title: const Text('编辑副本', style: TextStyle(fontSize: 15)),
-        backgroundColor: Colors.white,
-        elevation: 0.5,
+        backgroundColor: p.surface,
+        elevation: p.isDark ? 0 : 0.5,
         centerTitle: true,
         actions: [
           TextButton(
@@ -198,21 +200,23 @@ class _CopyEditPageState extends State<CopyEditPage> {
   }
 
   Widget _buildSection(String title, List<Widget> children) {
+    final p = context.palette;
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: p.surface,
         borderRadius: BorderRadius.circular(8),
+        border: p.isDark ? Border.all(color: p.border) : null,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             title,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w600,
-              color: Color(0xFF333333),
+              color: p.textPrimary,
             ),
           ),
           const SizedBox(height: 10),
@@ -250,6 +254,7 @@ class _CopyEditPageState extends State<CopyEditPage> {
   }
 
   Widget _buildStyleDropdown() {
+    final p = context.palette;
     return DropdownButtonFormField<String>(
       initialValue: _selectedStyle,
       decoration: InputDecoration(
@@ -259,7 +264,7 @@ class _CopyEditPageState extends State<CopyEditPage> {
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
         isDense: true,
       ),
-      style: const TextStyle(fontSize: 13, color: Color(0xFF333333)),
+      style: TextStyle(fontSize: 13, color: p.textPrimary),
       items: _styles.map((s) {
         return DropdownMenuItem(
           value: s,
@@ -273,11 +278,13 @@ class _CopyEditPageState extends State<CopyEditPage> {
   }
 
   Widget _buildCharList() {
+    final p = context.palette;
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: p.surface,
         borderRadius: BorderRadius.circular(8),
+        border: p.isDark ? Border.all(color: p.border) : null,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -287,7 +294,7 @@ class _CopyEditPageState extends State<CopyEditPage> {
             style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w600,
-              color: Color(0xFF333333),
+              color: p.textPrimary,
             ),
           ),
           const SizedBox(height: 8),

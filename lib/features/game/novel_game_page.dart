@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:deepseekapp/core/theme/app_palette.dart';
 import 'package:deepseekapp/features/game/novel_game/model/db/novel_db_helper.dart';
 import 'package:deepseekapp/features/game/novel_game/controller/novel_game_controller.dart';
 import 'package:deepseekapp/features/game/novel_game/view/page/novel_game_main_page.dart';
@@ -55,6 +56,7 @@ class _NovelGamePageState extends State<NovelGamePage> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     if (_error != null) {
       return Scaffold(
         appBar: AppBar(title: const Text('小说书架')),
@@ -62,7 +64,7 @@ class _NovelGamePageState extends State<NovelGamePage> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.error_outline, size: 48, color: Colors.red),
+              Icon(Icons.error_outline, size: 48, color: p.danger),
               const SizedBox(height: 16),
               Text('初始化失败: $_error'),
               const SizedBox(height: 16),

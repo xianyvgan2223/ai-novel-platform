@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:deepseekapp/core/theme/app_palette.dart';
 import '../../../shared/data/outline_chapter_db_helper.dart';
 import '../../../shared/domain/outline_chapter.dart';
 import '../../../shared/domain/outline_record.dart';
@@ -205,6 +206,7 @@ class OutlineEditChapterListPageState
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     final outline = _outline;
     // 大 / 小事件序号：与大纲正文里的「大事件N」/「○ 小事件N」同一套编号
     // （大事件只数大事件；小事件在每个大事件内部从 1 重新开始），
@@ -220,7 +222,7 @@ class OutlineEditChapterListPageState
         _clearSelection();
       },
       child: Scaffold(
-        backgroundColor: Colors.white,
+        backgroundColor: p.background,
         appBar: AppBar(
           title: Text(
             outline.title.isNotEmpty ? outline.title : '选择事件',
@@ -228,11 +230,11 @@ class OutlineEditChapterListPageState
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
-          backgroundColor: Colors.white,
+          backgroundColor: p.surface,
           elevation: 0.5,
           centerTitle: true,
           leading: IconButton(
-            icon: const Icon(Icons.arrow_back, color: Color(0xFF333333)),
+            icon: Icon(Icons.arrow_back, color: p.textPrimary),
             onPressed: _onBackPressed,
           ),
         ),
@@ -242,10 +244,10 @@ class OutlineEditChapterListPageState
             : _error != null
             ? OutlineLoadErrorView(error: _error!, onRetry: _load)
             : _chapters.isEmpty
-            ? const Center(
+            ? Center(
                 child: Text(
                   '该小说没有可编辑的事件',
-                  style: TextStyle(fontSize: 13, color: Color(0xFF999999)),
+                  style: TextStyle(fontSize: 13, color: p.textTertiary),
                 ),
               )
             : Column(
@@ -256,12 +258,12 @@ class OutlineEditChapterListPageState
                       horizontal: 16,
                       vertical: 8,
                     ),
-                    color: const Color(0xFFF8F9FF),
+                    color: p.accentSoft,
                     child: Text(
                       '共 ${_chapters.length} 个事件 · 已完成 $_completedCount',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
-                        color: Color(0xFF666666),
+                        color: p.textSecondary,
                       ),
                     ),
                   ),
@@ -299,13 +301,14 @@ class OutlineEditChapterListPageState
   ///
   /// 另外给两处文字都加了省略兜底：极窄屏或系统大字体下宁可截断，也不再溢出。
   Widget _buildBottomBar() {
+    final p = context.palette;
     final count = _selected.length;
     return SafeArea(
       child: Container(
         padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          border: Border(top: BorderSide(color: Color(0xFFEEEEEE))),
+        decoration: BoxDecoration(
+          color: p.surface,
+          border: Border(top: BorderSide(color: p.border)),
         ),
         child: Row(
           children: [
@@ -314,7 +317,7 @@ class OutlineEditChapterListPageState
                 '已选 $count 个事件',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 12, color: Color(0xFF666666)),
+                style: TextStyle(fontSize: 12, color: p.textSecondary),
               ),
             ),
             // 取消多选：勾了事件才出现，一键把勾选清零
@@ -326,9 +329,9 @@ class OutlineEditChapterListPageState
                   minimumSize: Size.zero,
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                 ),
-                child: const Text(
+                child: Text(
                   '取消选择',
-                  style: TextStyle(fontSize: 12, color: Color(0xFF999999)),
+                  style: TextStyle(fontSize: 12, color: p.textTertiary),
                 ),
               ),
             // 全选：只做全选。清空勾选交给「取消选择」，两个按钮不再重复
@@ -348,10 +351,10 @@ class OutlineEditChapterListPageState
                     ? null
                     : () => _openEdit(_selectedChapters),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF4D6BFE),
-                  foregroundColor: Colors.white,
-                  disabledBackgroundColor: const Color(0xFFE8ECF4),
-                  disabledForegroundColor: const Color(0xFF999999),
+                  backgroundColor: p.accent,
+                  foregroundColor: p.onAccent,
+                  disabledBackgroundColor: p.surfaceMuted,
+                  disabledForegroundColor: p.textTertiary,
                   padding: const EdgeInsets.symmetric(
                     horizontal: 12,
                     vertical: 8,
@@ -403,6 +406,7 @@ class _ChapterSelectTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     final isMajor = chapter.isMajor;
     final isCompleted = chapter.status == 'completed';
     final words = chapter.content.characters.length;
@@ -416,14 +420,12 @@ class _ChapterSelectTile extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 6),
         padding: const EdgeInsets.fromLTRB(6, 8, 6, 8),
         decoration: BoxDecoration(
-          color: isMajor ? const Color(0xFFF8F9FF) : Colors.white,
+          color: isMajor ? p.accentSoft : p.surface,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
             color: selected
-                ? const Color(0xFF4D6BFE)
-                : (isCompleted
-                      ? const Color(0xFFE0F0E0)
-                      : const Color(0xFFE8ECF4)),
+                ? p.accent
+                : (isCompleted ? p.successSoft : p.border),
           ),
         ),
         child: Row(
@@ -436,7 +438,7 @@ class _ChapterSelectTile extends StatelessWidget {
               child: Checkbox(
                 value: selected,
                 onChanged: (_) => onTap(),
-                activeColor: const Color(0xFF4D6BFE),
+                activeColor: p.accent,
                 visualDensity: VisualDensity.compact,
                 materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
@@ -451,9 +453,7 @@ class _ChapterSelectTile extends StatelessWidget {
                       Icon(
                         isMajor ? Icons.flag : Icons.article_outlined,
                         size: 14,
-                        color: isMajor
-                            ? const Color(0xFF4D6BFE)
-                            : const Color(0xFF999999),
+                        color: isMajor ? p.accent : p.textTertiary,
                       ),
                       const SizedBox(width: 4),
                       Expanded(
@@ -464,7 +464,7 @@ class _ChapterSelectTile extends StatelessWidget {
                             fontWeight: isMajor
                                 ? FontWeight.w600
                                 : FontWeight.w500,
-                            color: const Color(0xFF333333),
+                            color: p.textPrimary,
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
@@ -476,11 +476,11 @@ class _ChapterSelectTile extends StatelessWidget {
                         majorNumber: majorNumber,
                         minorNumber: minorNumber,
                         background: isMajor
-                            ? const Color(0xFFE8ECF4)
-                            : const Color(0xFFF2F4F8),
-                        foreground: const Color(0xFF666666),
+                            ? p.borderStrong
+                            : p.surfaceMuted,
+                        foreground: p.textSecondary,
                         // 序号用主色加粗：长列表里一眼能扫到第几个大事件 / 小事件
-                        numberColor: const Color(0xFF4D6BFE),
+                        numberColor: p.accent,
                       ),
                     ],
                   ),
@@ -489,10 +489,10 @@ class _ChapterSelectTile extends StatelessWidget {
                     chapter.eventSummary.trim().isEmpty
                         ? '暂无概要'
                         : chapter.eventSummary.trim(),
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 10,
                       height: 1.35,
-                      color: Color(0xFF999999),
+                      color: p.textTertiary,
                     ),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
@@ -502,9 +502,7 @@ class _ChapterSelectTile extends StatelessWidget {
                     isMajor ? statusText : '$statusText · $words 字',
                     style: TextStyle(
                       fontSize: 9,
-                      color: isCompleted
-                          ? const Color(0xFF4CAF50)
-                          : const Color(0xFFBBBBBB),
+                      color: isCompleted ? p.success : p.textTertiary,
                     ),
                   ),
                 ],
@@ -518,9 +516,9 @@ class _ChapterSelectTile extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 6),
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
-              child: const Text(
+              child: Text(
                 '编辑',
-                style: TextStyle(fontSize: 11, color: Color(0xFF4D6BFE)),
+                style: TextStyle(fontSize: 11, color: p.accent),
               ),
             ),
           ],

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:deepseekapp/core/theme/app_palette.dart';
 import 'package:deepseekapp/features/game/novel_game/model/entity/character_entity.dart';
 import 'package:deepseekapp/features/game/novel_game/model/entity/skill_entity.dart';
 import 'package:deepseekapp/features/game/novel_game/model/entity/equipment_entity.dart';
@@ -103,9 +104,11 @@ class _CharacterEditPageState extends State<CharacterEditPage> {
   }
 
   Future<void> _deleteCharacter() async {
+    final p = context.palette;
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
+        backgroundColor: p.surfaceElevated,
         title: const Text('确认删除', style: TextStyle(fontSize: 15)),
         content: Text(
           '确定要删除「${widget.character.charName}」吗？\n相关技能和装备也会一并删除。',
@@ -118,7 +121,7 @@ class _CharacterEditPageState extends State<CharacterEditPage> {
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            style: TextButton.styleFrom(foregroundColor: p.danger),
             child: const Text('删除'),
           ),
         ],
@@ -141,15 +144,16 @@ class _CharacterEditPageState extends State<CharacterEditPage> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
+      backgroundColor: p.background,
       appBar: AppBar(
         title: Text(
           _isEditing ? '编辑人物' : widget.character.charName,
           style: const TextStyle(fontSize: 15),
         ),
-        backgroundColor: Colors.white,
-        elevation: 0.5,
+        backgroundColor: p.surface,
+        elevation: p.isDark ? 0 : 0.5,
         centerTitle: true,
         actions: [
           if (_isEditing) ...[
@@ -170,10 +174,10 @@ class _CharacterEditPageState extends State<CharacterEditPage> {
               tooltip: '编辑',
             ),
             IconButton(
-              icon: const Icon(
+              icon: Icon(
                 Icons.delete_outline,
                 size: 18,
-                color: Color(0xFFE53935),
+                color: p.danger,
               ),
               onPressed: _deleteCharacter,
               tooltip: '删除',
@@ -209,14 +213,14 @@ class _CharacterEditPageState extends State<CharacterEditPage> {
                 ],
                 if (_copyStories.isNotEmpty) ...[
                   const SizedBox(height: 8),
-                  const Padding(
-                    padding: EdgeInsets.only(left: 2, bottom: 4),
+                  Padding(
+                    padding: const EdgeInsets.only(left: 2, bottom: 4),
                     child: Text(
                       '副本经历',
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
-                        color: Color(0xFF333333),
+                        color: p.textPrimary,
                       ),
                     ),
                   ),
@@ -231,25 +235,27 @@ class _CharacterEditPageState extends State<CharacterEditPage> {
   }
 
   Widget _buildInfoCard() {
+    final p = context.palette;
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: p.surface,
         borderRadius: BorderRadius.circular(8),
+        border: p.isDark ? Border.all(color: p.border) : null,
       ),
       child: Row(
         children: [
           CircleAvatar(
             radius: 22,
-            backgroundColor: const Color(0xFF4A90D9).withValues(alpha: 0.15),
+            backgroundColor: p.accent.withValues(alpha: 0.15),
             child: Text(
               widget.character.charName.isNotEmpty
                   ? widget.character.charName[0]
                   : '?',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
-                color: Color(0xFF4A90D9),
+                color: p.accent,
               ),
             ),
           ),
@@ -260,19 +266,19 @@ class _CharacterEditPageState extends State<CharacterEditPage> {
               children: [
                 Text(
                   widget.character.charName,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
-                    color: Color(0xFF333333),
+                    color: p.textPrimary,
                   ),
                 ),
                 if ((widget.character.baseDesc ?? '').isNotEmpty) ...[
                   const SizedBox(height: 4),
                   Text(
                     widget.character.baseDesc!,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 12,
-                      color: Color(0xFF777777),
+                      color: p.textSecondary,
                       height: 1.4,
                     ),
                   ),
@@ -286,11 +292,13 @@ class _CharacterEditPageState extends State<CharacterEditPage> {
   }
 
   Widget _buildEditInfoCard() {
+    final p = context.palette;
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: p.surface,
         borderRadius: BorderRadius.circular(8),
+        border: p.isDark ? Border.all(color: p.border) : null,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -336,21 +344,23 @@ class _CharacterEditPageState extends State<CharacterEditPage> {
   }
 
   Widget _buildSectionCard(String title, List<String> items, Color accent) {
+    final p = context.palette;
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: p.surface,
         borderRadius: BorderRadius.circular(8),
+        border: p.isDark ? Border.all(color: p.border) : null,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             title,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w600,
-              color: Color(0xFF333333),
+              color: p.textPrimary,
             ),
           ),
           const SizedBox(height: 8),
@@ -361,7 +371,7 @@ class _CharacterEditPageState extends State<CharacterEditPage> {
               return Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                  color: accent.withValues(alpha: 0.1),
+                  color: accent.withValues(alpha: p.isDark ? 0.18 : 0.1),
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Text(
@@ -377,6 +387,7 @@ class _CharacterEditPageState extends State<CharacterEditPage> {
   }
 
   Widget _buildStoryCard(_CopyStoryRef ref) {
+    final p = context.palette;
     return GestureDetector(
       onTap: () {
         Navigator.of(context).push(
@@ -386,8 +397,9 @@ class _CharacterEditPageState extends State<CharacterEditPage> {
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: p.surface,
           borderRadius: BorderRadius.circular(8),
+          border: p.isDark ? Border.all(color: p.border) : null,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -396,17 +408,17 @@ class _CharacterEditPageState extends State<CharacterEditPage> {
               children: [
                 Text(
                   ref.copyName,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
-                    color: Color(0xFF4A90D9),
+                    color: p.accent,
                   ),
                 ),
                 const Spacer(),
-                const Icon(
+                Icon(
                   Icons.chevron_right,
                   size: 14,
-                  color: Color(0xFFCCCCCC),
+                  color: p.textTertiary,
                 ),
               ],
             ),
@@ -415,9 +427,9 @@ class _CharacterEditPageState extends State<CharacterEditPage> {
               ref.story,
               maxLines: 3,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 11,
-                color: Color(0xFF777777),
+                color: p.textSecondary,
                 height: 1.5,
               ),
             ),

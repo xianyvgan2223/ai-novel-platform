@@ -1,6 +1,7 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import '../../../../../core/config/route_names.dart';
+import 'package:deepseekapp/core/theme/app_palette.dart';
 import '../../../shared/dialog_utils.dart';
 import '../../controller/battle_controller.dart';
 import '../../model/battle_model.dart';
@@ -93,6 +94,7 @@ class _AiBattlePageState extends State<AiBattlePage> {
 
   /// 弹出大编辑框方便编辑输入内容
   void _showEnlargeDialog(TextEditingController ctrl, String hint) {
+    final p = context.palette;
     final editCtrl = TextEditingController(text: ctrl.text);
     final screenH = MediaQuery.heightOf(context);
     final screenW = MediaQuery.widthOf(context);
@@ -119,15 +121,15 @@ class _AiBattlePageState extends State<AiBattlePage> {
             textAlignVertical: TextAlignVertical.top,
             decoration: InputDecoration(
               hintText: hint,
-              hintStyle: const TextStyle(
+              hintStyle: TextStyle(
                 fontSize: 13,
-                color: Color(0xFFBBBBBB),
+                color: p.textTertiary,
                 height: 1.5,
               ),
               border: InputBorder.none,
               contentPadding: const EdgeInsets.fromLTRB(4, 2, 4, 2),
               filled: true,
-              fillColor: const Color(0xFFFAFAFA),
+              fillColor: p.surfaceMuted,
             ),
             style: const TextStyle(fontSize: 13, height: 1.5),
           ),
@@ -156,9 +158,9 @@ class _AiBattlePageState extends State<AiBattlePage> {
               ctrl.text = editCtrl.text;
               scheduleControllerDispose(editCtrl);
             },
-            child: const Text(
+            child: Text(
               '确定',
-              style: TextStyle(fontSize: 12, color: Color(0xFFFF5722)),
+              style: TextStyle(fontSize: 12, color: p.accent),
             ),
           ),
         ],
@@ -168,26 +170,27 @@ class _AiBattlePageState extends State<AiBattlePage> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     final isLoading = _controller.isLoading;
     final streaming = _controller.streamingText;
 
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: p.background,
       appBar: AppBar(
         title: const Text(
           'AI 写战斗',
           style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
         ),
-        backgroundColor: Colors.white,
+        backgroundColor: p.surface,
         elevation: 0.5,
         centerTitle: true,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Color(0xFF333333)),
+          icon: Icon(Icons.arrow_back, color: p.textPrimary),
           onPressed: () => Navigator.of(context).pop(),
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.history, color: Color(0xFF666666)),
+            icon: Icon(Icons.history, color: p.textSecondary),
             tooltip: '历史记录',
             onPressed: () async {
               await Navigator.of(context).push(
@@ -200,7 +203,7 @@ class _AiBattlePageState extends State<AiBattlePage> {
             },
           ),
           IconButton(
-            icon: const Icon(Icons.settings_outlined, color: Color(0xFF666666)),
+            icon: Icon(Icons.settings_outlined, color: p.textSecondary),
             tooltip: '战斗设置',
             onPressed: () async {
               await Navigator.of(context).push(
@@ -229,7 +232,7 @@ class _AiBattlePageState extends State<AiBattlePage> {
               _buildInputArea(isLoading),
 
               // ── 分隔线 ──
-              const Divider(height: 1, color: Color(0xFFEEEEEE)),
+              Divider(height: 1, color: p.border),
 
               // ── 输出 / 历史区域 ──
               if (streaming.isNotEmpty || isLoading)
@@ -244,9 +247,10 @@ class _AiBattlePageState extends State<AiBattlePage> {
   }
 
   Widget _buildInputArea(bool isLoading) {
+    final p = context.palette;
     return Container(
       padding: const EdgeInsets.all(12),
-      color: const Color(0xFFFAFAFA),
+      color: p.surfaceMuted,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -292,8 +296,8 @@ class _AiBattlePageState extends State<AiBattlePage> {
                     icon: const Icon(Icons.stop, size: 18),
                     label: const Text('停止生成'),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFE53935),
-                      foregroundColor: Colors.white,
+                      backgroundColor: p.danger,
+                      foregroundColor: p.onAccent,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8),
                       ),
@@ -304,8 +308,8 @@ class _AiBattlePageState extends State<AiBattlePage> {
                     icon: const Icon(Icons.auto_awesome, size: 18),
                     label: const Text('生成战斗场景'),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFFF5722),
-                      foregroundColor: Colors.white,
+                      backgroundColor: p.accent,
+                      foregroundColor: p.onAccent,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8),
                       ),
@@ -318,26 +322,27 @@ class _AiBattlePageState extends State<AiBattlePage> {
   }
 
   InputDecoration _inputDecoration(String hint, {VoidCallback? onExpand}) {
+    final p = context.palette;
     return InputDecoration(
       hintText: hint,
-      hintStyle: const TextStyle(fontSize: 13, color: Color(0xFFBBBBBB)),
+      hintStyle: TextStyle(fontSize: 13, color: p.textTertiary),
       contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(6),
-        borderSide: const BorderSide(color: Color(0xFFDDDDDD)),
+        borderSide: BorderSide(color: p.borderStrong),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(6),
-        borderSide: const BorderSide(color: Color(0xFFDDDDDD)),
+        borderSide: BorderSide(color: p.borderStrong),
       ),
       filled: true,
-      fillColor: Colors.white,
+      fillColor: p.surface,
       isDense: true,
       suffixIcon: onExpand != null
           ? IconButton(
               icon: const Icon(Icons.open_in_full, size: 16),
               tooltip: '放大编辑',
-              color: const Color(0xFF999999),
+              color: p.textTertiary,
               onPressed: onExpand,
               constraints: const BoxConstraints(),
               padding: EdgeInsets.zero,
@@ -347,6 +352,7 @@ class _AiBattlePageState extends State<AiBattlePage> {
   }
 
   Widget _buildStreamingContent(String text, bool isLoading) {
+    final p = context.palette;
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -357,26 +363,26 @@ class _AiBattlePageState extends State<AiBattlePage> {
             width: double.infinity,
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: const Color(0xFFF5F5F5),
+              color: p.surfaceMuted,
               borderRadius: BorderRadius.circular(8),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
+                Text(
                   '战斗要素',
                   style: TextStyle(
                     fontWeight: FontWeight.w600,
                     fontSize: 13,
-                    color: Color(0xFF666666),
+                    color: p.textSecondary,
                   ),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   _controller.userInput,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 14,
-                    color: Color(0xFF333333),
+                    color: p.textPrimary,
                   ),
                 ),
               ],
@@ -387,12 +393,12 @@ class _AiBattlePageState extends State<AiBattlePage> {
           // 分隔
           Row(
             children: [
-              const Text(
+              Text(
                 '生成内容',
                 style: TextStyle(
                   fontWeight: FontWeight.w600,
                   fontSize: 13,
-                  color: Color(0xFF666666),
+                  color: p.textSecondary,
                 ),
               ),
               const SizedBox(width: 8),
@@ -407,10 +413,10 @@ class _AiBattlePageState extends State<AiBattlePage> {
           const SizedBox(height: 8),
           Text(
             text.isEmpty ? (isLoading ? '正在生成...' : '') : text,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 15,
               height: 1.7,
-              color: Color(0xFF222222),
+              color: p.textPrimary,
             ),
           ),
           if (!isLoading && text.isNotEmpty) ...[
@@ -423,8 +429,8 @@ class _AiBattlePageState extends State<AiBattlePage> {
                 icon: const Icon(Icons.check, size: 18),
                 label: const Text('完成'),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF4CAF50),
-                  foregroundColor: Colors.white,
+                  backgroundColor: p.success,
+                  foregroundColor: p.onAccent,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(8),
                   ),
@@ -438,23 +444,24 @@ class _AiBattlePageState extends State<AiBattlePage> {
   }
 
   List<Widget> _buildHistoryContent() {
+    final p = context.palette;
     final history = _controller.history;
     if (history.isEmpty) {
       return [
-        const Padding(
-          padding: EdgeInsets.symmetric(vertical: 64),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 64),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(
                 Icons.local_fire_department,
                 size: 48,
-                color: Color(0xFFDDDDDD),
+                color: p.textTertiary,
               ),
-              SizedBox(height: 12),
+              const SizedBox(height: 12),
               Text(
                 '在上方输入战斗要素，点击生成',
-                style: TextStyle(fontSize: 14, color: Color(0xFFBBBBBB)),
+                style: TextStyle(fontSize: 14, color: p.textTertiary),
               ),
             ],
           ),
@@ -478,12 +485,13 @@ class _AiBattlePageState extends State<AiBattlePage> {
   }
 
   Widget _buildHistoryCard(BattleScene scene) {
+    final p = context.palette;
     return Card(
       margin: EdgeInsets.zero,
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(8),
-        side: const BorderSide(color: Color(0xFFEEEEEE)),
+        side: BorderSide(color: p.border),
       ),
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -496,26 +504,26 @@ class _AiBattlePageState extends State<AiBattlePage> {
                 Expanded(
                   child: Text(
                     _formatTime(scene.createdAt),
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 12,
-                      color: Color(0xFF999999),
+                      color: p.textTertiary,
                     ),
                   ),
                 ),
                 InkWell(
-                  child: const Icon(
+                  child: Icon(
                     Icons.refresh,
                     size: 16,
-                    color: Color(0xFF999999),
+                    color: p.textTertiary,
                   ),
                   onTap: () => _loadSceneToInput(scene),
                 ),
                 const SizedBox(width: 8),
                 InkWell(
-                  child: const Icon(
+                  child: Icon(
                     Icons.delete_outline,
                     size: 16,
-                    color: Color(0xFFCCCCCC),
+                    color: p.textTertiary,
                   ),
                   onTap: () => _controller.removeFromHistory(scene.id!),
                 ),
@@ -527,20 +535,20 @@ class _AiBattlePageState extends State<AiBattlePage> {
               scene.userInput,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 13, color: Color(0xFF666666)),
+              style: TextStyle(fontSize: 13, color: p.textSecondary),
             ),
             if (scene.aiResult.isNotEmpty) ...[
               const SizedBox(height: 6),
-              const Divider(height: 1, color: Color(0xFFF0F0F0)),
+              Divider(height: 1, color: p.border),
               const SizedBox(height: 6),
               Text(
                 scene.aiResult,
                 maxLines: 4,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 14,
                   height: 1.5,
-                  color: Color(0xFF222222),
+                  color: p.textPrimary,
                 ),
               ),
             ],

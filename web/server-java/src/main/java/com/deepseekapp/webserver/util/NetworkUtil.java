@@ -66,7 +66,7 @@ public class NetworkUtil {
                 "http://127.0.0.1:" + port,
                 "usb",
                 true,
-                "手机插着数据线时用这条：在电脑上以 --usb 模式启动本服务即可打通，不怕防火墙。"));
+                "手机插着数据线并授权 USB 调试后，服务会自动建立隧道，不怕防火墙。"));
 
         candidates.add(candidate(
                 "本机（电脑自己的浏览器）",

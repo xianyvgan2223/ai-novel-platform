@@ -23,6 +23,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/config/app_version.dart';
 import '../../../core/config/deepseek_models.dart';
 import '../../../core/db/data_manager.dart';
+import '../../../core/theme/app_palette.dart';
+import '../../../core/theme/theme_mode_controller.dart';
 import '../../../core/widgets/settings_kit.dart';
 import '../../sync/presentation/sync_page.dart';
 import '../../update/presentation/update_page.dart';
@@ -71,26 +73,27 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
   Future<void> _onSave() async {
     final settingCtrl = ref.read(settingProvider);
+    final p = context.palette;
     try {
       await settingCtrl.saveSettings();
       // 清空对话控制器的配置缓存
       ref.read(chatProvider).clearSettingCache();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('设置已保存'),
-            backgroundColor: kSettingsPrimary,
-            duration: Duration(seconds: 1),
+          SnackBar(
+            content: const Text('设置已保存'),
+            backgroundColor: p.accent,
+            duration: const Duration(seconds: 1),
           ),
         );
       }
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('保存失败（数据库不可用）'),
-            backgroundColor: Color(0xFFFF4D4F),
-            duration: Duration(seconds: 1),
+          SnackBar(
+            content: const Text('保存失败（数据库不可用）'),
+            backgroundColor: p.danger,
+            duration: const Duration(seconds: 1),
           ),
         );
       }
@@ -99,6 +102,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
   Future<void> _onExport() async {
     final ctrl = ref.read(settingProvider);
+    final p = context.palette;
     // 先保存当前设置，确保数据最新
     await ctrl.saveSettings();
     // 清空缓存，确保数据库连接释放
@@ -109,15 +113,14 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(err ?? '数据库已导出'),
-        backgroundColor: err != null
-            ? const Color(0xFFFF4D4F)
-            : kSettingsPrimary,
+        backgroundColor: err != null ? p.danger : p.accent,
         duration: const Duration(seconds: 2),
       ),
     );
   }
 
   Future<void> _onImport() async {
+    final p = context.palette;
     // 导入前先弹出确认
     final confirm = await showDialog<bool>(
       context: context,
@@ -131,7 +134,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('确定导入', style: TextStyle(color: Colors.red)),
+            child: Text('确定导入', style: TextStyle(color: p.danger)),
           ),
         ],
       ),
@@ -143,9 +146,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(err ?? '数据导入成功，请重启应用生效'),
-        backgroundColor: err != null
-            ? const Color(0xFFFF4D4F)
-            : kSettingsPrimary,
+        backgroundColor: err != null ? p.danger : p.accent,
         duration: const Duration(seconds: 2),
       ),
     );
@@ -165,6 +166,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     // 只订阅「决定页面结构」的三个值：是否加载完成、联网搜索来源、流式开关。
     //
     // 其余参数值不要 watch：文本 / 开关的值由各行自己的 StatefulWidget 持有
@@ -180,18 +182,22 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       ),
     );
     if (!form.isLoaded) {
-      return const Scaffold(
-        backgroundColor: kSettingsPageBg,
-        body: Center(child: CircularProgressIndicator(color: kSettingsPrimary)),
+      return Scaffold(
+        backgroundColor: p.background,
+        body: Center(
+          child: CircularProgressIndicator(color: p.accent),
+        ),
       );
     }
 
     // 一次性读取当前值：只用来填各行的 initialValue，不建立依赖。
     final ctrl = ref.read(settingProvider);
     final engine = form.engine;
+    final themeMode = ref.watch(themeModeProvider.select((c) => c.mode));
+    final themeModeValue = ThemeModeController.encode(themeMode);
 
     return Scaffold(
-      backgroundColor: kSettingsPageBg,
+      backgroundColor: p.background,
       appBar: SettingsAppBar(title: '设置', onSave: _onSave),
       body: ListView(
         // 顶部 2dp、左右 16dp 给卡片；底部留白用 ListView padding 实现，
@@ -204,12 +210,42 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
         ),
         keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
         children: [
+          // ── 0. 外观 ──
+          const SettingsSectionHeader(
+            icon: Icons.contrast_rounded,
+            title: '外观',
+            subtitle: '跟随系统，或手动选择浅色 / 深色',
+            isFirst: true,
+          ),
+          SettingsCard(
+            children: [
+              SettingsSelectRow(
+                key: _k('theme_mode'),
+                label: '夜间模式',
+                value: themeModeValue,
+                options: const [
+                  SettingsSelectOption(
+                    'system',
+                    '跟随系统',
+                    shortLabel: '跟随系统',
+                  ),
+                  SettingsSelectOption('light', '浅色', shortLabel: '浅色'),
+                  SettingsSelectOption('dark', '深色', shortLabel: '深色'),
+                ],
+                onChanged: (v) {
+                  ref
+                      .read(themeModeProvider)
+                      .setMode(ThemeModeController.parse(v));
+                },
+              ),
+            ],
+          ),
+
           // ── 1. 必选鉴权 ──
           const SettingsSectionHeader(
             icon: Icons.vpn_key_rounded,
             title: '必选鉴权',
             subtitle: '对话与官方联网搜索共用同一个 Key',
-            isFirst: true,
           ),
           SettingsCard(
             children: [
@@ -487,33 +523,33 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             children: [
               SettingsActionRow(
                 icon: Icons.upload_rounded,
-                iconColor: kSettingsPrimary,
-                softColor: kSettingsPrimarySoft,
+                iconColor: p.accent,
+                softColor: p.accentSoft,
                 title: '导出数据库',
                 subtitle: '备份到本地文件',
                 onTap: _onExport,
               ),
               SettingsActionRow(
                 icon: Icons.download_rounded,
-                iconColor: kSettingsDanger,
-                softColor: kSettingsDangerSoft,
+                iconColor: p.danger,
+                softColor: p.dangerSoft,
                 title: '导入数据库',
-                titleColor: kSettingsDanger,
+                titleColor: p.danger,
                 subtitle: '从备份文件恢复，会覆盖现有数据',
                 onTap: _onImport,
               ),
               SettingsActionRow(
                 icon: Icons.sync_rounded,
-                iconColor: kSettingsPrimary,
-                softColor: kSettingsPrimarySoft,
+                iconColor: p.accent,
+                softColor: p.accentSoft,
                 title: '数据同步',
                 subtitle: '与电脑 Web 服务双向同步',
                 onTap: _openSync,
               ),
               SettingsActionRow(
                 icon: Icons.system_update_rounded,
-                iconColor: kSettingsPrimary,
-                softColor: kSettingsPrimarySoft,
+                iconColor: p.accent,
+                softColor: p.accentSoft,
                 title: '检查更新',
                 subtitle: '从电脑同步服务下载并安装新版本',
                 onTap: _openUpdate,
@@ -528,9 +564,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             child: Center(
               child: Text(
                 '当前版本 v$kAppVersion',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 11,
-                  color: kSettingsFooterText,
+                  color: p.textTertiary,
                 ),
               ),
             ),
@@ -589,6 +625,7 @@ class _ApiKeyCardState extends State<_ApiKeyCard> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     final configured = _controller.text.trim().isNotEmpty;
     return Padding(
       padding: const EdgeInsets.all(kSettingsCardPadH),
@@ -601,17 +638,17 @@ class _ApiKeyCardState extends State<_ApiKeyCard> {
                 width: 32,
                 height: 32,
                 decoration: BoxDecoration(
-                  color: kSettingsPrimarySoft,
+                  color: p.accentSoft,
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: const Icon(
+                child: Icon(
                   Icons.vpn_key_rounded,
                   size: 17,
-                  color: kSettingsPrimary,
+                  color: p.accent,
                 ),
               ),
               const SizedBox(width: 10),
-              const Expanded(
+              Expanded(
                 child: Text(
                   'DeepSeek API Key',
                   maxLines: 1,
@@ -619,7 +656,7 @@ class _ApiKeyCardState extends State<_ApiKeyCard> {
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
-                    color: kSettingsTitle,
+                    color: p.textPrimary,
                   ),
                 ),
               ),
@@ -632,10 +669,10 @@ class _ApiKeyCardState extends State<_ApiKeyCard> {
             height: 46,
             padding: const EdgeInsets.fromLTRB(12, 0, 4, 0),
             decoration: BoxDecoration(
-              color: kSettingsFieldBg,
+              color: p.surfaceMuted,
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
-                color: _focused ? kSettingsPrimary : kSettingsFieldBorder,
+                color: _focused ? p.accent : p.border,
                 width: _focused ? 1.2 : 1,
               ),
             ),
@@ -649,21 +686,21 @@ class _ApiKeyCardState extends State<_ApiKeyCard> {
                     autocorrect: false,
                     enableSuggestions: false,
                     textInputAction: TextInputAction.done,
-                    cursorColor: kSettingsPrimary,
-                    style: const TextStyle(
+                    cursorColor: p.accent,
+                    style: TextStyle(
                       fontSize: 13.5,
-                      color: kSettingsValue,
+                      color: p.textSecondary,
                     ),
                     onChanged: (v) {
                       // 首字符输入/清空时要刷新「已配置」徽标，所以这里 setState。
                       setState(() {});
                       widget.onChanged(v);
                     },
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       hintText: '填入以 sk- 开头的 Key',
                       hintStyle: TextStyle(
                         fontSize: 12.5,
-                        color: kSettingsHint,
+                        color: p.textTertiary,
                       ),
                       border: InputBorder.none,
                       isDense: true,
@@ -678,7 +715,7 @@ class _ApiKeyCardState extends State<_ApiKeyCard> {
                         ? Icons.visibility_off_outlined
                         : Icons.visibility_outlined,
                     size: 18,
-                    color: kSettingsSubtitle,
+                    color: p.textTertiary,
                   ),
                   tooltip: _obscured ? '显示 API Key' : '隐藏 API Key',
                   padding: EdgeInsets.zero,
@@ -704,11 +741,12 @@ class _KeyStatusChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final Color color = configured ? kSettingsSuccess : kSettingsSubtitle;
+    final p = context.palette;
+    final Color color = configured ? p.success : p.textTertiary;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
       decoration: BoxDecoration(
-        color: configured ? kSettingsSuccessSoft : kSettingsChipBg,
+        color: configured ? p.successSoft : p.surfaceMuted,
         borderRadius: BorderRadius.circular(20),
       ),
       child: Row(
@@ -719,7 +757,7 @@ class _KeyStatusChip extends StatelessWidget {
             height: 5,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: configured ? kSettingsSuccess : kSettingsHint,
+              color: configured ? p.success : p.textTertiary,
             ),
           ),
           const SizedBox(width: 4),
@@ -780,6 +818,7 @@ class _ModelSelectorState extends State<_ModelSelector> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -804,10 +843,10 @@ class _ModelSelectorState extends State<_ModelSelector> {
         if (_isCustom) ...[
           // 自定义输入属于同一张卡片里的下一行，手动补一条分隔线
           // （SettingsCard 只会在直接子项之间插线）。
-          const Divider(
+          Divider(
             height: 1,
             thickness: 1,
-            color: kSettingsDivider,
+            color: p.border,
             indent: kSettingsCardPadH,
             endIndent: kSettingsCardPadH,
           ),

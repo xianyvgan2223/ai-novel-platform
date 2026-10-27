@@ -2,6 +2,7 @@
 // 跑团模拟器首页 — 战役存档列表
 
 import 'package:flutter/material.dart';
+import 'package:deepseekapp/core/theme/app_palette.dart';
 import '../../controller/trpg_controller.dart';
 import '../../data/trpg_db_service.dart';
 import 'trpg_character_create_page.dart';
@@ -82,9 +83,11 @@ class _TrpgHomePageState extends State<TrpgHomePage> {
   }
 
   Future<void> _deleteCampaign(TrpgCampaign campaign) async {
+    final p = context.palette;
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
+        backgroundColor: p.surfaceElevated,
         title: const Text('删除战役', style: TextStyle(fontSize: 14)),
         content: const Text('确定删除该战役存档吗？', style: TextStyle(fontSize: 13)),
         actions: [
@@ -94,9 +97,9 @@ class _TrpgHomePageState extends State<TrpgHomePage> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text(
+            child: Text(
               '删除',
-              style: TextStyle(fontSize: 13, color: Colors.red),
+              style: TextStyle(fontSize: 13, color: p.danger),
             ),
           ),
         ],
@@ -110,25 +113,26 @@ class _TrpgHomePageState extends State<TrpgHomePage> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
+      backgroundColor: p.background,
       appBar: AppBar(
         toolbarHeight: 44,
-        backgroundColor: Colors.white,
+        backgroundColor: p.surface,
         elevation: 0,
         scrolledUnderElevation: 0,
-        title: const Text(
+        title: Text(
           '跑团模拟器',
           style: TextStyle(
             fontSize: 15,
             fontWeight: FontWeight.w600,
-            color: Color(0xFF333333),
+            color: p.textPrimary,
           ),
         ),
         centerTitle: true,
-        bottom: const PreferredSize(
-          preferredSize: Size.fromHeight(1),
-          child: Divider(height: 1, color: Color(0xFFEEEEEE)),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: Divider(height: 1, color: p.border),
         ),
       ),
       body: _loading
@@ -155,29 +159,30 @@ class _TrpgHomePageState extends State<TrpgHomePage> {
             ),
       floatingActionButton: FloatingActionButton(
         onPressed: _createCampaign,
-        backgroundColor: const Color(0xFF4D6BFE),
-        child: const Icon(Icons.add, color: Colors.white),
+        backgroundColor: p.accent,
+        child: Icon(Icons.add, color: p.onAccent),
       ),
     );
   }
 
   Widget _buildEmpty() {
+    final p = context.palette;
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(Icons.casino, size: 48, color: Color(0xFFCCCCCC)),
+          Icon(Icons.casino, size: 48, color: p.textTertiary),
           const SizedBox(height: 12),
-          const Text(
+          Text(
             '还没有战役存档',
-            style: TextStyle(fontSize: 13, color: Color(0xFF999999)),
+            style: TextStyle(fontSize: 13, color: p.textTertiary),
           ),
           const SizedBox(height: 16),
           ElevatedButton(
             onPressed: _createCampaign,
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF4D6BFE),
-              foregroundColor: Colors.white,
+              backgroundColor: p.accent,
+              foregroundColor: p.onAccent,
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
             ),
             child: const Text('新建战役', style: TextStyle(fontSize: 13)),
@@ -222,7 +227,9 @@ class _CreateCampaignDialogState extends State<_CreateCampaignDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return AlertDialog(
+      backgroundColor: p.surfaceElevated,
       title: const Text('新建战役', style: TextStyle(fontSize: 14)),
       content: SingleChildScrollView(
         child: Column(
@@ -278,9 +285,9 @@ class _CreateCampaignDialogState extends State<_CreateCampaignDialog> {
               'dm_prompt': _dmCtrl.text.trim(),
             });
           },
-          child: const Text(
+          child: Text(
             '创建',
-            style: TextStyle(fontSize: 13, color: Color(0xFF4D6BFE)),
+            style: TextStyle(fontSize: 13, color: p.accent),
           ),
         ),
       ],
@@ -301,21 +308,25 @@ class _CampaignCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: GestureDetector(
         onTap: onTap,
         child: Container(
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: p.surface,
             borderRadius: BorderRadius.circular(12),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.04),
-                blurRadius: 6,
-                offset: const Offset(0, 2),
-              ),
-            ],
+            border: p.isDark ? Border.all(color: p.border) : null,
+            boxShadow: p.isDark
+                ? null
+                : [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.04),
+                      blurRadius: 6,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
           ),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           child: Row(
@@ -324,14 +335,14 @@ class _CampaignCard extends StatelessWidget {
                 width: 40,
                 height: 40,
                 decoration: BoxDecoration(
-                  color: const Color(0xFF4D6BFE).withValues(alpha: 0.12),
+                  color: p.accent.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 alignment: Alignment.center,
-                child: const Icon(
+                child: Icon(
                   Icons.casino,
                   size: 20,
-                  color: Color(0xFF4D6BFE),
+                  color: p.accent,
                 ),
               ),
               const SizedBox(width: 12),
@@ -341,10 +352,10 @@ class _CampaignCard extends StatelessWidget {
                   children: [
                     Text(
                       campaign.name,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
-                        color: Color(0xFF333333),
+                        color: p.textPrimary,
                       ),
                     ),
                     const SizedBox(height: 3),
@@ -354,9 +365,9 @@ class _CampaignCard extends StatelessWidget {
                           : campaign.scene,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 11,
-                        color: Color(0xFF999999),
+                        color: p.textTertiary,
                       ),
                     ),
                   ],
@@ -364,10 +375,10 @@ class _CampaignCard extends StatelessWidget {
               ),
               GestureDetector(
                 onTap: onDelete,
-                child: const Icon(
+                child: Icon(
                   Icons.close,
                   size: 16,
-                  color: Color(0xFFCCCCCC),
+                  color: p.textTertiary,
                 ),
               ),
             ],
@@ -397,38 +408,39 @@ class _FullscreenEditPage extends StatefulWidget {
 class _FullscreenEditPageState extends State<_FullscreenEditPage> {
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: p.background,
       appBar: AppBar(
         toolbarHeight: 44,
-        backgroundColor: Colors.white,
+        backgroundColor: p.surface,
         elevation: 0,
         scrolledUnderElevation: 0,
         title: Text(
           widget.title,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 15,
             fontWeight: FontWeight.w600,
-            color: Color(0xFF333333),
+            color: p.textPrimary,
           ),
         ),
         centerTitle: true,
         leading: IconButton(
-          icon: const Icon(Icons.close, size: 20, color: Color(0xFF666666)),
+          icon: Icon(Icons.close, size: 20, color: p.textSecondary),
           onPressed: () => Navigator.of(context).pop(),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text(
+            child: Text(
               '完成',
-              style: TextStyle(fontSize: 13, color: Color(0xFF4D6BFE)),
+              style: TextStyle(fontSize: 13, color: p.accent),
             ),
           ),
         ],
-        bottom: const PreferredSize(
-          preferredSize: Size.fromHeight(1),
-          child: Divider(height: 1, color: Color(0xFFEEEEEE)),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: Divider(height: 1, color: p.border),
         ),
       ),
       body: Padding(
@@ -439,14 +451,14 @@ class _FullscreenEditPageState extends State<_FullscreenEditPage> {
           expands: true,
           textAlignVertical: TextAlignVertical.top,
           autofocus: true,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 14,
             height: 1.6,
-            color: Color(0xFF333333),
+            color: p.textPrimary,
           ),
           decoration: InputDecoration(
             hintText: widget.hintText,
-            hintStyle: const TextStyle(fontSize: 13, color: Color(0xFFBBBBBB)),
+            hintStyle: TextStyle(fontSize: 13, color: p.textTertiary),
             border: InputBorder.none,
             contentPadding: EdgeInsets.zero,
           ),

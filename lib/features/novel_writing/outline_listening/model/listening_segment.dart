@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'package:deepseekapp/core/theme/app_palette.dart';
+
 /// 「听大纲改名」的朗读模式：决定每个事件读多少内容。
 ///
 /// 三个档位覆盖三种典型用法：只想核对结构时读标题，想连听带看时读标题 + 概要，
@@ -197,6 +199,7 @@ class OutlineListenTextController extends TextEditingController {
       );
     }
     final base = style ?? const TextStyle();
+    final p = context.palette;
     final before = text.substring(0, range.start);
     final mid = text.substring(range.start, range.end);
     final after = text.substring(range.end);
@@ -207,8 +210,10 @@ class OutlineListenTextController extends TextEditingController {
         TextSpan(
           text: mid,
           style: base.copyWith(
-            backgroundColor: highlightColor,
-            color: const Color(0xFF1A1A1A),
+            backgroundColor: p.isDark
+                ? p.accent.withValues(alpha: 0.28)
+                : highlightColor,
+            color: p.isDark ? p.textPrimary : const Color(0xFF1A1A1A),
           ),
         ),
         if (after.isNotEmpty) TextSpan(text: after),

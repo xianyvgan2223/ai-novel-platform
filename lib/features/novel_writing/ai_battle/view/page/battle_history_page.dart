@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:deepseekapp/core/theme/app_palette.dart';
 import '../../controller/battle_controller.dart';
 import '../../model/battle_model.dart';
 import 'battle_edit_page.dart';
@@ -48,6 +49,7 @@ class _BattleHistoryPageState extends State<BattleHistoryPage> {
 
   Future<void> _confirmDelete(BattleScene scene) async {
     if (scene.id == null) return;
+    final p = context.palette;
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -60,7 +62,7 @@ class _BattleHistoryPageState extends State<BattleHistoryPage> {
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            style: TextButton.styleFrom(foregroundColor: const Color(0xFFE53935)),
+            style: TextButton.styleFrom(foregroundColor: p.danger),
             child: const Text('删除'),
           ),
         ],
@@ -73,32 +75,33 @@ class _BattleHistoryPageState extends State<BattleHistoryPage> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     final history = widget.controller.history;
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: p.background,
       appBar: AppBar(
         title: const Text(
           '历史记录',
           style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
         ),
-        backgroundColor: Colors.white,
+        backgroundColor: p.surface,
         elevation: 0.5,
         centerTitle: true,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Color(0xFF333333)),
+          icon: Icon(Icons.arrow_back, color: p.textPrimary),
           onPressed: () => Navigator.of(context).pop(),
         ),
       ),
       body: history.isEmpty
-          ? const Center(
+          ? Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.history, size: 48, color: Color(0xFFDDDDDD)),
-                  SizedBox(height: 12),
+                  Icon(Icons.history, size: 48, color: p.textTertiary),
+                  const SizedBox(height: 12),
                   Text(
                     '暂无历史记录',
-                    style: TextStyle(fontSize: 14, color: Color(0xFFBBBBBB)),
+                    style: TextStyle(fontSize: 14, color: p.textTertiary),
                   ),
                 ],
               ),
@@ -116,12 +119,13 @@ class _BattleHistoryPageState extends State<BattleHistoryPage> {
   }
 
   Widget _buildCard(BattleScene scene) {
+    final p = context.palette;
     return Card(
       margin: EdgeInsets.zero,
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(8),
-        side: const BorderSide(color: Color(0xFFEEEEEE)),
+        side: BorderSide(color: p.border),
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(8),
@@ -135,21 +139,21 @@ class _BattleHistoryPageState extends State<BattleHistoryPage> {
               Row(
                 children: [
                   Icon(Icons.access_time,
-                      size: 12, color: Colors.grey[400]),
+                      size: 12, color: p.textTertiary),
                   const SizedBox(width: 4),
                   Text(
                     _formatTime(scene.createdAt),
-                    style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                    style: TextStyle(fontSize: 12, color: p.textTertiary),
                   ),
                   const Spacer(),
                   InkWell(
                     onTap: () => _confirmDelete(scene),
-                    child: const Icon(Icons.delete_outline,
-                        size: 16, color: Color(0xFFCCCCCC)),
+                    child: Icon(Icons.delete_outline,
+                        size: 16, color: p.textTertiary),
                   ),
                   const SizedBox(width: 8),
-                  const Icon(Icons.edit_outlined,
-                      size: 14, color: Color(0xFFCCCCCC)),
+                  Icon(Icons.edit_outlined,
+                      size: 14, color: p.textTertiary),
                 ],
               ),
               const SizedBox(height: 8),
@@ -158,20 +162,20 @@ class _BattleHistoryPageState extends State<BattleHistoryPage> {
                 scene.userInput,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 13, color: Color(0xFF666666)),
+                style: TextStyle(fontSize: 13, color: p.textSecondary),
               ),
               if (scene.aiResult.isNotEmpty) ...[
                 const SizedBox(height: 8),
-                const Divider(height: 1, color: Color(0xFFF0F0F0)),
+                Divider(height: 1, color: p.border),
                 const SizedBox(height: 8),
                 Text(
                   scene.aiResult,
                   maxLines: 3,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 14,
                     height: 1.5,
-                    color: Color(0xFF222222),
+                    color: p.textPrimary,
                   ),
                 ),
               ],

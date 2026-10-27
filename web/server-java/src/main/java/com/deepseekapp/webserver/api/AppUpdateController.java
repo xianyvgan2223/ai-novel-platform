@@ -74,7 +74,7 @@ public class AppUpdateController {
      * 发布新 APK。只允许本机访问，或带正确的 x-api-token。
      *
      * <pre>
-     * POST /api/app/upload?versionCode=3&amp;versionName=5.1.1&amp;force=false
+     * POST /api/app/upload?versionCode=4&amp;versionName=5.2.0&amp;force=false
      * Content-Type: application/octet-stream
      * </pre>
      */

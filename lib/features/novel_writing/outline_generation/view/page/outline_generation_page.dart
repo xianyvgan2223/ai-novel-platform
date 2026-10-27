@@ -1,6 +1,7 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:deepseekapp/core/theme/app_palette.dart';
 import '../../../../../core/config/route_names.dart';
 import '../../../../../core/widgets/settings_kit.dart';
 import '../../background/outline_generation_session.dart';
@@ -11,36 +12,6 @@ import 'outline_setting_page.dart';
 import 'outline_history_list_page.dart';
 
 // ─── 本页视觉（色值 / 圆角 / 间距全部取自 settings_kit 的令牌，禁止另起一套） ───
-
-/// 警告横幅：柔和的暖底 + 深琥珀字。
-const Color _kWarningSoft = Color(0xFFFFF6E3);
-const Color _kWarningInk = Color(0xFF9A6B12);
-
-/// 检查点卡片：琥珀色点缀（图标 chip + 标题），底色仍用白卡。
-const Color _kAmberSoft = Color(0xFFFFF3DA);
-const Color _kAmberInk = Color(0xFFB8860B);
-const Color _kAmberTitle = Color(0xFF7A5C00);
-
-/// 错误气泡里的正文色（比纯红更沉，长文阅读不刺眼）。
-const Color _kErrorInk = Color(0xFF8C2F2F);
-
-/// 卡片发丝描边：白卡不用投影，改用 1px 浅灰描边，页面更平、更克制。
-const Color _kCardBorder = Color(0xFFECEEF2);
-
-/// 输入框聚焦时的描边：不用主色，一条中灰线即可（本页没有第二强调色）。
-const Color _kFieldFocusBorder = Color(0xFFD8DCE3);
-
-const TextStyle _kFieldTextStyle = TextStyle(
-  fontSize: 14,
-  height: 1.4,
-  color: kSettingsLabel,
-);
-
-const TextStyle _kHelperStyle = TextStyle(
-  fontSize: 11.5,
-  height: 1.5,
-  color: kSettingsSubtitle,
-);
 
 /// 一键生成小说大纲页面（流式输出）
 class OutlineGenerationPage extends StatefulWidget {
@@ -77,6 +48,34 @@ class OutlineGenerationPage extends StatefulWidget {
 
 class _OutlineGenerationPageState extends State<OutlineGenerationPage>
     with WidgetsBindingObserver {
+  AppPalette get _p => context.palette;
+
+  /// 警告横幅：柔和的暖底 + 深琥珀字。
+  Color get _warningSoft =>
+      _p.isDark ? _p.warning.withValues(alpha: 0.14) : const Color(0xFFFFF6E3);
+  Color get _warningInk => _p.isDark ? _p.warning : const Color(0xFF9A6B12);
+
+  /// 检查点卡片：琥珀色点缀（图标 chip + 标题），底色仍用白卡。
+  Color get _amberSoft =>
+      _p.isDark ? _p.warning.withValues(alpha: 0.14) : const Color(0xFFFFF3DA);
+  Color get _amberInk => _p.isDark ? _p.warning : const Color(0xFFB8860B);
+  Color get _amberTitle => _p.isDark ? _p.textPrimary : const Color(0xFF7A5C00);
+
+  /// 错误气泡里的正文色（比纯红更沉，长文阅读不刺眼）。
+  Color get _errorInk => _p.isDark ? _p.danger : const Color(0xFF8C2F2F);
+
+  /// 卡片发丝描边：白卡不用投影，改用 1px 浅灰描边，页面更平、更克制。
+  Color get _cardBorder => _p.border;
+
+  /// 输入框聚焦时的描边：不用主色，一条中灰线即可（本页没有第二强调色）。
+  Color get _fieldFocusBorder => _p.borderStrong;
+
+  TextStyle get _fieldTextStyle =>
+      TextStyle(fontSize: 14, height: 1.4, color: _p.textPrimary);
+
+  TextStyle get _helperStyle =>
+      TextStyle(fontSize: 11.5, height: 1.5, color: _p.textTertiary);
+
   /// 生成状态由进程级会话持有（见 [OutlineGenerationSession]）：
   /// 页面关闭时不取消生成，重新进入 / 点通知回来都挂回同一份状态。
   late OutlineController _controller;
@@ -340,7 +339,7 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
       for (var i = 0; i < bubbles.length; i++) ...[
         // 步骤之间用发丝分割线而不是间距：长结果更像连续文档，不是一摞气泡
         if (i > 0)
-          const Divider(height: 28, thickness: 1, color: kSettingsDivider),
+          Divider(height: 28, thickness: 1, color: _p.border),
         RepaintBoundary(
           child: _buildBubble(
             label: bubbles[i].label,
@@ -402,38 +401,38 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
         c.bubbles.isNotEmpty || c.displayText.isNotEmpty || c.loading;
     return DefaultSelectionStyle(
       // 光标 / 选中高亮也用中性色，避免输入框里还残留蓝色
-      cursorColor: kSettingsTitle,
-      selectionColor: kSettingsTitle.withValues(alpha: 0.18),
+      cursorColor: _p.textPrimary,
+      selectionColor: _p.textPrimary.withValues(alpha: 0.18),
       child: Scaffold(
-        backgroundColor: kSettingsPageBg,
+        backgroundColor: _p.background,
         appBar: AppBar(
-          backgroundColor: kSettingsCardBg,
+          backgroundColor: _p.surface,
           surfaceTintColor: Colors.transparent,
           elevation: 0,
           scrolledUnderElevation: 0,
           centerTitle: true,
           title: Text(
             _isContinue ? '继续生成' : (_isReedit ? '局部重新生成' : '一键生成大纲'),
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w600,
-              color: kSettingsTitle,
+              color: _p.textPrimary,
             ),
           ),
           leading: IconButton(
-            icon: const Icon(
+            icon: Icon(
               Icons.arrow_back_ios_new_rounded,
               size: 18,
-              color: kSettingsLabel,
+              color: _p.textPrimary,
             ),
             onPressed: () => Navigator.of(context).pop(),
           ),
           actions: [
             IconButton(
-              icon: const Icon(
+              icon: Icon(
                 Icons.history_rounded,
                 size: 21,
-                color: kSettingsValue,
+                color: _p.textSecondary,
               ),
               tooltip: '历史大纲',
               onPressed: () => Navigator.of(context).push(
@@ -443,10 +442,10 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
               ),
             ),
             IconButton(
-              icon: const Icon(
+              icon: Icon(
                 Icons.tune_rounded,
                 size: 21,
-                color: kSettingsValue,
+                color: _p.textSecondary,
               ),
               tooltip: '大纲生成设置',
               onPressed: () => Navigator.of(context).push(
@@ -461,12 +460,12 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
             ),
             const SizedBox(width: 4),
           ],
-          bottom: const PreferredSize(
-            preferredSize: Size.fromHeight(1),
+          bottom: PreferredSize(
+            preferredSize: const Size.fromHeight(1),
             child: Divider(
               height: 1,
               thickness: 1,
-              color: kSettingsAppBarDivider,
+              color: _p.borderStrong,
             ),
           ),
         ),
@@ -510,8 +509,8 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
                           _buildBanner(
                             text: c.error!,
                             icon: Icons.error_outline_rounded,
-                            background: kSettingsDangerSoft,
-                            foreground: kSettingsDanger,
+                            background: _p.dangerSoft,
+                            foreground: _p.danger,
                           ),
                         ],
                         if (c.warning != null) ...[
@@ -519,8 +518,8 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
                           _buildBanner(
                             text: c.warning!,
                             icon: Icons.warning_amber_rounded,
-                            background: _kWarningSoft,
-                            foreground: _kWarningInk,
+                            background: _warningSoft,
+                            foreground: _warningInk,
                           ),
                         ],
                         if (hasOutput) ...[
@@ -545,7 +544,7 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
                               label: const Text('继续上次未完成的生成'),
                               style: _secondaryButtonStyle(
                                 fontSize: 13.5,
-                                foreground: kSettingsLabel,
+                                foreground: _p.textPrimary,
                               ),
                             ),
                           ),
@@ -572,8 +571,8 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
                       child: FloatingActionButton.extended(
                         onPressed: _onCancelPressed,
                         // 白底 + 红字：停止是「打断」而不是主行动，不用大面积红色抢焦点
-                        backgroundColor: kSettingsCardBg,
-                        foregroundColor: kSettingsDanger,
+                        backgroundColor: _p.surface,
+                        foregroundColor: _p.danger,
                         elevation: 0,
                         highlightElevation: 0,
                         extendedPadding: const EdgeInsets.symmetric(
@@ -581,7 +580,9 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
                         ),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(16),
-                          side: const BorderSide(color: Color(0xFFF2E2E0)),
+                          side: BorderSide(
+                            color: _p.danger.withValues(alpha: 0.25),
+                          ),
                         ),
                         icon: const Icon(Icons.stop_rounded, size: 18),
                         label: const Text(
@@ -619,15 +620,15 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
+              Text(
                 '修改世界观 / 主角设定后点「继续」，将按新设定重新生成后续内容并保存到新大纲',
-                style: _kHelperStyle,
+                style: _helperStyle,
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: c.genreController,
                 decoration: _inputDecoration('小说类型'),
-                style: _kFieldTextStyle,
+                style: _fieldTextStyle,
               ),
               const SizedBox(height: 12),
               _fieldWithExpand(c.themeController, '主题（如：废土世界中的 AI 觉醒）', '主题'),
@@ -691,7 +692,7 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
                           ? '__custom__'
                           : c.genreController.text),
                 decoration: _inputDecoration('小说类型'),
-                style: _kFieldTextStyle,
+                style: _fieldTextStyle,
                 items: [
                   ..._predefinedGenres.map(
                     (g) => DropdownMenuItem(value: g, child: Text(g)),
@@ -707,10 +708,10 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(
+                          Icon(
                             Icons.edit_rounded,
                             size: 16,
-                            color: kSettingsValue,
+                            color: _p.textSecondary,
                           ),
                           const SizedBox(width: 6),
                           ConstrainedBox(
@@ -724,14 +725,14 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
                         ],
                       ),
                     ),
-                  const DropdownMenuItem(
+                  DropdownMenuItem(
                     value: '__custom__',
                     child: Row(
                       children: [
                         Icon(
                           Icons.edit_rounded,
                           size: 16,
-                          color: kSettingsValue,
+                          color: _p.textSecondary,
                         ),
                         SizedBox(width: 6),
                         Text('自定义'),
@@ -772,17 +773,17 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
                 '要求提示词',
               ),
               const SizedBox(height: 8),
-              const Text(
+              Text(
                 '要求提示词会注入到定调、粗骨架、精写大事件、展开小事件的每一步',
-                style: _kHelperStyle,
+                style: _helperStyle,
               ),
               const SizedBox(height: 18),
-              const Text(
+              Text(
                 '事件规模',
                 style: TextStyle(
                   fontSize: 12.5,
                   fontWeight: FontWeight.w600,
-                  color: kSettingsSubtitle,
+                  color: _p.textTertiary,
                   letterSpacing: 0.3,
                 ),
               ),
@@ -807,7 +808,7 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
               const SizedBox(height: 8),
               Text(
                 '预计约 ${c.estimatedApiCalls} 次 AI 调用，大事件数较多时耗时较长',
-                style: _kHelperStyle,
+                style: _helperStyle,
               ),
             ],
           ),
@@ -826,16 +827,16 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
     );
     return InputDecoration(
       hintText: hint,
-      hintStyle: const TextStyle(fontSize: 13.5, color: kSettingsHint),
+      hintStyle: TextStyle(fontSize: 13.5, color: _p.textTertiary),
       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
       border: base,
       enabledBorder: base,
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: _kFieldFocusBorder),
+        borderSide: BorderSide(color: _fieldFocusBorder),
       ),
       filled: true,
-      fillColor: kSettingsFieldBg,
+      fillColor: _p.surfaceMuted,
       isDense: true,
     );
   }
@@ -846,9 +847,9 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
       width: double.infinity,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: kSettingsCardBg,
+        color: _p.surface,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: _kCardBorder),
+        border: Border.all(color: _cardBorder),
       ),
       child: child,
     );
@@ -865,10 +866,10 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
       controller: controller,
       decoration: _inputDecoration(hint).copyWith(
         suffixIcon: IconButton(
-          icon: const Icon(
+          icon: Icon(
             Icons.open_in_full_rounded,
             size: 16,
-            color: kSettingsHint,
+            color: _p.textTertiary,
           ),
           tooltip: '放大编辑',
           onPressed: () => _showLargeEditor(context, controller, title),
@@ -878,7 +879,7 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
           minHeight: 40,
         ),
       ),
-      style: _kFieldTextStyle,
+      style: _fieldTextStyle,
     );
   }
 
@@ -898,12 +899,12 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
                   await _refreshDraft();
                 },
           icon: c.loading
-              ? const SizedBox(
+              ? SizedBox(
                   width: 15,
                   height: 15,
                   child: CircularProgressIndicator(
                     strokeWidth: 2,
-                    color: kSettingsSubtitle,
+                    color: _p.textTertiary,
                   ),
                 )
               : const Icon(Icons.auto_awesome_rounded, size: 17),
@@ -912,13 +913,13 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
             // 生成中：按钮禁用但仍保持「同一颗按钮」的克制浅灰态
             backgroundColor: WidgetStateProperty.resolveWith(
               (states) => states.contains(WidgetState.disabled)
-                  ? kSettingsChipBg
-                  : kSettingsTitle,
+                  ? _p.surfaceMuted
+                  : _p.textPrimary,
             ),
             foregroundColor: WidgetStateProperty.resolveWith(
               (states) => states.contains(WidgetState.disabled)
-                  ? kSettingsSubtitle
-                  : Colors.white,
+                  ? _p.textTertiary
+                  : _p.onAccent,
             ),
           ),
         ),
@@ -934,9 +935,9 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 18),
       decoration: BoxDecoration(
-        color: kSettingsCardBg,
+        color: _p.surface,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: _kCardBorder),
+        border: Border.all(color: _cardBorder),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -944,12 +945,12 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
           if (c.title.isNotEmpty) ...[
             Text(
               c.title,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.w700,
                 height: 1.4,
                 letterSpacing: 0.1,
-                color: kSettingsTitle,
+                color: _p.textPrimary,
               ),
             ),
             const SizedBox(height: 16),
@@ -982,19 +983,19 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
               child: LinearProgressIndicator(
                 value: c.progress,
                 minHeight: 2,
-                backgroundColor: const Color(0xFFEAEDF4),
-                color: kSettingsTitle,
+                backgroundColor: _p.border,
+                color: _p.textPrimary,
               ),
             ),
             const SizedBox(height: 10),
             Text(
               c.progressText,
-              style: const TextStyle(fontSize: 12, color: kSettingsSubtitle),
+              style: TextStyle(fontSize: 12, color: _p.textTertiary),
             ),
             if (c.lastStepSummary != null)
               Padding(
                 padding: const EdgeInsets.only(top: 4),
-                child: Text('最近完成：${c.lastStepSummary}', style: _kHelperStyle),
+                child: Text('最近完成：${c.lastStepSummary}', style: _helperStyle),
               ),
           ],
         ],
@@ -1034,8 +1035,8 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
   ButtonStyle _primaryButtonStyle({double fontSize = 13}) {
     return ElevatedButton.styleFrom(
       // 炭黑主按钮：靠明度而不是饱和色建立层级，避免亮蓝铺底显廉价
-      backgroundColor: kSettingsTitle,
-      foregroundColor: Colors.white,
+      backgroundColor: _p.textPrimary,
+      foregroundColor: _p.onAccent,
       elevation: 0,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       textStyle: TextStyle(fontSize: fontSize, fontWeight: FontWeight.w600),
@@ -1044,12 +1045,12 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
 
   ButtonStyle _secondaryButtonStyle({
     double fontSize = 13,
-    Color foreground = kSettingsLabel,
+    Color? foreground,
   }) {
     return OutlinedButton.styleFrom(
-      foregroundColor: foreground,
-      backgroundColor: kSettingsCardBg,
-      side: const BorderSide(color: kSettingsFieldBorder),
+      foregroundColor: foreground ?? _p.textPrimary,
+      backgroundColor: _p.surface,
+      side: BorderSide(color: _p.border),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       textStyle: TextStyle(fontSize: fontSize, fontWeight: FontWeight.w500),
     );
@@ -1087,9 +1088,9 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
       width: double.infinity,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: kSettingsCardBg,
+        color: _p.surface,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: _kCardBorder),
+        border: Border.all(color: _cardBorder),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1100,23 +1101,23 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
                 width: 26,
                 height: 26,
                 decoration: BoxDecoration(
-                  color: _kAmberSoft,
+                  color: _amberSoft,
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Icon(
+                child: Icon(
                   Icons.pause_rounded,
                   size: 15,
-                  color: _kAmberInk,
+                  color: _amberInk,
                 ),
               ),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   cardTitle,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
-                    color: kSettingsTitle,
+                    color: _p.textPrimary,
                   ),
                 ),
               ),
@@ -1125,17 +1126,17 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
           const SizedBox(height: 6),
           Text(
             cardDesc,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 11.5,
               height: 1.45,
-              color: kSettingsSubtitle,
+              color: _p.textTertiary,
             ),
           ),
           if (_isReedit) ...[
             const SizedBox(height: 4),
             Text(
               _isContinue ? '继续生成后将另存为新大纲，不会覆盖原记录' : '重新生成后将另存为新大纲，不会覆盖原记录',
-              style: const TextStyle(fontSize: 11.5, color: _kAmberTitle),
+              style: TextStyle(fontSize: 11.5, color: _amberTitle),
             ),
           ],
           const SizedBox(height: 12),
@@ -1143,10 +1144,10 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
             controller: _checkpointCtrl,
             maxLines: null,
             minLines: 6,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 12.5,
               height: 1.6,
-              color: kSettingsLabel,
+              color: _p.textPrimary,
             ),
             decoration: _inputDecoration(fieldHint),
             // 编辑内容实时同步到控制器并防抖落盘，意外退出页面后可通过「继续上次」恢复
@@ -1223,7 +1224,7 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
               onPressed: _onCancelPressed,
               icon: const Icon(Icons.stop_rounded, size: 15),
               label: const Text('取消生成', style: TextStyle(fontSize: 12.5)),
-              style: TextButton.styleFrom(foregroundColor: kSettingsDanger),
+              style: TextButton.styleFrom(foregroundColor: _p.danger),
             ),
           ),
         ],
@@ -1244,17 +1245,17 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
         Expanded(
           child: Text(
             label,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 13.5,
               fontWeight: FontWeight.w500,
-              color: kSettingsLabel,
+              color: _p.textPrimary,
             ),
           ),
         ),
         Container(
           height: 34,
           decoration: BoxDecoration(
-            color: kSettingsFieldBg,
+            color: _p.surfaceMuted,
             borderRadius: BorderRadius.circular(12),
           ),
           child: Row(
@@ -1263,8 +1264,8 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
               IconButton(
                 icon: const Icon(Icons.remove_rounded),
                 iconSize: 18,
-                color: kSettingsValue,
-                disabledColor: kSettingsChevron,
+                color: _p.textSecondary,
+                disabledColor: _p.textTertiary,
                 onPressed: value > min
                     ? () => setState(() {
                         onChanged(value - 1);
@@ -1279,10 +1280,10 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
                 child: TextField(
                   keyboardType: TextInputType.number,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
-                    color: kSettingsTitle,
+                    color: _p.textPrimary,
                   ),
                   decoration: const InputDecoration(
                     isCollapsed: true,
@@ -1301,8 +1302,8 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
               IconButton(
                 icon: const Icon(Icons.add_rounded),
                 iconSize: 18,
-                color: kSettingsValue,
-                disabledColor: kSettingsChevron,
+                color: _p.textSecondary,
+                disabledColor: _p.textTertiary,
                 onPressed: max == null || value < max
                     ? () => setState(() {
                         onChanged(value + 1);
@@ -1334,7 +1335,7 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
     final bodyStyle = TextStyle(
       fontSize: 13.5,
       height: 1.65,
-      color: isError ? _kErrorInk : const Color(0xFF3A4150),
+      color: isError ? _errorInk : _p.textPrimary,
     );
     final text = content.isEmpty ? '（无内容）' : content;
     final highlighted = isError || !selectable;
@@ -1343,7 +1344,7 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
       padding: highlighted ? const EdgeInsets.all(14) : EdgeInsets.zero,
       decoration: highlighted
           ? BoxDecoration(
-              color: isError ? kSettingsDangerSoft : kSettingsFieldBg,
+              color: isError ? _p.dangerSoft : _p.surfaceMuted,
               borderRadius: BorderRadius.circular(12),
             )
           : null,
@@ -1358,7 +1359,7 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
                       ? Icons.error_outline_rounded
                       : Icons.auto_awesome_rounded,
                   size: 12,
-                  color: isError ? kSettingsDanger : kSettingsHint,
+                  color: isError ? _p.danger : _p.textTertiary,
                 ),
                 const SizedBox(width: 5),
                 Expanded(
@@ -1368,7 +1369,7 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
                       fontSize: 11.5,
                       fontWeight: FontWeight.w600,
                       letterSpacing: 0.4,
-                      color: isError ? kSettingsDanger : kSettingsSubtitle,
+                      color: isError ? _p.danger : _p.textTertiary,
                     ),
                   ),
                 ),
@@ -1422,24 +1423,25 @@ class _JumpToBottomButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return Tooltip(
       message: '滚动到底部',
       child: Material(
-        color: kSettingsCardBg,
+        color: p.surface,
         elevation: 0,
-        shape: const CircleBorder(
-          side: BorderSide(color: kSettingsFieldBorder),
+        shape: CircleBorder(
+          side: BorderSide(color: p.border),
         ),
         child: InkWell(
           customBorder: const CircleBorder(),
           onTap: onTap,
-          child: const SizedBox(
+          child: SizedBox(
             width: 40,
             height: 40,
             child: Icon(
               Icons.vertical_align_bottom_rounded,
               size: 19,
-              color: kSettingsValue,
+              color: p.textSecondary,
             ),
           ),
         ),
@@ -1456,24 +1458,25 @@ class _InspirationButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(8),
-        child: const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.shuffle_rounded, size: 13, color: kSettingsValue),
-              SizedBox(width: 4),
+              Icon(Icons.shuffle_rounded, size: 13, color: p.textSecondary),
+              const SizedBox(width: 4),
               Text(
                 '随机灵感',
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w500,
-                  color: kSettingsValue,
+                  color: p.textSecondary,
                 ),
               ),
             ],
@@ -1501,6 +1504,7 @@ class _SectionHeading extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return Padding(
       padding: EdgeInsets.fromLTRB(
         4,
@@ -1516,11 +1520,11 @@ class _SectionHeading extends StatelessWidget {
             title,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 15,
               fontWeight: FontWeight.w600,
               height: 1.25,
-              color: kSettingsTitle,
+              color: p.textPrimary,
             ),
           ),
           if (subtitle != null) ...[
@@ -1529,10 +1533,10 @@ class _SectionHeading extends StatelessWidget {
               subtitle!,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 11.5,
                 height: 1.25,
-                color: kSettingsSubtitle,
+                color: p.textTertiary,
               ),
             ),
           ],
@@ -1560,6 +1564,8 @@ class _LargeEditorDialog extends StatefulWidget {
 
 class _LargeEditorDialogState extends State<_LargeEditorDialog> {
   late final TextEditingController _controller;
+
+  AppPalette get _p => context.palette;
 
   @override
   void initState() {
@@ -1603,17 +1609,17 @@ class _LargeEditorDialogState extends State<_LargeEditorDialog> {
               children: [
                 Text(
                   widget.title,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w600,
-                    color: kSettingsTitle,
+                    color: _p.textPrimary,
                   ),
                 ),
                 const Spacer(),
                 IconButton(
-                  icon: const Icon(
+                  icon: Icon(
                     Icons.close_rounded,
-                    color: kSettingsSubtitle,
+                    color: _p.textTertiary,
                   ),
                   onPressed: () => Navigator.of(context).pop(),
                 ),
@@ -1626,17 +1632,17 @@ class _LargeEditorDialogState extends State<_LargeEditorDialog> {
                 maxLines: null,
                 expands: true,
                 textAlignVertical: TextAlignVertical.top,
-                cursorColor: kSettingsTitle,
-                style: const TextStyle(
+                cursorColor: _p.textPrimary,
+                style: TextStyle(
                   fontSize: 13.5,
                   height: 1.6,
-                  color: kSettingsLabel,
+                  color: _p.textPrimary,
                 ),
                 decoration: InputDecoration(
                   hintText: _hintFor(widget.title),
-                  hintStyle: const TextStyle(
+                  hintStyle: TextStyle(
                     fontSize: 13,
-                    color: kSettingsHint,
+                    color: _p.textTertiary,
                   ),
                   border: InputBorder.none,
                   contentPadding: EdgeInsets.zero,
@@ -1653,8 +1659,8 @@ class _LargeEditorDialogState extends State<_LargeEditorDialog> {
                   Navigator.of(context).pop();
                 },
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: kSettingsTitle,
-                  foregroundColor: Colors.white,
+                  backgroundColor: _p.textPrimary,
+                  foregroundColor: _p.onAccent,
                   elevation: 0,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
@@ -1685,6 +1691,8 @@ class _CustomGenreDialog extends StatefulWidget {
 class _CustomGenreDialogState extends State<_CustomGenreDialog> {
   late final TextEditingController _controller;
 
+  AppPalette get _p => context.palette;
+
   @override
   void initState() {
     super.initState();
@@ -1708,44 +1716,48 @@ class _CustomGenreDialogState extends State<_CustomGenreDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
+              Text(
                 '自定义小说类型',
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w600,
-                  color: kSettingsTitle,
+                  color: _p.textPrimary,
                 ),
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: _controller,
                 autofocus: true,
-                cursorColor: kSettingsTitle,
-                style: _kFieldTextStyle,
+                cursorColor: _p.textPrimary,
+                style: TextStyle(
+                  fontSize: 14,
+                  height: 1.4,
+                  color: _p.textPrimary,
+                ),
                 decoration: InputDecoration(
                   hintText: '输入自定义类型（如：赛博朋克、末日废土...）',
-                  hintStyle: const TextStyle(
+                  hintStyle: TextStyle(
                     fontSize: 14,
-                    color: kSettingsHint,
+                    color: _p.textTertiary,
                   ),
                   contentPadding: const EdgeInsets.symmetric(
                     horizontal: 12,
                     vertical: 13,
                   ),
                   filled: true,
-                  fillColor: kSettingsFieldBg,
+                  fillColor: _p.surfaceMuted,
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(10),
-                    borderSide: const BorderSide(color: kSettingsFieldBorder),
+                    borderSide: BorderSide(color: _p.border),
                   ),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(10),
-                    borderSide: const BorderSide(color: kSettingsFieldBorder),
+                    borderSide: BorderSide(color: _p.border),
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(10),
-                    borderSide: const BorderSide(
-                      color: kSettingsTitle,
+                    borderSide: BorderSide(
+                      color: _p.textPrimary,
                       width: 1.5,
                     ),
                   ),
@@ -1761,8 +1773,8 @@ class _CustomGenreDialogState extends State<_CustomGenreDialog> {
                     closeDialogSafely(context, result: _controller.text.trim());
                   },
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: kSettingsTitle,
-                    foregroundColor: Colors.white,
+                    backgroundColor: _p.textPrimary,
+                    foregroundColor: _p.onAccent,
                     elevation: 0,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),

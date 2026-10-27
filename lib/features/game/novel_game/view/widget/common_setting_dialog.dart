@@ -18,6 +18,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import 'package:deepseekapp/core/theme/app_palette.dart';
 import 'package:deepseekapp/core/widgets/settings_kit.dart';
 import 'package:deepseekapp/features/game/novel_game/model/entity/character_entity.dart';
 import 'package:deepseekapp/features/game/novel_game/model/entity/copy_entity.dart';
@@ -70,8 +71,9 @@ void _showEditDialog(
   showDialog<Map<String, dynamic>>(
     context: context,
     builder: (ctx) {
+      final p = ctx.palette;
       return Dialog(
-        backgroundColor: Colors.white,
+        backgroundColor: p.surfaceElevated,
         surfaceTintColor: Colors.transparent,
         insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
@@ -86,10 +88,10 @@ void _showEditDialog(
                 title,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w600,
-                  color: kSettingsTitle,
+                  color: p.textPrimary,
                 ),
               ),
               const SizedBox(height: 14),
@@ -106,34 +108,34 @@ void _showEditDialog(
                 textInputAction: maxLines > 1
                     ? TextInputAction.newline
                     : TextInputAction.done,
-                cursorColor: kSettingsPrimary,
-                style: const TextStyle(
+                cursorColor: p.accent,
+                style: TextStyle(
                   fontSize: 13.5,
                   height: 1.5,
-                  color: kSettingsValue,
+                  color: p.textPrimary,
                 ),
                 decoration: InputDecoration(
                   hintText: hintText,
-                  hintStyle: const TextStyle(
+                  hintStyle: TextStyle(
                     fontSize: 12.5,
-                    color: kSettingsHint,
+                    color: p.textTertiary,
                   ),
                   filled: true,
-                  fillColor: kSettingsFieldBg,
+                  fillColor: p.surfaceMuted,
                   isDense: true,
                   contentPadding: const EdgeInsets.all(12),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: kSettingsFieldBorder),
+                    borderSide: BorderSide(color: p.border),
                   ),
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: kSettingsFieldBorder),
+                    borderSide: BorderSide(color: p.border),
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(
-                      color: kSettingsPrimary,
+                    borderSide: BorderSide(
+                      color: p.accent,
                       width: 1.2,
                     ),
                   ),
@@ -150,7 +152,7 @@ void _showEditDialog(
                       scheduleControllerDispose(controller);
                     },
                     style: TextButton.styleFrom(
-                      foregroundColor: kSettingsValue,
+                      foregroundColor: p.textSecondary,
                       padding: const EdgeInsets.symmetric(horizontal: 14),
                       minimumSize: const Size(0, 34),
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,

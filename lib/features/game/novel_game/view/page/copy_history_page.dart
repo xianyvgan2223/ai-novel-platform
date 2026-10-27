@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:deepseekapp/core/theme/app_palette.dart';
 import '../../model/entity/copy_entity.dart';
 import '../../model/entity/copy_record_entity.dart';
 import '../../model/repo/copy_repository.dart';
@@ -48,21 +49,22 @@ class _CopyHistoryPageState extends State<CopyHistoryPage> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
+      backgroundColor: p.background,
       appBar: AppBar(
         title: const Text('副本经历', style: TextStyle(fontSize: 15)),
-        backgroundColor: Colors.white,
-        elevation: 0.5,
+        backgroundColor: p.surface,
+        elevation: p.isDark ? 0 : 0.5,
         centerTitle: true,
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
           : _records.isEmpty
-          ? const Center(
+          ? Center(
               child: Text(
                 '暂无副本经历',
-                style: TextStyle(fontSize: 13, color: Color(0xFF999999)),
+                style: TextStyle(fontSize: 13, color: p.textTertiary),
               ),
             )
           : RefreshIndicator(
@@ -107,13 +109,15 @@ class _RecordCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return GestureDetector(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: p.surface,
           borderRadius: BorderRadius.circular(8),
+          border: p.isDark ? Border.all(color: p.border) : null,
         ),
         child: Row(
           children: [
@@ -123,18 +127,18 @@ class _RecordCard extends StatelessWidget {
                 children: [
                   Text(
                     copyName,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w500,
-                      color: Color(0xFF333333),
+                      color: p.textPrimary,
                     ),
                   ),
                   const SizedBox(height: 4),
                   Text(
                     time,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 11,
-                      color: Color(0xFF999999),
+                      color: p.textTertiary,
                     ),
                   ),
                 ],
@@ -144,12 +148,12 @@ class _RecordCard extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF4A90D9).withValues(alpha: 0.1),
+                  color: p.accentSoft,
                   borderRadius: BorderRadius.circular(4),
                 ),
-                child: const Text(
+                child: Text(
                   '查看',
-                  style: TextStyle(fontSize: 11, color: Color(0xFF4A90D9)),
+                  style: TextStyle(fontSize: 11, color: p.accent),
                 ),
               ),
           ],

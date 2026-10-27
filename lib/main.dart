@@ -8,6 +8,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_displaymode/flutter_displaymode.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'core/config/app_preferences.dart';
+import 'core/theme/app_theme.dart';
+import 'core/theme/theme_mode_controller.dart';
 import 'features/chat/presentation/chat_page.dart';
 import 'features/chat/presentation/widgets/chat_floating_ball.dart';
 import 'features/novel_writing/outline_generation/background/outline_background_notification.dart';
@@ -24,7 +27,23 @@ void main() async {
   await FlutterDisplayMode.setHighRefreshRate();
   // 前台轮询：电脑（网页）点「同步手机」后自动执行，不用碰手机
   SyncPoller.instance.start();
-  runApp(const ProviderScope(child: MyApp()));
+  // 先读一次本机主题偏好再启动，避免首帧亮色闪一下再切到深色
+  String? themeRaw;
+  try {
+    themeRaw = await AppPreferences.get(AppPreferences.themeModeKey);
+  } catch (_) {
+    themeRaw = null;
+  }
+  runApp(
+    ProviderScope(
+      overrides: <Override>[
+        themeModeProvider.overrideWith(
+          (ref) => ThemeModeController(initialRaw: themeRaw),
+        ),
+      ],
+      child: const MyApp(),
+    ),
+  );
 }
 
 /// 掉帧排查开关（默认全关，release 直接跳过，不影响正常运行）。
@@ -66,14 +85,14 @@ void _installDiagnostics() {
   }
 }
 
-class MyApp extends StatefulWidget {
+class MyApp extends ConsumerStatefulWidget {
   const MyApp({super.key});
 
   @override
-  State<MyApp> createState() => _MyAppState();
+  ConsumerState<MyApp> createState() => _MyAppState();
 }
 
-class _MyAppState extends State<MyApp> {
+class _MyAppState extends ConsumerState<MyApp> {
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   final FloatingChatRouteObserver _routeObserver = FloatingChatRouteObserver();
 
@@ -210,6 +229,7 @@ class _MyAppState extends State<MyApp> {
 
   @override
   Widget build(BuildContext context) {
+    final themeMode = ref.watch(themeModeProvider).mode;
     return MaterialApp(
       title: 'DeepSeek',
       debugShowCheckedModeBanner: false,
@@ -217,13 +237,11 @@ class _MyAppState extends State<MyApp> {
       navigatorObservers: [_routeObserver],
       // 让后台轮询也能弹提示（电脑请求的同步完成/失败）
       scaffoldMessengerKey: SyncPoller.instance.messengerKey,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF4D6BFE),
-          brightness: Brightness.light,
-        ),
-        useMaterial3: true,
-      ),
+      theme: AppTheme.light(),
+      darkTheme: AppTheme.dark(),
+      themeMode: themeMode,
+      themeAnimationDuration: const Duration(milliseconds: 240),
+      themeAnimationCurve: Curves.easeOutCubic,
       home: const ChatPage(),
       // 全局挂载悬浮聊天球：离开主聊天页后显示，点击可展开迷你聊天面板
       builder: (context, child) => ChatFloatingBallHost(

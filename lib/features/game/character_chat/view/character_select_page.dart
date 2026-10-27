@@ -2,6 +2,7 @@
 // 角色选择页 — 展示所有可对话角色和历史会话
 
 import 'package:flutter/material.dart';
+import 'package:deepseekapp/core/theme/app_palette.dart';
 import '../model/character_model.dart';
 import '../controller/chat_controller.dart';
 import '../data/default_characters.dart';
@@ -63,25 +64,26 @@ class _CharacterSelectPageState extends State<CharacterSelectPage> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
+      backgroundColor: p.background,
       appBar: AppBar(
         toolbarHeight: 44,
-        backgroundColor: Colors.white,
+        backgroundColor: p.surface,
         elevation: 0,
         scrolledUnderElevation: 0,
-        title: const Text(
+        title: Text(
           '角色扮演',
           style: TextStyle(
             fontSize: 15,
             fontWeight: FontWeight.w600,
-            color: Color(0xFF333333),
+            color: p.textPrimary,
           ),
         ),
         centerTitle: true,
-        bottom: const PreferredSize(
-          preferredSize: Size.fromHeight(1),
-          child: Divider(height: 1, color: Color(0xFFEEEEEE)),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: Divider(height: 1, color: p.border),
         ),
       ),
       body: ListView(
@@ -90,55 +92,55 @@ class _CharacterSelectPageState extends State<CharacterSelectPage> {
           // ── 搜索框 ──
           Container(
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: p.surface,
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: const Color(0xFFE8E8E8)),
+              border: Border.all(color: p.border),
             ),
             padding: const EdgeInsets.symmetric(horizontal: 12),
             child: TextField(
               controller: _searchCtrl,
               decoration: InputDecoration(
                 hintText: '搜索角色名或标签...',
-                hintStyle: const TextStyle(
+                hintStyle: TextStyle(
                   fontSize: 13,
-                  color: Color(0xFFBBBBBB),
+                  color: p.textTertiary,
                 ),
                 border: InputBorder.none,
-                prefixIcon: const Icon(
+                prefixIcon: Icon(
                   Icons.search,
                   size: 18,
-                  color: Color(0xFFBBBBBB),
+                  color: p.textTertiary,
                 ),
                 suffixIcon: _searchQuery.isNotEmpty
                     ? GestureDetector(
                         onTap: () {
                           _searchCtrl.clear();
                         },
-                        child: const Icon(
+                        child: Icon(
                           Icons.close,
                           size: 16,
-                          color: Color(0xFFCCCCCC),
+                          color: p.textTertiary,
                         ),
                       )
                     : null,
                 contentPadding: const EdgeInsets.symmetric(vertical: 10),
                 isDense: true,
               ),
-              style: const TextStyle(fontSize: 13, color: Color(0xFF333333)),
+              style: TextStyle(fontSize: 13, color: p.textPrimary),
             ),
           ),
           const SizedBox(height: 12),
 
           // ── 历史会话 ──
           if (_sessions.isNotEmpty) ...[
-            const Padding(
-              padding: EdgeInsets.only(left: 4, bottom: 8),
+            Padding(
+              padding: const EdgeInsets.only(left: 4, bottom: 8),
               child: Text(
                 '继续对话',
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
-                  color: Color(0xFF666666),
+                  color: p.textSecondary,
                 ),
               ),
             ),
@@ -152,9 +154,9 @@ class _CharacterSelectPageState extends State<CharacterSelectPage> {
                 ),
               ),
             ),
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 12),
-              child: Divider(height: 1, color: Color(0xFFE0E0E0)),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Divider(height: 1, color: p.border),
             ),
           ] else if (!_loadingSessions)
             const Padding(
@@ -162,24 +164,24 @@ class _CharacterSelectPageState extends State<CharacterSelectPage> {
               child: SizedBox.shrink(),
             ),
           // ── 新建对话 ──
-          const Padding(
-            padding: EdgeInsets.only(left: 4, bottom: 8),
+          Padding(
+            padding: const EdgeInsets.only(left: 4, bottom: 8),
             child: Text(
               '选择角色开始新对话',
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
-                color: Color(0xFF666666),
+                color: p.textSecondary,
               ),
             ),
           ),
           if (_filteredCharacters.isEmpty)
-            const Padding(
-              padding: EdgeInsets.only(top: 40),
+            Padding(
+              padding: const EdgeInsets.only(top: 40),
               child: Center(
                 child: Text(
                   '没有匹配的角色',
-                  style: TextStyle(fontSize: 13, color: Color(0xFF999999)),
+                  style: TextStyle(fontSize: 13, color: p.textTertiary),
                 ),
               ),
             )
@@ -226,9 +228,11 @@ class _CharacterSelectPageState extends State<CharacterSelectPage> {
   }
 
   Future<void> _deleteSession(int id) async {
+    final p = context.palette;
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
+        backgroundColor: p.surfaceElevated,
         title: const Text('删除会话', style: TextStyle(fontSize: 14)),
         content: const Text('确定删除该对话记录吗？', style: TextStyle(fontSize: 13)),
         actions: [
@@ -238,9 +242,9 @@ class _CharacterSelectPageState extends State<CharacterSelectPage> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text(
+            child: Text(
               '删除',
-              style: TextStyle(fontSize: 13, color: Colors.red),
+              style: TextStyle(fontSize: 13, color: p.danger),
             ),
           ),
         ],
@@ -267,6 +271,7 @@ class _HistoryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     final colors = {
       '塞拉菲娜': const Color(0xFFE74C3C),
       '罗兰': const Color(0xFF6B4226),
@@ -280,9 +285,9 @@ class _HistoryCard extends StatelessWidget {
       onTap: onTap,
       child: Container(
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: p.surface,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: const Color(0xFFE8E8E8)),
+          border: Border.all(color: p.border),
         ),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         child: Row(
@@ -311,18 +316,18 @@ class _HistoryCard extends StatelessWidget {
                 children: [
                   Text(
                     session.characterName,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
-                      color: Color(0xFF333333),
+                      color: p.textPrimary,
                     ),
                   ),
                   const SizedBox(height: 2),
                   Text(
                     '上次对话: ${_formatTime(session.updatedAt)}',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 10,
-                      color: Color(0xFF999999),
+                      color: p.textTertiary,
                     ),
                   ),
                 ],
@@ -330,10 +335,10 @@ class _HistoryCard extends StatelessWidget {
             ),
             GestureDetector(
               onTap: onDelete,
-              child: const Icon(
+              child: Icon(
                 Icons.close,
                 size: 16,
-                color: Color(0xFFCCCCCC),
+                color: p.textTertiary,
               ),
             ),
           ],
@@ -365,14 +370,14 @@ class _CharacterCard extends StatelessWidget {
   });
 
   /// 构建带搜索高亮的名字文本
-  Widget _buildHighlightedName() {
+  Widget _buildHighlightedName(AppPalette p) {
     if (searchQuery.isEmpty) {
       return Text(
         character.name,
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 15,
           fontWeight: FontWeight.w600,
-          color: Color(0xFF333333),
+          color: p.textPrimary,
         ),
       );
     }
@@ -395,9 +400,9 @@ class _CharacterCard extends StatelessWidget {
       spans.add(
         TextSpan(
           text: name.substring(index, index + query.length),
-          style: const TextStyle(
+          style: TextStyle(
             fontWeight: FontWeight.w800,
-            color: Color(0xFF333333),
+            color: p.textPrimary,
           ),
         ),
       );
@@ -406,10 +411,10 @@ class _CharacterCard extends StatelessWidget {
 
     return Text.rich(
       TextSpan(
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 15,
           fontWeight: FontWeight.w600,
-          color: Color(0xFF333333),
+          color: p.textPrimary,
         ),
         children: spans,
       ),
@@ -418,6 +423,7 @@ class _CharacterCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     final themeColors = <String, Color>{
       '塞拉菲娜': const Color(0xFFE74C3C),
       '罗兰': const Color(0xFF6B4226),
@@ -426,20 +432,26 @@ class _CharacterCard extends StatelessWidget {
       '佐克斯': const Color(0xFF3498DB),
     };
     final avatarColor = themeColors[character.name] ?? const Color(0xFF4A90D9);
+    final tagColor = p.isDark
+        ? Color.lerp(avatarColor, Colors.white, 0.35) ?? avatarColor
+        : avatarColor;
 
     return GestureDetector(
       onTap: onTap,
       child: Container(
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: p.surface,
           borderRadius: BorderRadius.circular(12),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.04),
-              blurRadius: 6,
-              offset: const Offset(0, 2),
-            ),
-          ],
+          border: p.isDark ? Border.all(color: p.border) : null,
+          boxShadow: p.isDark
+              ? null
+              : [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.04),
+                    blurRadius: 6,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
         ),
         padding: const EdgeInsets.all(14),
         child: Row(
@@ -467,15 +479,15 @@ class _CharacterCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildHighlightedName(),
+                  _buildHighlightedName(p),
                   const SizedBox(height: 4),
                   Text(
                     character.description,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 11,
-                      color: Color(0xFF888888),
+                      color: p.textSecondary,
                       height: 1.4,
                     ),
                   ),
@@ -491,14 +503,16 @@ class _CharacterCard extends StatelessWidget {
                             vertical: 2,
                           ),
                           decoration: BoxDecoration(
-                            color: avatarColor.withValues(alpha: 0.1),
+                            color: avatarColor.withValues(
+                              alpha: p.isDark ? 0.18 : 0.1,
+                            ),
                             borderRadius: BorderRadius.circular(4),
                           ),
                           child: Text(
                             tag,
                             style: TextStyle(
                               fontSize: 10,
-                              color: avatarColor.withValues(alpha: 0.8),
+                              color: tagColor.withValues(alpha: 0.8),
                               height: 1.3,
                             ),
                           ),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:deepseekapp/core/theme/app_palette.dart';
 import 'package:deepseekapp/features/game/novel_game/model/entity/character_entity.dart';
 import 'package:deepseekapp/features/game/novel_game/view/page/character_edit_page.dart';
 
@@ -16,28 +17,34 @@ class CharacterCardWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     final card = Opacity(
       opacity: isDragging ? 0.5 : 1.0,
       child: GestureDetector(
         onTap: onTap,
         child: Card(
-          color: Colors.white,
-          elevation: 1,
+          color: p.surface,
+          elevation: p.isDark ? 0 : 1,
           margin: EdgeInsets.zero,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(4),
+            side: BorderSide(
+              color: p.isDark ? p.border : Colors.transparent,
+            ),
+          ),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
             child: Row(
               children: [
                 CircleAvatar(
                   radius: 8,
-                  backgroundColor: const Color(0xFFE8E8E8),
+                  backgroundColor: p.surfaceMuted,
                   child: Text(
                     character.charName.isNotEmpty ? character.charName[0] : '?',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 8,
                       fontWeight: FontWeight.bold,
-                      color: Color(0xFF666666),
+                      color: p.textSecondary,
                     ),
                   ),
                 ),
@@ -49,10 +56,10 @@ class CharacterCardWidget extends StatelessWidget {
                     children: [
                       Text(
                         character.charName,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 9,
                           fontWeight: FontWeight.bold,
-                          color: Color(0xFF333333),
+                          color: p.textPrimary,
                         ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -60,9 +67,9 @@ class CharacterCardWidget extends StatelessWidget {
                       if ((character.baseDesc ?? '').isNotEmpty)
                         Text(
                           character.baseDesc!,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 7,
-                            color: Color(0xFF999999),
+                            color: p.textTertiary,
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
@@ -83,13 +90,13 @@ class CharacterCardWidget extends StatelessWidget {
                     height: 18,
                     alignment: Alignment.center,
                     decoration: BoxDecoration(
-                      color: const Color(0xFF4A90D9).withValues(alpha: 0.1),
+                      color: p.accent.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(3),
                     ),
-                    child: const Icon(
+                    child: Icon(
                       Icons.chevron_right,
                       size: 12,
-                      color: Color(0xFF4A90D9),
+                      color: p.accent,
                     ),
                   ),
                 ),
@@ -105,10 +112,11 @@ class CharacterCardWidget extends StatelessWidget {
       feedback: Material(
         elevation: 4,
         borderRadius: BorderRadius.circular(4),
+        color: p.surfaceElevated,
         child: SizedBox(
           width: 60,
           child: Card(
-            color: Colors.white,
+            color: p.surfaceElevated,
             elevation: 4,
             margin: EdgeInsets.zero,
             shape: RoundedRectangleBorder(

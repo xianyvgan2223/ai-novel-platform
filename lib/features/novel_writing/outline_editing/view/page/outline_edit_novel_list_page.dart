@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../../../../../core/widgets/settings_kit.dart';
+import 'package:deepseekapp/core/theme/app_palette.dart';
 import '../../../shared/dialog_utils.dart';
 import '../../../shared/data/outline_chapter_db_helper.dart';
 import '../../../shared/data/outline_record_db_helper.dart';
@@ -155,6 +155,7 @@ class _OutlineEditNovelListPageState extends State<OutlineEditNovelListPage> {
   Future<void> _confirmDelete(OutlineRecord summary) async {
     final id = summary.id;
     if (id == null) return;
+    final p = context.palette;
     final title = summary.title.isNotEmpty ? summary.title : '未命名大纲';
     final ok = await showDialog<bool>(
       context: context,
@@ -168,7 +169,7 @@ class _OutlineEditNovelListPageState extends State<OutlineEditNovelListPage> {
           ),
           TextButton(
             onPressed: () => closeDialogSafely(ctx, result: true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            style: TextButton.styleFrom(foregroundColor: p.danger),
             child: const Text('删除'),
           ),
         ],
@@ -198,21 +199,22 @@ class _OutlineEditNovelListPageState extends State<OutlineEditNovelListPage> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: p.background,
       appBar: AppBar(
         title: Text(
           widget.title,
           style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
         ),
-        backgroundColor: Colors.white,
+        backgroundColor: p.surface,
         elevation: 0.5,
         centerTitle: true,
         leading: IconButton(
           icon: Icon(
             Icons.arrow_back_ios_new_rounded,
             size: 18,
-            color: widget.mutedAccent ? kSettingsLabel : const Color(0xFF333333),
+            color: p.textPrimary,
           ),
           onPressed: () => Navigator.of(context).pop(),
         ),
@@ -226,25 +228,25 @@ class _OutlineEditNovelListPageState extends State<OutlineEditNovelListPage> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(
+                  Icon(
                     Icons.auto_stories,
                     size: 64,
-                    color: Color(0xFFCCCCCC),
+                    color: p.textTertiary,
                   ),
                   const SizedBox(height: 16),
                   Text(
                     widget.emptyTitle,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 14,
-                      color: Color(0xFF999999),
+                      color: p.textTertiary,
                     ),
                   ),
                   const SizedBox(height: 8),
                   Text(
                     widget.emptyHint,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 12,
-                      color: Color(0xFFBBBBBB),
+                      color: p.textTertiary,
                     ),
                   ),
                 ],
@@ -259,14 +261,14 @@ class _OutlineEditNovelListPageState extends State<OutlineEditNovelListPage> {
                     vertical: 10,
                   ),
                   color: widget.mutedAccent
-                      ? kSettingsChipBg
-                      : const Color(0xFFF8F9FF),
+                      ? p.surfaceMuted
+                      : p.accentSoft,
                   child: Text(
                     '共 ${_records.length} 部小说 · ${widget.hint}'
                     '${widget.allowDelete ? ' · 长按卡片删除' : ''}',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 12,
-                      color: Color(0xFF666666),
+                      color: p.textSecondary,
                     ),
                   ),
                 ),
@@ -331,6 +333,7 @@ class _OutlineCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     final title = record.title.isNotEmpty ? record.title : '未命名大纲';
     final genre = record.genre.trim();
     final protagonist = record.protagonist.trim().replaceAll('\n', ' ');
@@ -338,17 +341,15 @@ class _OutlineCard extends StatelessWidget {
     final completed = stat?.completed ?? 0;
     final firstChar = title.characters.isEmpty ? '书' : title.characters.first;
     // 默认保持原来的主色蓝；历史入口传 mutedAccent 时换成中性灰阶
-    final accent = mutedAccent ? kSettingsTitle : const Color(0xFF4D6BFE);
+    final accent = mutedAccent ? p.textPrimary : p.accent;
     final avatarColors = mutedAccent
         ? const [Color(0xFF2B303A), Color(0xFF6B7385)]
         : const [Color(0xFF4D6BFE), Color(0xFF8AA2FF)];
-    final tagBg = mutedAccent ? kSettingsChipBg : const Color(0xFFEFF3FF);
-    final tagFg = mutedAccent ? kSettingsValue : const Color(0xFF4D6BFE);
-    final statIconColor = mutedAccent
-        ? kSettingsSubtitle
-        : const Color(0xFF4D6BFE);
+    final tagBg = mutedAccent ? p.surfaceMuted : p.accentSoft;
+    final tagFg = mutedAccent ? p.textSecondary : p.accent;
+    final statIconColor = mutedAccent ? p.textTertiary : p.accent;
     return Material(
-      color: Colors.white,
+      color: p.surface,
       borderRadius: BorderRadius.circular(10),
       child: InkWell(
         onTap: onTap,
@@ -358,14 +359,16 @@ class _OutlineCard extends StatelessWidget {
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: const Color(0xFFE8ECF4)),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x0A000000),
-                blurRadius: 6,
-                offset: Offset(0, 2),
-              ),
-            ],
+            border: Border.all(color: p.border),
+            boxShadow: p.isDark
+                ? null
+                : const [
+                    BoxShadow(
+                      color: Color(0x0A000000),
+                      blurRadius: 6,
+                      offset: Offset(0, 2),
+                    ),
+                  ],
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -398,11 +401,11 @@ class _OutlineCard extends StatelessWidget {
                   Expanded(
                     child: Text(
                       title,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 13,
                         height: 1.25,
                         fontWeight: FontWeight.w600,
-                        color: Color(0xFF333333),
+                        color: p.textPrimary,
                       ),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
@@ -432,10 +435,10 @@ class _OutlineCard extends StatelessWidget {
                 const SizedBox(height: 6),
                 Text(
                   protagonist,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 10.5,
                     height: 1.4,
-                    color: Color(0xFF999999),
+                    color: p.textTertiary,
                   ),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
@@ -444,7 +447,7 @@ class _OutlineCard extends StatelessWidget {
               const Spacer(),
               Text(
                 record.formattedDate,
-                style: const TextStyle(fontSize: 10, color: Color(0xFFBBBBBB)),
+                style: TextStyle(fontSize: 10, color: p.textTertiary),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -455,7 +458,7 @@ class _OutlineCard extends StatelessWidget {
                   child: LinearProgressIndicator(
                     value: completed / total,
                     minHeight: 3,
-                    backgroundColor: const Color(0xFFF0F2F6),
+                    backgroundColor: p.border,
                     valueColor: AlwaysStoppedAnimation<Color>(accent),
                   ),
                 ),
@@ -465,9 +468,9 @@ class _OutlineCard extends StatelessWidget {
                     Expanded(
                       child: Text(
                         '共 $total 章 · 已完成 $completed',
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 10,
-                          color: Color(0xFF999999),
+                          color: p.textTertiary,
                         ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -477,21 +480,21 @@ class _OutlineCard extends StatelessWidget {
                   ],
                 ),
               ] else
-                const Row(
+                Row(
                   children: [
                     Expanded(
                       child: Text(
                         '未解析章节',
                         style: TextStyle(
                           fontSize: 10,
-                          color: Color(0xFFBBBBBB),
+                          color: p.textTertiary,
                         ),
                       ),
                     ),
                     Icon(
                       Icons.chevron_right,
                       size: 14,
-                      color: Color(0xFFCCCCCC),
+                      color: p.textTertiary,
                     ),
                   ],
                 ),

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../../../../core/config/route_names.dart';
+import 'package:deepseekapp/core/theme/app_palette.dart';
 import '../../../../../core/widgets/keyboard_inset_padding.dart';
 import '../../../shared/dialog_utils.dart';
 import '../../../shared/domain/outline_record.dart';
@@ -109,6 +110,7 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return PopScope(
       canPop: !_showWriteView && !_selectMode,
       onPopInvokedWithResult: (didPop, result) {
@@ -124,22 +126,22 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
         }
       },
       child: Scaffold(
-        backgroundColor: Colors.white,
+        backgroundColor: p.background,
         appBar: AppBar(
           title: Text(
             widget.outline.title.isNotEmpty ? widget.outline.title : '大纲转章节',
             style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
           ),
-          backgroundColor: Colors.white,
+          backgroundColor: p.surface,
           elevation: 0.5,
           centerTitle: true,
           leading: IconButton(
-            icon: const Icon(Icons.arrow_back, color: Color(0xFF333333)),
+            icon: Icon(Icons.arrow_back, color: p.textPrimary),
             onPressed: _handleBack,
           ),
           actions: [
             IconButton(
-              icon: const Icon(Icons.menu_book, color: Color(0xFF4D6BFE)),
+              icon: Icon(Icons.menu_book, color: p.accent),
               tooltip: '剧情状态账本',
               onPressed: () {
                 if (widget.outline.id == null) return;
@@ -154,9 +156,9 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
               },
             ),
             IconButton(
-              icon: const Icon(
+              icon: Icon(
                 Icons.settings_outlined,
-                color: Color(0xFF666666),
+                color: p.textSecondary,
               ),
               tooltip: 'AI 设置',
               onPressed: () {
@@ -173,7 +175,7 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
             ),
             if (_selectMode)
               IconButton(
-                icon: const Icon(Icons.close, color: Color(0xFF666666)),
+                icon: Icon(Icons.close, color: p.textSecondary),
                 tooltip: '取消选择',
                 onPressed: () => setState(() {
                   _selectMode = false;
@@ -182,9 +184,9 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
               )
             else
               IconButton(
-                icon: const Icon(
+                icon: Icon(
                   Icons.delete_sweep_outlined,
-                  color: Color(0xFF666666),
+                  color: p.textSecondary,
                 ),
                 tooltip: '批量删除已生成内容',
                 onPressed: (_controller.isWriting || _showWriteView)
@@ -208,14 +210,14 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
                       horizontal: 16,
                       vertical: 10,
                     ),
-                    color: const Color(0xFFF8F9FF),
+                    color: p.accentSoft,
                     child: Text(
                       _controller.isAllCompleted
                           ? '✅ 所有事件已完成'
                           : '${_controller.completedCount}/${_controller.writableCount} 个事件已完成',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 13,
-                        color: Color(0xFF666666),
+                        color: p.textSecondary,
                       ),
                     ),
                   ),
@@ -227,21 +229,25 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
                         horizontal: 16,
                         vertical: 8,
                       ),
-                      color: const Color(0xFFFFF8E1),
-                      child: const Row(
+                      color: p.isDark
+                          ? p.warning.withValues(alpha: 0.16)
+                          : const Color(0xFFFFF8E1),
+                      child: Row(
                         children: [
-                          SizedBox(
+                          const SizedBox(
                             width: 12,
                             height: 12,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           ),
-                          SizedBox(width: 8),
+                          const SizedBox(width: 8),
                           Expanded(
                             child: Text(
                               '伏笔清单提炼中，完成后自动更新',
                               style: TextStyle(
                                 fontSize: 12,
-                                color: Color(0xFF8D6E63),
+                                color: p.isDark
+                                    ? p.warning
+                                    : const Color(0xFF8D6E63),
                               ),
                             ),
                           ),
@@ -288,8 +294,8 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
         floatingActionButton: _controller.isWriting
             ? FloatingActionButton.extended(
                 onPressed: () => _controller.stopWrite(),
-                backgroundColor: Colors.red,
-                foregroundColor: Colors.white,
+                backgroundColor: p.danger,
+                foregroundColor: p.onAccent,
                 icon: const Icon(Icons.stop, size: 18),
                 label: const Text('停止生成'),
               )
@@ -375,6 +381,7 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
 
   /// 全屏生成视图：状态条 + 完整流式正文（可选中复制、自动滚动）
   Widget _buildWriteView() {
+    final p = context.palette;
     final ch = _currentWritingChapter();
     final writing = _controller.isWriting;
     final text = _controller.writingText;
@@ -410,7 +417,7 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
         Container(
           width: double.infinity,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          color: const Color(0xFFF8F9FF),
+          color: p.accentSoft,
           child: Row(
             children: [
               if (writing ||
@@ -430,16 +437,16 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
                       : Icons.check_circle,
                   size: 16,
                   color: _controller.wasCancelled
-                      ? const Color(0xFFFF9800)
-                      : const Color(0xFF4CAF50),
+                      ? p.warning
+                      : p.success,
                 ),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   status,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 13,
-                    color: Color(0xFF666666),
+                    color: p.textSecondary,
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -452,9 +459,9 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                   minimumSize: Size.zero,
                 ),
-                child: const Text(
+                child: Text(
                   '回到列表',
-                  style: TextStyle(fontSize: 12, color: Color(0xFF4D6BFE)),
+                  style: TextStyle(fontSize: 12, color: p.accent),
                 ),
               ),
             ],
@@ -532,16 +539,18 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
                       width: double.infinity,
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFFFF3F0),
+                        color: p.dangerSoft,
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: const Color(0xFFFFCCBC)),
+                        border: Border.all(
+                          color: p.danger.withValues(alpha: 0.35),
+                        ),
                       ),
                       child: SelectableText(
                         '生成失败：${_controller.errorText}',
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 12,
                           height: 1.6,
-                          color: Color(0xFFD84315),
+                          color: p.danger,
                         ),
                       ),
                     ),
@@ -556,8 +565,8 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
                         icon: const Icon(Icons.refresh, size: 18),
                         label: const Text('重新生成'),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF4D6BFE),
-                          foregroundColor: Colors.white,
+                          backgroundColor: p.accent,
+                          foregroundColor: p.onAccent,
                         ),
                       ),
                     ),
@@ -572,10 +581,10 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
                               ? '正在思考中，请稍候...'
                               : '（暂无内容）')
                         : text,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 14,
                       height: 1.8,
-                      color: Color(0xFF333333),
+                      color: p.textPrimary,
                     ),
                   ),
                   // ── 审查相关（思考/意见/对比）位于正文下方 ──
@@ -645,27 +654,28 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
     required String content,
     required String emptyHint,
   }) {
+    final p = context.palette;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: const Color(0xFFF0F4FF),
+        color: p.accentSoft,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFFD8E2FF)),
+        border: Border.all(color: p.borderStrong),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(icon, size: 14, color: const Color(0xFF4D6BFE)),
+              Icon(icon, size: 14, color: p.accent),
               const SizedBox(width: 4),
               Text(
                 title,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w600,
-                  color: Color(0xFF4D6BFE),
+                  color: p.accent,
                 ),
               ),
             ],
@@ -673,10 +683,10 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
           const SizedBox(height: 6),
           SelectableText(
             content.trim().isEmpty ? emptyHint : content,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 12,
               height: 1.6,
-              color: Color(0xFF666666),
+              color: p.textSecondary,
             ),
           ),
         ],
@@ -704,21 +714,22 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
 
   /// 批量删除底部操作栏：已选数量 + 全选 + 删除
   Widget _buildSelectBar() {
+    final p = context.palette;
     final deletable = _deletableChapters();
     final allSelected =
         deletable.isNotEmpty && _selected.length == deletable.length;
     return SafeArea(
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          border: Border(top: BorderSide(color: Color(0xFFEEEEEE))),
+        decoration: BoxDecoration(
+          color: p.surface,
+          border: Border(top: BorderSide(color: p.border)),
         ),
         child: Row(
           children: [
             Text(
               '已选 ${_selected.length} 项',
-              style: const TextStyle(fontSize: 13, color: Color(0xFF666666)),
+              style: TextStyle(fontSize: 13, color: p.textSecondary),
             ),
             const Spacer(),
             TextButton(
@@ -733,15 +744,15 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
               }),
               child: Text(
                 allSelected ? '取消全选' : '全选',
-                style: const TextStyle(fontSize: 13, color: Color(0xFF4D6BFE)),
+                style: TextStyle(fontSize: 13, color: p.accent),
               ),
             ),
             const SizedBox(width: 8),
             ElevatedButton(
               onPressed: _selected.isEmpty ? null : _confirmBatchDelete,
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFFF5252),
-                foregroundColor: Colors.white,
+                backgroundColor: p.danger,
+                foregroundColor: p.onAccent,
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 visualDensity: VisualDensity.compact,
                 textStyle: const TextStyle(
@@ -759,6 +770,7 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
 
   /// 确认并批量删除已选章节的已生成内容
   Future<void> _confirmBatchDelete() async {
+    final p = context.palette;
     final count = _selected.length;
     final ok = await showDialog<bool>(
       context: context,
@@ -768,11 +780,11 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
         actions: [
           TextButton(
             onPressed: () => closeDialogSafely(ctx, result: false),
-            child: const Text('取消', style: TextStyle(color: Color(0xFF999999))),
+            child: Text('取消', style: TextStyle(color: p.textTertiary)),
           ),
           TextButton(
             onPressed: () => closeDialogSafely(ctx, result: true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            style: TextButton.styleFrom(foregroundColor: p.danger),
             child: const Text('删除'),
           ),
         ],
@@ -809,6 +821,7 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
 
   /// 编辑章节大纲弹窗
   void _showEditOutlineDialog(OutlineChapter ch) {
+    final p = context.palette;
     if (ch.id == null) return;
     final titleCtrl = TextEditingController(text: ch.eventTitle);
     final summaryCtrl = TextEditingController(text: ch.eventSummary);
@@ -833,11 +846,11 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
                   labelText: '事件标题',
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: Color(0xFFDDDDDD)),
+                    borderSide: BorderSide(color: p.borderStrong),
                   ),
                   contentPadding: const EdgeInsets.all(10),
                   filled: true,
-                  fillColor: const Color(0xFFFAFAFA),
+                  fillColor: p.surfaceMuted,
                 ),
                 style: const TextStyle(fontSize: 14),
               ),
@@ -849,15 +862,15 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
                   labelText: '事件概要',
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: Color(0xFFDDDDDD)),
+                    borderSide: BorderSide(color: p.borderStrong),
                   ),
                   contentPadding: const EdgeInsets.all(10),
                   filled: true,
-                  fillColor: const Color(0xFFFAFAFA),
+                  fillColor: p.surfaceMuted,
                   suffixIcon: IconButton(
                     icon: const Icon(Icons.open_in_full, size: 18),
                     tooltip: '放大编辑',
-                    color: const Color(0xFF999999),
+                    color: p.textTertiary,
                     onPressed: () {
                       final editCtrl = TextEditingController(
                         text: summaryCtrl.text,
@@ -905,7 +918,7 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
                                   2,
                                 ),
                                 filled: true,
-                                fillColor: const Color(0xFFFAFAFA),
+                                fillColor: p.surfaceMuted,
                               ),
                               style: const TextStyle(fontSize: 10, height: 1.5),
                             ),
@@ -943,11 +956,11 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
                                 summaryCtrl.text = editCtrl.text;
                                 scheduleControllerDispose(editCtrl);
                               },
-                              child: const Text(
+                              child: Text(
                                 '确定',
                                 style: TextStyle(
                                   fontSize: 12,
-                                  color: Color(0xFF4D6BFE),
+                                  color: p.accent,
                                 ),
                               ),
                             ),
@@ -965,9 +978,9 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
         actions: [
           TextButton(
             onPressed: () => closeDialogSafely(ctx),
-            child: const Text(
+            child: Text(
               '取消',
-              style: TextStyle(fontSize: 12, color: Color(0xFF999999)),
+              style: TextStyle(fontSize: 12, color: p.textTertiary),
             ),
           ),
           TextButton(
@@ -981,9 +994,9 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
               if (ctx.mounted) closeDialogSafely(ctx);
               // 保存完成：伏笔清单在后台重新提炼，页面横幅会持续提醒直到提炼完成
             },
-            child: const Text(
+            child: Text(
               '保存',
-              style: TextStyle(fontSize: 12, color: Color(0xFF4D6BFE)),
+              style: TextStyle(fontSize: 12, color: p.accent),
             ),
           ),
         ],
@@ -993,6 +1006,7 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
 
   /// 检测到大纲内容已修改时弹出同步确认对话框
   Future<void> _showResyncDialog() async {
+    final p = context.palette;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -1001,13 +1015,13 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
         actions: [
           TextButton(
             onPressed: () => closeDialogSafely(ctx, result: false),
-            child: const Text('忽略', style: TextStyle(color: Color(0xFF999999))),
+            child: Text('忽略', style: TextStyle(color: p.textTertiary)),
           ),
           TextButton(
             onPressed: () => closeDialogSafely(ctx, result: true),
-            child: const Text(
+            child: Text(
               '重新解析',
-              style: TextStyle(color: Color(0xFF4D6BFE)),
+              style: TextStyle(color: p.accent),
             ),
           ),
         ],
@@ -1021,6 +1035,7 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
 
   /// 查看/编辑本章独立的剧情账本（每章生成时自动保存，重新生成后可回退）
   void _openLedgerDialog(OutlineChapter ch) {
+    final p = context.palette;
     final ctrl = TextEditingController(text: ch.storyState);
     showDialog(
       context: context,
@@ -1042,12 +1057,12 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
             child: TextField(
               controller: ctrl,
               maxLines: null,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 hintText: '本章剧情账本（角色处境 / 时间地点 / 伏笔 / 悬念 / 冲突）。生成章节后自动提炼，可在此手动修改',
-                border: OutlineInputBorder(),
-                contentPadding: EdgeInsets.all(10),
+                border: const OutlineInputBorder(),
+                contentPadding: const EdgeInsets.all(10),
                 filled: true,
-                fillColor: Color(0xFFFAFAFA),
+                fillColor: p.surfaceMuted,
               ),
               style: const TextStyle(fontSize: 13, height: 1.6),
             ),
@@ -1075,7 +1090,7 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
                 ),
               );
             },
-            style: TextButton.styleFrom(foregroundColor: const Color(0xFF4D6BFE)),
+            style: TextButton.styleFrom(foregroundColor: p.accent),
             child: const Text('保存', style: TextStyle(fontSize: 13)),
           ),
         ],
@@ -1141,6 +1156,7 @@ class _ChapterTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     final isMajor = chapter.eventType == 'major';
     final isCompleted = chapter.status == 'completed';
     // 选择模式下仅已完成且含正文的章节可被勾选
@@ -1153,32 +1169,32 @@ class _ChapterTile extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: const Color(0xFFF8F9FF),
+          color: p.accentSoft,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: const Color(0xFFE8ECF4)),
+          border: Border.all(color: p.border),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                const Icon(Icons.flag, size: 20, color: Color(0xFF4D6BFE)),
+                Icon(Icons.flag, size: 20, color: p.accent),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     chapter.eventTitle,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.w600,
-                      color: Color(0xFF333333),
+                      color: p.textPrimary,
                     ),
                   ),
                 ),
                 GestureDetector(
                   onTap: () => onEditOutline(chapter),
-                  child: const Text(
+                  child: Text(
                     '修改大纲',
-                    style: TextStyle(fontSize: 11, color: Color(0xFF4D6BFE)),
+                    style: TextStyle(fontSize: 11, color: p.accent),
                   ),
                 ),
               ],
@@ -1187,10 +1203,10 @@ class _ChapterTile extends StatelessWidget {
               const SizedBox(height: 6),
               Text(
                 chapter.eventSummary,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 11,
                   height: 1.4,
-                  color: Color(0xFF999999),
+                  color: p.textTertiary,
                 ),
                 maxLines: 3,
                 overflow: TextOverflow.ellipsis,
@@ -1207,12 +1223,10 @@ class _ChapterTile extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: isMajor ? const Color(0xFFF8F9FF) : Colors.white,
+          color: isMajor ? p.accentSoft : p.surface,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
-            color: isCompleted
-                ? const Color(0xFFE0F0E0)
-                : const Color(0xFFE8ECF4),
+            color: isCompleted ? p.successSoft : p.border,
           ),
         ),
         child: Column(
@@ -1224,7 +1238,7 @@ class _ChapterTile extends StatelessWidget {
                   Checkbox(
                     value: selected,
                     onChanged: canSelect ? (_) => onToggleSelect?.call() : null,
-                    activeColor: const Color(0xFF4D6BFE),
+                    activeColor: p.accent,
                     visualDensity: VisualDensity.compact,
                     materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
@@ -1234,10 +1248,8 @@ class _ChapterTile extends StatelessWidget {
                   isMajor ? Icons.flag : Icons.circle_outlined,
                   size: isMajor ? 20 : 8,
                   color: isCompleted
-                      ? const Color(0xFF4CAF50)
-                      : (isMajor
-                            ? const Color(0xFF4D6BFE)
-                            : const Color(0xFF999999)),
+                      ? p.success
+                      : (isMajor ? p.accent : p.textTertiary),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
@@ -1246,7 +1258,7 @@ class _ChapterTile extends StatelessWidget {
                     style: TextStyle(
                       fontSize: isMajor ? 15 : 13,
                       fontWeight: isMajor ? FontWeight.w600 : FontWeight.w500,
-                      color: const Color(0xFF333333),
+                      color: p.textPrimary,
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -1261,10 +1273,10 @@ class _ChapterTile extends StatelessWidget {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 else if (isCompleted)
-                  const Icon(
+                  Icon(
                     Icons.check_circle,
                     size: 20,
-                    color: Color(0xFF4CAF50),
+                    color: p.success,
                   )
                 else
                   SizedBox(
@@ -1272,12 +1284,8 @@ class _ChapterTile extends StatelessWidget {
                     child: ElevatedButton(
                       onPressed: locked ? null : onWrite,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: locked
-                            ? const Color(0xFFE8ECF4)
-                            : const Color(0xFF4D6BFE),
-                        foregroundColor: locked
-                            ? const Color(0xFF999999)
-                            : Colors.white,
+                        backgroundColor: locked ? p.surfaceMuted : p.accent,
+                        foregroundColor: locked ? p.textTertiary : p.onAccent,
                         padding: const EdgeInsets.symmetric(horizontal: 12),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(4),
@@ -1296,10 +1304,10 @@ class _ChapterTile extends StatelessWidget {
               const SizedBox(height: 6),
               Text(
                 chapter.eventSummary,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 11,
                   height: 1.4,
-                  color: Color(0xFF999999),
+                  color: p.textTertiary,
                 ),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
@@ -1311,7 +1319,7 @@ class _ChapterTile extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 11,
                   height: 1.4,
-                  color: Colors.grey[300],
+                  color: p.textTertiary,
                 ),
               ),
             ],
@@ -1319,15 +1327,15 @@ class _ChapterTile extends StatelessWidget {
               const SizedBox(height: 6),
               Row(
                 children: [
-                  const Icon(
+                  Icon(
                     Icons.lock_outline,
                     size: 12,
-                    color: Color(0xFFBBBBBB),
+                    color: p.textTertiary,
                   ),
                   const SizedBox(width: 4),
                   Text(
                     '需先完成前面的章节才能生成',
-                    style: TextStyle(fontSize: 11, color: Color(0xFFBBBBBB)),
+                    style: TextStyle(fontSize: 11, color: p.textTertiary),
                   ),
                 ],
               ),
@@ -1338,9 +1346,9 @@ class _ChapterTile extends StatelessWidget {
                 children: [
                   GestureDetector(
                     onTap: onView,
-                    child: const Text(
+                    child: Text(
                       '查看内容',
-                      style: TextStyle(fontSize: 11, color: Color(0xFF4D6BFE)),
+                      style: TextStyle(fontSize: 11, color: p.accent),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -1354,17 +1362,17 @@ class _ChapterTile extends StatelessWidget {
                   const SizedBox(width: 12),
                   GestureDetector(
                     onTap: () => onEditOutline(chapter),
-                    child: const Text(
+                    child: Text(
                       '修改大纲',
-                      style: TextStyle(fontSize: 11, color: Color(0xFF4D6BFE)),
+                      style: TextStyle(fontSize: 11, color: p.accent),
                     ),
                   ),
                   const SizedBox(width: 12),
                   GestureDetector(
                     onTap: () => onEditLedger(chapter),
-                    child: const Text(
+                    child: Text(
                       '账本',
-                      style: TextStyle(fontSize: 11, color: Color(0xFF00897B)),
+                      style: TextStyle(fontSize: 11, color: p.success),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -1386,7 +1394,7 @@ class _ChapterTile extends StatelessWidget {
                                 onDelete();
                               },
                               style: TextButton.styleFrom(
-                                foregroundColor: Colors.red,
+                                foregroundColor: p.danger,
                               ),
                               child: const Text('删除'),
                             ),
@@ -1394,9 +1402,9 @@ class _ChapterTile extends StatelessWidget {
                         ),
                       );
                     },
-                    child: const Text(
+                    child: Text(
                       '重新生成',
-                      style: TextStyle(fontSize: 11, color: Color(0xFFFF5722)),
+                      style: TextStyle(fontSize: 11, color: p.accent),
                     ),
                   ),
                 ],
@@ -1405,19 +1413,19 @@ class _ChapterTile extends StatelessWidget {
             if (isProcessing) ...[
               const SizedBox(height: 6),
               Row(
-                children: const [
-                  SizedBox(
+                children: [
+                  const SizedBox(
                     width: 12,
                     height: 12,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   ),
-                  SizedBox(width: 6),
+                  const SizedBox(width: 6),
                   Expanded(
                     child: Text(
                       '正在提炼剧情状态与整章小结，可点「查看内容」查看进度',
                       style: TextStyle(
                         fontSize: 11,
-                        color: Color(0xFF8D6E63),
+                        color: p.textSecondary,
                       ),
                     ),
                   ),
@@ -1431,17 +1439,17 @@ class _ChapterTile extends StatelessWidget {
                   children: [
                     GestureDetector(
                       onTap: () => onEditOutline(chapter),
-                      child: const Text(
+                      child: Text(
                         '修改大纲',
-                        style: TextStyle(fontSize: 11, color: Color(0xFF4D6BFE)),
+                        style: TextStyle(fontSize: 11, color: p.accent),
                       ),
                     ),
                     const SizedBox(width: 12),
                     GestureDetector(
                       onTap: () => onEditLedger(chapter),
-                      child: const Text(
+                      child: Text(
                         '账本',
-                        style: TextStyle(fontSize: 11, color: Color(0xFF00897B)),
+                        style: TextStyle(fontSize: 11, color: p.success),
                       ),
                     ),
                   ],
@@ -1457,7 +1465,7 @@ class _ChapterTile extends StatelessWidget {
                   width: double.infinity,
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF0F4FF),
+                    color: p.accentSoft,
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: Row(
@@ -1472,7 +1480,7 @@ class _ChapterTile extends StatelessWidget {
                         '正在思考中，点击查看生成进度',
                         style: TextStyle(
                           fontSize: 11,
-                          color: Color(0xFF666666),
+                          color: p.textSecondary,
                         ),
                       ),
                     ],
@@ -1488,15 +1496,15 @@ class _ChapterTile extends StatelessWidget {
                   width: double.infinity,
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF5F5F5),
+                    color: p.surfaceMuted,
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: Text(
                     writingContent,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 11,
                       height: 1.4,
-                      color: Color(0xFF666666),
+                      color: p.textSecondary,
                     ),
                     maxLines: 5,
                     overflow: TextOverflow.ellipsis,
@@ -1548,29 +1556,30 @@ class _ChapterViewPageState extends State<_ChapterViewPage> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     final chapter = widget.chapter;
     final processing = widget.controller.isProcessingChapter(chapter);
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: p.background,
       appBar: AppBar(
         title: Text(
           chapter.eventTitle,
           style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
         ),
-        backgroundColor: Colors.white,
+        backgroundColor: p.surface,
         elevation: 0.5,
         centerTitle: true,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Color(0xFF333333)),
+          icon: Icon(Icons.arrow_back, color: p.textPrimary),
           onPressed: () => Navigator.of(context).pop(),
         ),
         actions: [
           if (widget.onEdit != null)
             TextButton(
               onPressed: widget.onEdit,
-              child: const Text(
+              child: Text(
                 '编辑',
-                style: TextStyle(fontSize: 14, color: Color(0xFF4D6BFE)),
+                style: TextStyle(fontSize: 14, color: p.accent),
               ),
             ),
         ],
@@ -1585,21 +1594,21 @@ class _ChapterViewPageState extends State<_ChapterViewPage> {
                 horizontal: 16,
                 vertical: 8,
               ),
-              color: const Color(0xFFF0F4FF),
+              color: p.accentSoft,
               child: Row(
-                children: const [
-                  SizedBox(
+                children: [
+                  const SizedBox(
                     width: 12,
                     height: 12,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   ),
-                  SizedBox(width: 8),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       '正在提炼剧情状态与整章小结...',
                       style: TextStyle(
                         fontSize: 12,
-                        color: Color(0xFF4D6BFE),
+                        color: p.accent,
                       ),
                     ),
                   ),
@@ -1611,10 +1620,10 @@ class _ChapterViewPageState extends State<_ChapterViewPage> {
               padding: const EdgeInsets.all(16),
               child: SelectableText(
                 chapter.content,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 14,
                   height: 1.8,
-                  color: Color(0xFF333333),
+                  color: p.textPrimary,
                 ),
               ),
             ),
@@ -1723,22 +1732,23 @@ class _ChapterEditPageState extends State<_ChapterEditPage> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     final wordCount = _controller.text.characters.length;
     // 过程气泡可见：本页保存中，或本章正在后台提炼（退出编辑页后重新进入续显进度）
     final showProcess =
         _saving || widget.controller.isProcessingChapter(widget.chapter);
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: p.background,
       appBar: AppBar(
         title: Text(
           widget.chapter.eventTitle,
           style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
         ),
-        backgroundColor: Colors.white,
+        backgroundColor: p.surface,
         elevation: 0.5,
         centerTitle: true,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Color(0xFF333333)),
+          icon: Icon(Icons.arrow_back, color: p.textPrimary),
           onPressed: () {
             if (_saving) {
               // 提炼进行中：正文已保存，允许直接退出（后台继续完成提炼）
@@ -1759,9 +1769,9 @@ class _ChapterEditPageState extends State<_ChapterEditPage> {
                         if (!closeDialogSafely(ctx)) return;
                         Navigator.of(context).pop();
                       },
-                      child: const Text(
+                      child: Text(
                         '不保存',
-                        style: TextStyle(color: Color(0xFF999999)),
+                        style: TextStyle(color: p.textTertiary),
                       ),
                     ),
                     TextButton(
@@ -1769,9 +1779,9 @@ class _ChapterEditPageState extends State<_ChapterEditPage> {
                         if (!closeDialogSafely(ctx)) return;
                         _saveAndProcess();
                       },
-                      child: const Text(
+                      child: Text(
                         '保存',
-                        style: TextStyle(color: Color(0xFF4D6BFE)),
+                        style: TextStyle(color: p.accent),
                       ),
                     ),
                   ],
@@ -1789,21 +1799,21 @@ class _ChapterEditPageState extends State<_ChapterEditPage> {
             child: Center(
               child: Text(
                 '$wordCount 字',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 12,
-                  color: Color(0xFF666666),
+                  color: p.textSecondary,
                   fontWeight: FontWeight.w500,
                 ),
               ),
             ),
           ),
           IconButton(
-            icon: const Icon(Icons.undo, size: 20, color: Color(0xFF4D6BFE)),
+            icon: Icon(Icons.undo, size: 20, color: p.accent),
             tooltip: '撤回',
             onPressed: (_saving || _undoStack.isEmpty) ? null : _undo,
           ),
           IconButton(
-            icon: const Icon(Icons.redo, size: 20, color: Color(0xFF4D6BFE)),
+            icon: Icon(Icons.redo, size: 20, color: p.accent),
             tooltip: '前进',
             onPressed: (_saving || _redoStack.isEmpty) ? null : _redo,
           ),
@@ -1815,9 +1825,9 @@ class _ChapterEditPageState extends State<_ChapterEditPage> {
                     height: 14,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Text(
+                : Text(
                     '保存',
-                    style: TextStyle(fontSize: 14, color: Color(0xFF4D6BFE)),
+                    style: TextStyle(fontSize: 14, color: p.accent),
                   ),
           ),
         ],
@@ -1840,11 +1850,11 @@ class _ChapterEditPageState extends State<_ChapterEditPage> {
                   hintText: '在此编辑章节内容...',
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: Color(0xFFDDDDDD)),
+                    borderSide: BorderSide(color: p.borderStrong),
                   ),
                   contentPadding: const EdgeInsets.all(12),
                   filled: true,
-                  fillColor: const Color(0xFFFAFAFA),
+                  fillColor: p.surfaceMuted,
                 ),
                 style: const TextStyle(fontSize: 14, height: 1.6),
               ),
@@ -1922,6 +1932,7 @@ class _ChapterProcessPanelState extends State<_ChapterProcessPanel> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     final c = widget.controller;
     // 不在提炼中（或提炼的不是本章）时不占位
     if (!c.isProcessingChapter(widget.chapter)) {
@@ -1934,7 +1945,7 @@ class _ChapterProcessPanelState extends State<_ChapterProcessPanel> {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
-            color: const Color(0xFFF0F4FF),
+            color: p.accentSoft,
             borderRadius: BorderRadius.circular(8),
           ),
           child: Row(
@@ -1950,9 +1961,9 @@ class _ChapterProcessPanelState extends State<_ChapterProcessPanel> {
                   c.extractingStory
                       ? '正在提炼剧情状态账本...'
                       : '正在提炼整章小结...',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 13,
-                    color: Color(0xFF4D6BFE),
+                    color: p.accent,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -2000,9 +2011,9 @@ class _ChapterProcessPanelState extends State<_ChapterProcessPanel> {
             title: '整章小结',
             content: c.chapterSummaryOutputText,
             emptyHint: '正在提炼中...',
-            color: const Color(0xFFF1F8E9),
-            borderColor: const Color(0xFFDCEDC8),
-            iconColor: const Color(0xFF558B2F),
+            color: p.successSoft,
+            borderColor: p.success.withValues(alpha: 0.35),
+            iconColor: p.success,
           ),
         ],
       ],
@@ -2014,31 +2025,35 @@ class _ChapterProcessPanelState extends State<_ChapterProcessPanel> {
     required String title,
     required String content,
     required String emptyHint,
-    Color color = const Color(0xFFF0F4FF),
-    Color borderColor = const Color(0xFFD8E2FF),
-    Color iconColor = const Color(0xFF4D6BFE),
+    Color? color,
+    Color? borderColor,
+    Color? iconColor,
   }) {
+    final p = context.palette;
+    final bg = color ?? p.accentSoft;
+    final border = borderColor ?? p.borderStrong;
+    final fg = iconColor ?? p.accent;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: color,
+        color: bg,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: borderColor),
+        border: Border.all(color: border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(icon, size: 14, color: iconColor),
+              Icon(icon, size: 14, color: fg),
               const SizedBox(width: 4),
               Text(
                 title,
                 style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w600,
-                  color: iconColor,
+                  color: fg,
                 ),
               ),
             ],
@@ -2046,10 +2061,10 @@ class _ChapterProcessPanelState extends State<_ChapterProcessPanel> {
           const SizedBox(height: 6),
           SelectableText(
             content.trim().isEmpty ? emptyHint : content,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 12,
               height: 1.6,
-              color: Color(0xFF666666),
+              color: p.textSecondary,
             ),
           ),
         ],
@@ -2093,6 +2108,7 @@ class _WordCountDialogState extends State<_WordCountDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return AlertDialog(
       title: const Text(
         '设置本章字数',
@@ -2102,9 +2118,9 @@ class _WordCountDialogState extends State<_WordCountDialog> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             '输入本章目标字数，将覆盖设置中的默认范围',
-            style: TextStyle(fontSize: 12, color: Color(0xFF999999)),
+            style: TextStyle(fontSize: 12, color: p.textTertiary),
           ),
           const SizedBox(height: 10),
           TextField(
@@ -2122,7 +2138,7 @@ class _WordCountDialogState extends State<_WordCountDialog> {
                 vertical: 10,
               ),
               filled: true,
-              fillColor: const Color(0xFFFAFAFA),
+              fillColor: p.surfaceMuted,
             ),
             style: const TextStyle(fontSize: 14),
             onSubmitted: (_) => _confirm(),
@@ -2132,14 +2148,14 @@ class _WordCountDialogState extends State<_WordCountDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('取消', style: TextStyle(color: Color(0xFF999999))),
+          child: Text('取消', style: TextStyle(color: p.textTertiary)),
         ),
         TextButton(
           onPressed: _confirm,
-          child: const Text(
+          child: Text(
             '开始生成',
             style: TextStyle(
-              color: Color(0xFF4D6BFE),
+              color: p.accent,
               fontWeight: FontWeight.w600,
             ),
           ),

@@ -6,6 +6,7 @@
 // 搜索比百度多出站点名/发布时间/权威性等字段，正好借这次合并。
 
 import 'package:flutter/material.dart';
+import 'package:deepseekapp/core/theme/app_palette.dart';
 
 /// 搜索结果在界面上的视图模型。
 ///
@@ -111,6 +112,7 @@ class _SearchSourcesCardState extends State<SearchSourcesCard> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     final views = widget.results
         .map(SearchResultView.fromMap)
         .take(widget.maxItems)
@@ -120,9 +122,11 @@ class _SearchSourcesCardState extends State<SearchSourcesCard> {
     final card = Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       decoration: BoxDecoration(
-        color: const Color(0xFFE8EEFF),
+        color: p.accentSoft,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFFB3C5FF)),
+        border: Border.all(
+          color: p.isDark ? p.borderStrong : const Color(0xFFB3C5FF),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -130,11 +134,11 @@ class _SearchSourcesCardState extends State<SearchSourcesCard> {
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.public, size: 14, color: Color(0xFF4D6BFE)),
+              Icon(Icons.public, size: 14, color: p.accent),
               const SizedBox(width: 4),
               Text(
                 '搜索来源（${widget.results.length}）',
-                style: const TextStyle(fontSize: 11, color: Color(0xFF4D6BFE)),
+                style: TextStyle(fontSize: 11, color: p.accent),
               ),
               if (widget.collapsible) ...[
                 const Spacer(),
@@ -143,7 +147,7 @@ class _SearchSourcesCardState extends State<SearchSourcesCard> {
                       ? Icons.keyboard_arrow_up
                       : Icons.keyboard_arrow_down,
                   size: 14,
-                  color: const Color(0xFF4D6BFE),
+                  color: p.accent,
                 ),
               ],
             ],
@@ -160,10 +164,10 @@ class _SearchSourcesCardState extends State<SearchSourcesCard> {
                     children: [
                       Text(
                         r.title,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w600,
-                          color: Color(0xFF333333),
+                          color: p.textPrimary,
                         ),
                       ),
                       if (r.meta.isNotEmpty)
@@ -171,9 +175,9 @@ class _SearchSourcesCardState extends State<SearchSourcesCard> {
                           padding: const EdgeInsets.only(top: 1),
                           child: Text(
                             r.meta,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 9,
-                              color: Color(0xFF888888),
+                              color: p.textTertiary,
                             ),
                           ),
                         ),
@@ -182,9 +186,9 @@ class _SearchSourcesCardState extends State<SearchSourcesCard> {
                           padding: const EdgeInsets.only(top: 2),
                           child: Text(
                             r.snippet,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 10,
-                              color: Color(0xFF666666),
+                              color: p.textSecondary,
                             ),
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
@@ -195,9 +199,9 @@ class _SearchSourcesCardState extends State<SearchSourcesCard> {
                           padding: const EdgeInsets.only(top: 1),
                           child: Text(
                             r.url,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 9,
-                              color: Color(0xFF4D6BFE),
+                              color: p.accent,
                               decoration: TextDecoration.underline,
                             ),
                             // 有些来源链接带 accessToken 之类的查询串，长度能到几百字符，

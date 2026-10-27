@@ -2,6 +2,7 @@
 // 聊天室页面 — 与角色进行对话
 
 import 'package:flutter/material.dart';
+import 'package:deepseekapp/core/theme/app_palette.dart';
 import '../../../../core/widgets/keyboard_inset_padding.dart';
 import '../controller/chat_controller.dart';
 import '../model/character_model.dart';
@@ -106,6 +107,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setSheetState) {
+            final p = ctx.palette;
             ctrl.addListener(() {
               if (mounted) setSheetState(() {});
             });
@@ -122,29 +124,29 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                     width: 36,
                     height: 4,
                     decoration: BoxDecoration(
-                      color: const Color(0xFFDDDDDD),
+                      color: p.borderStrong,
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
                   const SizedBox(height: 16),
-                  const Text(
+                  Text(
                     '世界书管理',
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
-                      color: Color(0xFF333333),
+                      color: p.textPrimary,
                     ),
                   ),
                   const SizedBox(height: 12),
-                  const Divider(height: 1, color: Color(0xFFEEEEEE)),
+                  Divider(height: 1, color: p.border),
                   if (ctrl.worldEntries.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 24),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 24),
                       child: Text(
                         '暂无条目',
                         style: TextStyle(
                           fontSize: 13,
-                          color: Color(0xFF999999),
+                          color: p.textTertiary,
                         ),
                       ),
                     )
@@ -157,8 +159,8 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                           vertical: 8,
                         ),
                         itemCount: ctrl.worldEntries.length,
-                        separatorBuilder: (_, __) =>
-                            const Divider(height: 1, color: Color(0xFFF0F0F0)),
+                        separatorBuilder: (_, _) =>
+                            Divider(height: 1, color: p.border),
                         itemBuilder: (_, i) {
                           final entry = ctrl.worldEntries[i];
                           return Padding(
@@ -173,28 +175,28 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                                     children: [
                                       Text(
                                         entry.title,
-                                        style: const TextStyle(
+                                        style: TextStyle(
                                           fontSize: 14,
                                           fontWeight: FontWeight.w600,
-                                          color: Color(0xFF333333),
+                                          color: p.textPrimary,
                                         ),
                                       ),
                                       const SizedBox(height: 4),
                                       Text(
                                         '关键词: ${entry.keywords.join(', ')}',
-                                        style: const TextStyle(
+                                        style: TextStyle(
                                           fontSize: 11,
-                                          color: Color(0xFF999999),
+                                          color: p.textTertiary,
                                         ),
                                       ),
                                     ],
                                   ),
                                 ),
                                 IconButton(
-                                  icon: const Icon(
+                                  icon: Icon(
                                     Icons.delete_outline,
                                     size: 18,
-                                    color: Colors.redAccent,
+                                    color: p.danger,
                                   ),
                                   constraints: const BoxConstraints(
                                     minWidth: 32,
@@ -210,7 +212,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                         },
                       ),
                     ),
-                  const Divider(height: 1, color: Color(0xFFEEEEEE)),
+                  Divider(height: 1, color: p.border),
                   Padding(
                     padding: const EdgeInsets.all(16),
                     child: SizedBox(
@@ -223,8 +225,8 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                           style: TextStyle(fontSize: 13),
                         ),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF4D6BFE),
-                          foregroundColor: Colors.white,
+                          backgroundColor: p.accent,
+                          foregroundColor: p.onAccent,
                           padding: const EdgeInsets.symmetric(vertical: 10),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(8),
@@ -243,6 +245,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
   }
 
   void _showAddEntryDialog(BuildContext sheetContext) {
+    final p = sheetContext.palette;
     final titleCtrl = TextEditingController();
     final contentCtrl = TextEditingController();
     final keywordsCtrl = TextEditingController();
@@ -250,6 +253,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     showDialog(
       context: sheetContext,
       builder: (ctx) => AlertDialog(
+        backgroundColor: p.surfaceElevated,
         title: const Text('添加条目', style: TextStyle(fontSize: 14)),
         content: SingleChildScrollView(
           child: Column(
@@ -322,9 +326,9 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
               widget.controller.addWorldEntry(title, content, keywords);
               Navigator.of(ctx).pop();
             },
-            child: const Text(
+            child: Text(
               '保存',
-              style: TextStyle(fontSize: 13, color: Color(0xFF4D6BFE)),
+              style: TextStyle(fontSize: 13, color: p.accent),
             ),
           ),
         ],
@@ -338,6 +342,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     final ctrl = widget.controller;
     final character = ctrl.character;
     final messages = ctrl.messages;
@@ -348,7 +353,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     return PopScope(
       canPop: true,
       child: Scaffold(
-        backgroundColor: const Color(0xFFF8F8F8),
+        backgroundColor: p.background,
         appBar: _buildAppBar(character),
         body: Column(
           children: [
@@ -359,19 +364,19 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                   horizontal: 12,
                   vertical: 6,
                 ),
-                color: const Color(0xFFFFEBEE),
+                color: p.dangerSoft,
                 child: Row(
                   children: [
-                    const Icon(
+                    Icon(
                       Icons.error_outline,
                       size: 14,
-                      color: Colors.red,
+                      color: p.danger,
                     ),
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
                         error,
-                        style: const TextStyle(fontSize: 11, color: Colors.red),
+                        style: TextStyle(fontSize: 11, color: p.danger),
                       ),
                     ),
                   ],
@@ -393,26 +398,31 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
   }
 
   Widget _buildSummaryBar() {
+    final p = context.palette;
+    final gold = p.isDark ? p.warning : const Color(0xFF997A00);
     return Container(
       width: double.infinity,
       height: 28,
-      color: const Color(0xFFFFF9E6),
+      color: p.isDark
+          ? p.warning.withValues(alpha: 0.16)
+          : const Color(0xFFFFF9E6),
       alignment: Alignment.center,
-      child: const Text(
+      child: Text(
         '早期对话已压缩为摘要',
-        style: TextStyle(fontSize: 11, color: Color(0xFF997A00)),
+        style: TextStyle(fontSize: 11, color: gold),
       ),
     );
   }
 
   PreferredSizeWidget _buildAppBar(CharacterModel? character) {
+    final p = context.palette;
     return AppBar(
       toolbarHeight: 44,
-      backgroundColor: Colors.white,
+      backgroundColor: p.surface,
       elevation: 0,
       scrolledUnderElevation: 0,
       leading: IconButton(
-        icon: const Icon(Icons.arrow_back, size: 20, color: Color(0xFF333333)),
+        icon: Icon(Icons.arrow_back, size: 20, color: p.textPrimary),
         constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
         onPressed: () => Navigator.of(context).pop(),
       ),
@@ -423,26 +433,26 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
             width: 26,
             height: 26,
             decoration: BoxDecoration(
-              color: const Color(0xFF4D6BFE).withValues(alpha: 0.15),
+              color: p.accent.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(13),
             ),
             alignment: Alignment.center,
             child: Text(
               character?.name.characters.first ?? '?',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.bold,
-                color: Color(0xFF4D6BFE),
+                color: p.accent,
               ),
             ),
           ),
           const SizedBox(width: 8),
           Text(
             character?.name ?? '',
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w600,
-              color: Color(0xFF333333),
+              color: p.textPrimary,
             ),
           ),
         ],
@@ -450,14 +460,14 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
       centerTitle: true,
       actions: [
         IconButton(
-          icon: const Icon(Icons.menu_book, size: 20, color: Color(0xFF333333)),
+          icon: Icon(Icons.menu_book, size: 20, color: p.textPrimary),
           constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
           onPressed: _showWorldBookSheet,
         ),
       ],
-      bottom: const PreferredSize(
-        preferredSize: Size.fromHeight(1),
-        child: Divider(height: 1, color: Color(0xFFEEEEEE)),
+      bottom: PreferredSize(
+        preferredSize: const Size.fromHeight(1),
+        child: Divider(height: 1, color: p.border),
       ),
     );
   }
@@ -487,10 +497,11 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
   }
 
   Widget _buildInputArea(bool isLoading) {
+    final p = context.palette;
     return Container(
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(top: BorderSide(color: Color(0xFFEEEEEE), width: 1)),
+      decoration: BoxDecoration(
+        color: p.surface,
+        border: Border(top: BorderSide(color: p.border, width: 1)),
       ),
       padding: const EdgeInsets.fromLTRB(10, 6, 10, 8),
       child: SafeArea(
@@ -500,15 +511,15 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
             Expanded(
               child: TextField(
                 controller: _inputCtrl,
-                style: const TextStyle(fontSize: 13, color: Color(0xFF333333)),
+                style: TextStyle(fontSize: 13, color: p.textPrimary),
                 decoration: InputDecoration(
                   hintText: '说点什么...',
-                  hintStyle: const TextStyle(
-                    color: Color(0xFFBBBBBB),
+                  hintStyle: TextStyle(
+                    color: p.textTertiary,
                     fontSize: 13,
                   ),
                   filled: true,
-                  fillColor: const Color(0xFFF5F5F5),
+                  fillColor: p.surfaceMuted,
                   contentPadding: const EdgeInsets.symmetric(
                     horizontal: 14,
                     vertical: 8,
@@ -531,14 +542,14 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                 width: 34,
                 height: 34,
                 decoration: BoxDecoration(
-                  color: isLoading ? Colors.redAccent : const Color(0xFF4D6BFE),
+                  color: isLoading ? p.danger : p.accent,
                   borderRadius: BorderRadius.circular(17),
                 ),
                 alignment: Alignment.center,
                 child: Icon(
                   isLoading ? Icons.stop : Icons.arrow_upward,
                   size: 16,
-                  color: Colors.white,
+                  color: p.onAccent,
                 ),
               ),
             ),
@@ -574,6 +585,7 @@ class _MessageBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     final bubble = Column(
       crossAxisAlignment: isCharacter
           ? CrossAxisAlignment.start
@@ -592,25 +604,25 @@ class _MessageBubble extends StatelessWidget {
               if (isCharacter)
                 Text(
                   charName,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 10,
                     fontWeight: FontWeight.w500,
-                    color: Color(0xFF4D6BFE),
+                    color: p.accent,
                   ),
                 ),
               if (isCharacter) const SizedBox(width: 8),
               Text(
                 _formatTime(message.timestamp),
-                style: const TextStyle(fontSize: 9, color: Color(0xFFBBBBBB)),
+                style: TextStyle(fontSize: 9, color: p.textTertiary),
               ),
               if (!isCharacter) const SizedBox(width: 8),
               if (!isCharacter)
-                const Text(
+                Text(
                   '你',
                   style: TextStyle(
                     fontSize: 10,
                     fontWeight: FontWeight.w500,
-                    color: Color(0xFF666666),
+                    color: p.textSecondary,
                   ),
                 ),
             ],
@@ -626,14 +638,17 @@ class _MessageBubble extends StatelessWidget {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
-                color: isCharacter ? Colors.white : const Color(0xFF4D6BFE),
+                color: isCharacter ? p.bubbleAssistant : p.bubbleUser,
                 borderRadius: BorderRadius.only(
                   topLeft: Radius.circular(isCharacter ? 4 : 14),
                   topRight: Radius.circular(isCharacter ? 14 : 4),
                   bottomLeft: const Radius.circular(14),
                   bottomRight: const Radius.circular(14),
                 ),
-                boxShadow: isCharacter
+                border: isCharacter && p.isDark
+                    ? Border.all(color: p.border)
+                    : null,
+                boxShadow: isCharacter && !p.isDark
                     ? [
                         BoxShadow(
                           color: Colors.black.withValues(alpha: 0.04),
@@ -647,7 +662,9 @@ class _MessageBubble extends StatelessWidget {
                 message.content,
                 style: TextStyle(
                   fontSize: 13,
-                  color: isCharacter ? const Color(0xFF333333) : Colors.white,
+                  color: isCharacter
+                      ? p.bubbleAssistantText
+                      : p.bubbleUserText,
                   height: 1.5,
                 ),
               ),
@@ -655,7 +672,7 @@ class _MessageBubble extends StatelessWidget {
           ),
         ),
         // 滑动指示圆点 - 仅 AI 消息且有多候选时显示
-        if (_canSwipe) ...[const SizedBox(height: 6), _buildDotIndicator()],
+        if (_canSwipe) ...[const SizedBox(height: 6), _buildDotIndicator(p)],
       ],
     );
 
@@ -682,7 +699,7 @@ class _MessageBubble extends StatelessWidget {
     return Padding(padding: const EdgeInsets.only(bottom: 10), child: bubble);
   }
 
-  Widget _buildDotIndicator() {
+  Widget _buildDotIndicator(AppPalette p) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: List.generate(_candidateCount, (i) {
@@ -692,9 +709,7 @@ class _MessageBubble extends StatelessWidget {
           margin: const EdgeInsets.only(right: 4),
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: i == _currentIndex
-                ? const Color(0xFF4D6BFE)
-                : const Color(0xFFBBBBBB),
+            color: i == _currentIndex ? p.accent : p.textTertiary,
           ),
         );
       }),
@@ -712,6 +727,7 @@ class _TypingIndicator extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return Align(
       alignment: Alignment.centerLeft,
       child: Padding(
@@ -722,24 +738,27 @@ class _TypingIndicator extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: p.bubbleAssistant,
                 borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.04),
-                    blurRadius: 4,
-                    offset: const Offset(0, 1),
-                  ),
-                ],
+                border: p.isDark ? Border.all(color: p.border) : null,
+                boxShadow: p.isDark
+                    ? null
+                    : [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.04),
+                          blurRadius: 4,
+                          offset: const Offset(0, 1),
+                        ),
+                      ],
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  _dot(0),
+                  _dot(0, p.textTertiary),
                   const SizedBox(width: 4),
-                  _dot(400),
+                  _dot(400, p.textTertiary),
                   const SizedBox(width: 4),
-                  _dot(800),
+                  _dot(800, p.textTertiary),
                 ],
               ),
             ),
@@ -749,13 +768,13 @@ class _TypingIndicator extends StatelessWidget {
     );
   }
 
-  Widget _dot(int delay) {
+  Widget _dot(int delay, Color color) {
     return SizedBox(
       width: 6,
       height: 6,
       child: DecoratedBox(
         decoration: BoxDecoration(
-          color: const Color(0xFF999999),
+          color: color,
           shape: BoxShape.circle,
         ),
       ),

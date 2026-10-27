@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'package:deepseekapp/core/theme/app_palette.dart';
+
 /// 大纲数据加载失败时的占位视图。
 ///
 /// 以前这些页面把异常 `catch (_) {}` 吞掉，界面直接显示「还没有大纲」，
@@ -17,23 +19,24 @@ class OutlineLoadErrorView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.error_outline, size: 56, color: Color(0xFFE57373)),
+            Icon(Icons.error_outline, size: 56, color: p.danger),
             const SizedBox(height: 12),
-            const Text(
+            Text(
               '大纲加载失败',
-              style: TextStyle(fontSize: 15, color: Color(0xFF333333)),
+              style: TextStyle(fontSize: 15, color: p.textPrimary),
             ),
             const SizedBox(height: 8),
             Text(
               error.toString(),
               textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 12, color: Color(0xFF999999)),
+              style: TextStyle(fontSize: 12, color: p.textTertiary),
             ),
             const SizedBox(height: 16),
             OutlinedButton.icon(

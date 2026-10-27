@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:deepseekapp/core/theme/app_palette.dart';
 import '../../controller/outline_format_controller.dart';
 
 /// 大纲格式匹配页面
@@ -31,29 +32,34 @@ class _OutlineFormatPageState extends State<OutlineFormatPage> {
   Future<void> _handleSave() async {
     final ok = await _controller.save();
     if (!ok || !mounted) return;
+    final p = context.palette;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('大纲已保存，可前往「大纲转章节」使用'),
-        backgroundColor: Color(0xFF4D6BFE),
+      SnackBar(
+        content: Text(
+          '大纲已保存，可前往「大纲转章节」使用',
+          style: TextStyle(color: p.onAccent),
+        ),
+        backgroundColor: p.accent,
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     final c = _controller;
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: p.background,
       appBar: AppBar(
         title: const Text(
           '匹配大纲格式',
           style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
         ),
-        backgroundColor: Colors.white,
+        backgroundColor: p.surface,
         elevation: 0.5,
         centerTitle: true,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Color(0xFF333333)),
+          icon: Icon(Icons.arrow_back, color: p.textPrimary),
           onPressed: () => Navigator.of(context).pop(),
         ),
       ),
@@ -66,21 +72,21 @@ class _OutlineFormatPageState extends State<OutlineFormatPage> {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: const Color(0xFFF0F4FF),
+                color: p.accentSoft,
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
-                  color: const Color(0xFF4D6BFE).withValues(alpha: 0.3),
+                  color: p.accent.withValues(alpha: 0.3),
                 ),
               ),
-              child: const Row(
+              child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(Icons.info_outline, color: Color(0xFF4D6BFE), size: 18),
-                  SizedBox(width: 8),
+                  Icon(Icons.info_outline, color: p.accent, size: 18),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       '在此粘贴您已有的大纲，点击「AI 格式化」后系统会自动将其转换为「大纲转章节」功能所需的格式。格式化后您还可以手动编辑调整。',
-                      style: TextStyle(fontSize: 13, color: Color(0xFF666666)),
+                      style: TextStyle(fontSize: 13, color: p.textSecondary),
                     ),
                   ),
                 ],
@@ -99,22 +105,22 @@ class _OutlineFormatPageState extends State<OutlineFormatPage> {
               maxLines: 10,
               decoration: InputDecoration(
                 hintText: '请粘贴或输入您的大纲内容...',
-                hintStyle: const TextStyle(color: Color(0xFFCCCCCC)),
+                hintStyle: TextStyle(color: p.textTertiary),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
-                  borderSide: const BorderSide(color: Color(0xFFDDDDDD)),
+                  borderSide: BorderSide(color: p.borderStrong),
                 ),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
-                  borderSide: const BorderSide(color: Color(0xFFDDDDDD)),
+                  borderSide: BorderSide(color: p.borderStrong),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
-                  borderSide: const BorderSide(color: Color(0xFF4D6BFE)),
+                  borderSide: BorderSide(color: p.accent),
                 ),
                 contentPadding: const EdgeInsets.all(12),
               ),
-              style: const TextStyle(fontSize: 14, color: Color(0xFF333333)),
+              style: TextStyle(fontSize: 14, color: p.textPrimary),
             ),
             const SizedBox(height: 12),
 
@@ -125,22 +131,20 @@ class _OutlineFormatPageState extends State<OutlineFormatPage> {
                   child: ElevatedButton.icon(
                     onPressed: c.loading ? null : c.format,
                     icon: c.loading
-                        ? const SizedBox(
+                        ? SizedBox(
                             width: 18,
                             height: 18,
                             child: CircularProgressIndicator(
                               strokeWidth: 2,
-                              color: Colors.white,
+                              color: p.onAccent,
                             ),
                           )
                         : const Icon(Icons.auto_fix_high, size: 18),
                     label: Text(c.loading ? '格式化中...' : 'AI 格式化'),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF4D6BFE),
-                      foregroundColor: Colors.white,
-                      disabledBackgroundColor: const Color(
-                        0xFF4D6BFE,
-                      ).withValues(alpha: 0.6),
+                      backgroundColor: p.accent,
+                      foregroundColor: p.onAccent,
+                      disabledBackgroundColor: p.accent.withValues(alpha: 0.6),
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8),
@@ -157,8 +161,8 @@ class _OutlineFormatPageState extends State<OutlineFormatPage> {
                   OutlinedButton(
                     onPressed: c.cancel,
                     style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.red,
-                      side: const BorderSide(color: Colors.red),
+                      foregroundColor: p.danger,
+                      side: BorderSide(color: p.danger),
                       padding: const EdgeInsets.symmetric(
                         horizontal: 20,
                         vertical: 14,
@@ -179,12 +183,12 @@ class _OutlineFormatPageState extends State<OutlineFormatPage> {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.red.shade50,
+                  color: p.dangerSoft,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
                   c.error!,
-                  style: const TextStyle(color: Colors.red, fontSize: 13),
+                  style: TextStyle(color: p.danger, fontSize: 13),
                 ),
               ),
             ],
@@ -213,7 +217,7 @@ class _OutlineFormatPageState extends State<OutlineFormatPage> {
                           style: TextStyle(fontSize: 12),
                         ),
                         style: TextButton.styleFrom(
-                          foregroundColor: const Color(0xFF999999),
+                          foregroundColor: p.textTertiary,
                           padding: const EdgeInsets.symmetric(horizontal: 8),
                         ),
                       ),
@@ -222,7 +226,7 @@ class _OutlineFormatPageState extends State<OutlineFormatPage> {
                         icon: const Icon(Icons.save, size: 16),
                         label: const Text('保存', style: TextStyle(fontSize: 12)),
                         style: TextButton.styleFrom(
-                          foregroundColor: const Color(0xFF4D6BFE),
+                          foregroundColor: p.accent,
                           padding: const EdgeInsets.symmetric(horizontal: 8),
                         ),
                       ),
@@ -237,19 +241,19 @@ class _OutlineFormatPageState extends State<OutlineFormatPage> {
                 decoration: InputDecoration(
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: Color(0xFFDDDDDD)),
+                    borderSide: BorderSide(color: p.borderStrong),
                   ),
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: Color(0xFFDDDDDD)),
+                    borderSide: BorderSide(color: p.borderStrong),
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: Color(0xFF4D6BFE)),
+                    borderSide: BorderSide(color: p.accent),
                   ),
                   contentPadding: const EdgeInsets.all(12),
                 ),
-                style: const TextStyle(fontSize: 13, color: Color(0xFF333333)),
+                style: TextStyle(fontSize: 13, color: p.textPrimary),
               ),
               const SizedBox(height: 12),
               // 保存按钮（底部大按钮）
@@ -260,8 +264,8 @@ class _OutlineFormatPageState extends State<OutlineFormatPage> {
                   icon: const Icon(Icons.save_alt, size: 18),
                   label: const Text('保存到大纲记录'),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF4D6BFE),
-                    foregroundColor: Colors.white,
+                    backgroundColor: p.accent,
+                    foregroundColor: p.onAccent,
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(8),
@@ -276,7 +280,7 @@ class _OutlineFormatPageState extends State<OutlineFormatPage> {
               const SizedBox(height: 8),
               Text(
                 '保存后可在「大纲转章节」中选择此大纲生成章节内容',
-                style: TextStyle(fontSize: 12, color: Colors.grey.shade400),
+                style: TextStyle(fontSize: 12, color: p.textTertiary),
                 textAlign: TextAlign.center,
               ),
             ],

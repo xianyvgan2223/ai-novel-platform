@@ -2,6 +2,7 @@
 // 消息气泡组件 — 独立渲染层，流式更新时仅受影响的消息重绘
 
 import 'package:flutter/material.dart';
+import 'package:deepseekapp/core/theme/app_palette.dart';
 import '../../domain/chat_message.dart';
 import 'search_sources_card.dart';
 
@@ -32,11 +33,12 @@ class _MessageBubbleState extends State<MessageBubble> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     final isUser = widget.message.isUser;
 
     // 气泡的两个槽位：复选框（仅编辑模式）+ 内容
     final rowChildren = <Widget>[
-      if (widget.isEditMode && !isUser) _buildCheckbox(),
+      if (widget.isEditMode && !isUser) _buildCheckbox(p),
       Flexible(
         child: GestureDetector(
           onTap: widget.isEditMode ? widget.onToggleSelection : null,
@@ -46,10 +48,10 @@ class _MessageBubbleState extends State<MessageBubble> {
                 : CrossAxisAlignment.start,
             children: [
               if (!isUser && widget.message.thinkingText != null) ...[
-                _buildThinkingSection(),
+                _buildThinkingSection(p),
                 const SizedBox(height: 6),
               ],
-              _buildBubble(),
+              _buildBubble(p),
               if (!isUser && widget.message.searchResults != null) ...[
                 const SizedBox(height: 8),
                 _buildSearchResultsSection(),
@@ -68,14 +70,14 @@ class _MessageBubbleState extends State<MessageBubble> {
                           vertical: 2,
                         ),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFF0F0F0),
+                          color: p.surfaceMuted,
                           borderRadius: BorderRadius.circular(12),
                         ),
-                        child: const Text(
+                        child: Text(
                           '···',
                           style: TextStyle(
                             fontSize: 12,
-                            color: Color(0xFF999999),
+                            color: p.textTertiary,
                             height: 1.2,
                           ),
                         ),
@@ -87,7 +89,7 @@ class _MessageBubbleState extends State<MessageBubble> {
           ),
         ),
       ),
-      if (widget.isEditMode && isUser) _buildCheckbox(),
+      if (widget.isEditMode && isUser) _buildCheckbox(p),
     ];
 
     // IntrinsicHeight 的唯一用途是把复选框撑到气泡高度，代价是每次布局都要为
@@ -126,14 +128,12 @@ class _MessageBubbleState extends State<MessageBubble> {
     );
   }
 
-  Widget _buildBubble() {
+  Widget _buildBubble(AppPalette p) {
     final isUser = widget.message.isUser;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color: isUser
-            ? const Color(0xFF4D6BFE)
-            : const Color(0xFFF5F5F5),
+        color: isUser ? p.bubbleUser : p.bubbleAssistant,
         borderRadius: BorderRadius.only(
           topLeft: const Radius.circular(12),
           topRight: const Radius.circular(12),
@@ -145,22 +145,22 @@ class _MessageBubbleState extends State<MessageBubble> {
         widget.message.content,
         style: TextStyle(
           fontSize: 13,
-          color: isUser ? Colors.white : const Color(0xFF333333),
+          color: isUser ? p.bubbleUserText : p.bubbleAssistantText,
           height: 1.5,
         ),
       ),
     );
   }
 
-  Widget _buildThinkingSection() {
+  Widget _buildThinkingSection(AppPalette p) {
     return GestureDetector(
       onTap: () => setState(() => _showThinking = !_showThinking),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
         decoration: BoxDecoration(
-          color: const Color(0xFFF5F5F5),
+          color: p.surfaceMuted,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: const Color(0xFFE8E8E8)),
+          border: Border.all(color: p.border),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -168,17 +168,17 @@ class _MessageBubbleState extends State<MessageBubble> {
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.psychology, size: 14, color: Color(0xFF999999)),
+                Icon(Icons.psychology, size: 14, color: p.textTertiary),
                 const SizedBox(width: 4),
-                const Text('思考过程',
-                  style: TextStyle(fontSize: 11, color: Color(0xFF999999)),
+                Text('思考过程',
+                  style: TextStyle(fontSize: 11, color: p.textTertiary),
                 ),
                 const SizedBox(width: 4),
                 Icon(
                   _showThinking
                       ? Icons.keyboard_arrow_up
                       : Icons.keyboard_arrow_down,
-                  size: 14, color: const Color(0xFF999999),
+                  size: 14, color: p.textTertiary,
                 ),
               ],
             ),
@@ -186,7 +186,7 @@ class _MessageBubbleState extends State<MessageBubble> {
               const SizedBox(height: 6),
               SelectableText(
                 widget.message.thinkingText!,
-                style: const TextStyle(fontSize: 11, color: Color(0xFF666666)),
+                style: TextStyle(fontSize: 11, color: p.textSecondary),
               ),
             ],
           ],
@@ -202,7 +202,7 @@ class _MessageBubbleState extends State<MessageBubble> {
     );
   }
 
-  Widget _buildCheckbox() {
+  Widget _buildCheckbox(AppPalette p) {
     return Container(
       alignment: Alignment.center,
       padding: EdgeInsets.only(
@@ -214,7 +214,7 @@ class _MessageBubbleState extends State<MessageBubble> {
         child: Checkbox(
           value: widget.isSelected,
           onChanged: (_) => widget.onToggleSelection?.call(),
-          activeColor: const Color(0xFF4D6BFE),
+          activeColor: p.accent,
           materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
           visualDensity: VisualDensity.compact,
         ),

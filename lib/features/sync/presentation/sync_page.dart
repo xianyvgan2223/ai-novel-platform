@@ -11,6 +11,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:deepseekapp/core/theme/app_palette.dart';
 
 import '../../../core/db/database_helper.dart';
 import '../application/sync_service.dart';
@@ -18,10 +19,6 @@ import '../data/address_resolver.dart';
 import '../data/server_discovery.dart';
 import '../data/sync_store.dart';
 
-const Color _kPrimary = Color(0xFF4D6BFE);
-const Color _kInk = Color(0xFF333333);
-const Color _kMuted = Color(0xFF888888);
-const Color _kLine = Color(0xFFEEEEEE);
 /// USB 隧道地址：adb reverse 建好后，手机上的这个地址就是电脑
 const String _kUsbUrl = 'http://127.0.0.1:3210';
 
@@ -205,10 +202,11 @@ class _SyncPageState extends State<SyncPage> {
 
   void _toast(String message, {bool error = false}) {
     if (!mounted) return;
+    final p = context.palette;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(message),
-        backgroundColor: error ? const Color(0xFFFF4D4F) : _kPrimary,
+        content: Text(message, style: TextStyle(color: p.onAccent)),
+        backgroundColor: error ? p.danger : p.accent,
         duration: const Duration(seconds: 3),
       ),
     );
@@ -342,7 +340,10 @@ class _SyncPageState extends State<SyncPage> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('确定重置', style: TextStyle(color: Colors.red)),
+            child: Text(
+              '确定重置',
+              style: TextStyle(color: ctx.palette.danger),
+            ),
           ),
         ],
       ),
@@ -368,24 +369,29 @@ class _SyncPageState extends State<SyncPage> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: p.background,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: p.surface,
         elevation: 0,
         scrolledUnderElevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: _kInk),
+          icon: Icon(Icons.arrow_back, color: p.textPrimary),
           onPressed: () => Navigator.of(context).pop(),
         ),
-        title: const Text(
+        title: Text(
           '数据同步',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: _kInk),
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+            color: p.textPrimary,
+          ),
         ),
         centerTitle: true,
-        bottom: const PreferredSize(
+        bottom: PreferredSize(
           preferredSize: Size.fromHeight(1),
-          child: Divider(height: 1, color: _kLine),
+          child: Divider(height: 1, color: p.border),
         ),
       ),
       body: ListView(
@@ -420,26 +426,27 @@ class _SyncPageState extends State<SyncPage> {
   // ─────────────────────────── 各区块 ───────────────────────────
 
   Widget _buildIntro() {
+    final p = context.palette;
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFFF5F7FF),
+        color: p.accentSoft,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFFE3E8FF)),
+        border: Border.all(color: p.borderStrong),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            children: const [
-              Icon(Icons.cable, size: 17, color: _kPrimary),
-              SizedBox(width: 7),
+            children: [
+              Icon(Icons.cable, size: 17, color: p.accent),
+              const SizedBox(width: 7),
               Text(
                 '两种连接方式（推荐第一种）',
                 style: TextStyle(
                   fontSize: 13.5,
                   fontWeight: FontWeight.w600,
-                  color: _kPrimary,
+                  color: p.accent,
                 ),
               ),
             ],
@@ -455,14 +462,19 @@ class _SyncPageState extends State<SyncPage> {
 
   /// 连接通道面板：USB 隧道状态 + 自动找电脑 + 当前通道
   Widget _buildChannelPanel() {
+    final p = context.palette;
     final kind = _channelKind;
     final currentUrl = _urlCtrl.text.trim();
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       decoration: BoxDecoration(
-        color: _usbReady ? const Color(0xFFF2FBF5) : Colors.white,
+        color: _usbReady ? p.successSoft : p.surface,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: _usbReady ? const Color(0xFFCDEBD8) : _kLine),
+        border: Border.all(
+          color: _usbReady
+              ? (p.isDark ? p.border : const Color(0xFFCDEBD8))
+              : p.border,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -472,7 +484,7 @@ class _SyncPageState extends State<SyncPage> {
               Icon(
                 _usbReady ? Icons.usb : Icons.usb_off,
                 size: 16,
-                color: _usbReady ? const Color(0xFF1F9254) : _kMuted,
+                color: _usbReady ? p.success : p.textTertiary,
               ),
               const SizedBox(width: 7),
               Expanded(
@@ -481,7 +493,7 @@ class _SyncPageState extends State<SyncPage> {
                   style: TextStyle(
                     fontSize: 13.5,
                     fontWeight: FontWeight.w600,
-                    color: _usbReady ? const Color(0xFF1F9254) : _kInk,
+                    color: _usbReady ? p.success : p.textPrimary,
                   ),
                 ),
               ),
@@ -489,12 +501,12 @@ class _SyncPageState extends State<SyncPage> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF0F3FF),
+                    color: p.accentSoft,
                     borderRadius: BorderRadius.circular(5),
                   ),
                   child: Text(
                     '当前：${kind.label}',
-                    style: const TextStyle(fontSize: 11, color: _kPrimary),
+                    style: TextStyle(fontSize: 11, color: p.accent),
                   ),
                 ),
             ],
@@ -504,22 +516,29 @@ class _SyncPageState extends State<SyncPage> {
             _usbReady
                 ? '手机正通过数据线连接电脑（地址 $currentUrl）'
                 : '插上数据线后，在电脑的 web/server 目录执行 npm run usb',
-            style: const TextStyle(fontSize: 12, height: 1.6, color: Color(0xFF777777)),
+            style: TextStyle(
+              fontSize: 12,
+              height: 1.6,
+              color: p.textSecondary,
+            ),
           ),
           if (_findMessage.isNotEmpty) ...[
             const SizedBox(height: 8),
             Row(
               children: [
-                const SizedBox(
+                SizedBox(
                   width: 12,
                   height: 12,
-                  child: CircularProgressIndicator(strokeWidth: 1.8, color: _kPrimary),
+                  child: CircularProgressIndicator(
+                    strokeWidth: 1.8,
+                    color: p.accent,
+                  ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     _findMessage,
-                    style: const TextStyle(fontSize: 12, color: _kMuted),
+                    style: TextStyle(fontSize: 12, color: p.textTertiary),
                   ),
                 ),
               ],
@@ -534,8 +553,8 @@ class _SyncPageState extends State<SyncPage> {
                   icon: const Icon(Icons.travel_explore, size: 15),
                   label: const Text('自动找电脑', style: TextStyle(fontSize: 13)),
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: _kPrimary,
-                    side: const BorderSide(color: _kPrimary),
+                    foregroundColor: p.accent,
+                    side: BorderSide(color: p.accent),
                     padding: const EdgeInsets.symmetric(vertical: 9),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   ),
@@ -548,8 +567,10 @@ class _SyncPageState extends State<SyncPage> {
                   icon: const Icon(Icons.usb, size: 15),
                   label: const Text('用 USB 连', style: TextStyle(fontSize: 13)),
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFF1F9254),
-                    side: const BorderSide(color: Color(0xFFCDEBD8)),
+                    foregroundColor: p.success,
+                    side: BorderSide(
+                      color: p.isDark ? p.border : const Color(0xFFCDEBD8),
+                    ),
                     padding: const EdgeInsets.symmetric(vertical: 9),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   ),
@@ -563,19 +584,20 @@ class _SyncPageState extends State<SyncPage> {
   }
 
   Widget _bullet(String text) {
+    final p = context.palette;
     return Padding(
       padding: const EdgeInsets.only(bottom: 4, left: 2),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Padding(
-            padding: EdgeInsets.only(top: 6, right: 6),
+          Padding(
+            padding: const EdgeInsets.only(top: 6, right: 6),
             child: SizedBox(
               width: 4,
               height: 4,
               child: DecoratedBox(
                 decoration: BoxDecoration(
-                  color: _kMuted,
+                  color: p.textTertiary,
                   shape: BoxShape.circle,
                 ),
               ),
@@ -584,7 +606,11 @@ class _SyncPageState extends State<SyncPage> {
           Expanded(
             child: Text(
               text,
-              style: const TextStyle(fontSize: 12.5, height: 1.6, color: Color(0xFF555555)),
+              style: TextStyle(
+                fontSize: 12.5,
+                height: 1.6,
+                color: p.textSecondary,
+              ),
             ),
           ),
         ],
@@ -593,6 +619,7 @@ class _SyncPageState extends State<SyncPage> {
   }
 
   Widget _buildServerForm() {
+    final p = context.palette;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -604,23 +631,23 @@ class _SyncPageState extends State<SyncPage> {
           autocorrect: false,
           decoration: InputDecoration(
             hintText: '留空则自动找（USB 隧道固定为 $_kUsbUrl）',
-            hintStyle: const TextStyle(color: Color(0xFFBBBBBB), fontSize: 13.5),
+            hintStyle: TextStyle(color: p.textTertiary, fontSize: 13.5),
             isDense: true,
             contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: _kLine),
+              borderSide: BorderSide(color: p.border),
             ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: _kLine),
+              borderSide: BorderSide(color: p.border),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: _kPrimary),
+              borderSide: BorderSide(color: p.accent),
             ),
           ),
-          style: const TextStyle(fontSize: 13.5, color: _kInk),
+          style: TextStyle(fontSize: 13.5, color: p.textPrimary),
         ),
         const SizedBox(height: 8),
         Row(
@@ -631,8 +658,8 @@ class _SyncPageState extends State<SyncPage> {
                 icon: const Icon(Icons.link, size: 15),
                 label: const Text('测试连接', style: TextStyle(fontSize: 13)),
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: _kPrimary,
-                  side: const BorderSide(color: _kPrimary),
+                  foregroundColor: p.accent,
+                  side: BorderSide(color: p.accent),
                   padding: const EdgeInsets.symmetric(vertical: 10),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),
@@ -648,8 +675,8 @@ class _SyncPageState extends State<SyncPage> {
                 ),
                 label: const Text('高级选项', style: TextStyle(fontSize: 13)),
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: _kMuted,
-                  side: const BorderSide(color: _kLine),
+                  foregroundColor: p.textTertiary,
+                  side: BorderSide(color: p.border),
                   padding: const EdgeInsets.symmetric(vertical: 10),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),
@@ -666,19 +693,19 @@ class _SyncPageState extends State<SyncPage> {
             obscureText: true,
             decoration: InputDecoration(
               hintText: '与 server/.env 里的 API_TOKEN 一致',
-              hintStyle: const TextStyle(color: Color(0xFFBBBBBB), fontSize: 13.5),
+              hintStyle: TextStyle(color: p.textTertiary, fontSize: 13.5),
               isDense: true,
               contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(8),
-                borderSide: const BorderSide(color: _kLine),
+                borderSide: BorderSide(color: p.border),
               ),
               enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(8),
-                borderSide: const BorderSide(color: _kLine),
+                borderSide: BorderSide(color: p.border),
               ),
             ),
-            style: const TextStyle(fontSize: 13.5, color: _kInk),
+            style: TextStyle(fontSize: 13.5, color: p.textPrimary),
           ),
           const SizedBox(height: 16),
           const _Label('设备 SQLite 版本'),
@@ -686,15 +713,15 @@ class _SyncPageState extends State<SyncPage> {
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
             decoration: BoxDecoration(
-              color: const Color(0xFFFAFAFA),
+              color: p.surfaceMuted,
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: _kLine),
+              border: Border.all(color: p.border),
             ),
             child: Text(
               _sqliteVersion.isEmpty ? '（读取中…）' : _sqliteVersion,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 12.5,
-                color: Color(0xFF666666),
+                color: p.textSecondary,
                 fontFamily: 'monospace',
               ),
             ),
@@ -710,15 +737,15 @@ class _SyncPageState extends State<SyncPage> {
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
               decoration: BoxDecoration(
-                color: const Color(0xFFFAFAFA),
+                color: p.surfaceMuted,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: _kLine),
+                border: Border.all(color: p.border),
               ),
               child: Text(
                 _deviceId.isEmpty ? '（生成中…）' : _deviceId,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 12.5,
-                  color: Color(0xFF666666),
+                  color: p.textSecondary,
                   fontFamily: 'monospace',
                 ),
               ),
@@ -730,15 +757,16 @@ class _SyncPageState extends State<SyncPage> {
   }
 
   Widget _buildSyncButton() {
+    final p = context.palette;
     return SizedBox(
       width: double.infinity,
       child: ElevatedButton.icon(
         onPressed: _busy ? null : _sync,
         icon: _busy
-            ? const SizedBox(
+            ? SizedBox(
                 width: 15,
                 height: 15,
-                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                child: CircularProgressIndicator(strokeWidth: 2, color: p.onAccent),
               )
             : const Icon(Icons.sync, size: 18),
         label: Text(
@@ -746,10 +774,10 @@ class _SyncPageState extends State<SyncPage> {
           style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
         ),
         style: ElevatedButton.styleFrom(
-          backgroundColor: _kPrimary,
-          foregroundColor: Colors.white,
-          disabledBackgroundColor: const Color(0xFFB9C4FF),
-          disabledForegroundColor: Colors.white,
+          backgroundColor: p.accent,
+          foregroundColor: p.onAccent,
+          disabledBackgroundColor: p.accent.withValues(alpha: 0.45),
+          disabledForegroundColor: p.onAccent,
           padding: const EdgeInsets.symmetric(vertical: 14),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
           elevation: 0,
@@ -759,6 +787,7 @@ class _SyncPageState extends State<SyncPage> {
   }
 
   Widget _buildProgress() {
+    final p = context.palette;
     final current = _progressCurrent;
     final total = _progressTotal;
     final ratio = (current != null && total != null && total > 0)
@@ -771,8 +800,8 @@ class _SyncPageState extends State<SyncPage> {
         LinearProgressIndicator(
           minHeight: 3,
           value: ratio,
-          backgroundColor: const Color(0xFFEEF1FF),
-          valueColor: const AlwaysStoppedAnimation<Color>(_kPrimary),
+          backgroundColor: p.accentSoft,
+          valueColor: AlwaysStoppedAnimation<Color>(p.accent),
         ),
         const SizedBox(height: 8),
         Row(
@@ -781,7 +810,7 @@ class _SyncPageState extends State<SyncPage> {
             Expanded(
               child: Text(
                 _progress,
-                style: const TextStyle(fontSize: 12.5, color: _kMuted),
+                style: TextStyle(fontSize: 12.5, color: p.textTertiary),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -789,9 +818,9 @@ class _SyncPageState extends State<SyncPage> {
             if (ratio != null)
               Text(
                 '${(ratio * 100).round()}%',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 12.5,
-                  color: _kPrimary,
+                  color: p.accent,
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -802,26 +831,29 @@ class _SyncPageState extends State<SyncPage> {
   }
 
   Widget _buildReport(SyncReport report) {
+    final p = context.palette;
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFFF7FDF9),
+        color: p.successSoft,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFFCDEFD8)),
+        border: Border.all(
+          color: p.isDark ? p.border : const Color(0xFFCDEFD8),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            children: const [
-              Icon(Icons.check_circle, size: 17, color: Color(0xFF10B981)),
-              SizedBox(width: 7),
+            children: [
+              Icon(Icons.check_circle, size: 17, color: p.success),
+              const SizedBox(width: 7),
               Text(
                 '同步完成',
                 style: TextStyle(
                   fontSize: 13.5,
                   fontWeight: FontWeight.w600,
-                  color: Color(0xFF065F46),
+                  color: p.success,
                 ),
               ),
             ],
@@ -839,9 +871,9 @@ class _SyncPageState extends State<SyncPage> {
           if (report.skippedTables > 0)
             _reportRow('跳过', '${report.skippedTables} 张本机不存在的表'),
           const SizedBox(height: 8),
-          const Text(
+          Text(
             '提示：同步完成后返回首页重新进入，列表才会显示最新数据。',
-            style: TextStyle(fontSize: 12, color: Color(0xFF059669), height: 1.6),
+            style: TextStyle(fontSize: 12, color: p.success, height: 1.6),
           ),
         ],
       ),
@@ -849,17 +881,18 @@ class _SyncPageState extends State<SyncPage> {
   }
 
   Widget _reportRow(String label, String value) {
+    final p = context.palette;
     return Padding(
       padding: const EdgeInsets.only(bottom: 4),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: const TextStyle(fontSize: 12.5, color: Color(0xFF555555))),
+          Text(label, style: TextStyle(fontSize: 12.5, color: p.textSecondary)),
           Text(
             value,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 12.5,
-              color: Color(0xFF065F46),
+              color: p.success,
               fontWeight: FontWeight.w500,
             ),
           ),
@@ -869,25 +902,28 @@ class _SyncPageState extends State<SyncPage> {
   }
 
   Widget _buildError(String message) {
+    final p = context.palette;
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFFFFF5F5),
+        color: p.dangerSoft,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFFFFD9D9)),
+        border: Border.all(
+          color: p.isDark ? p.border : const Color(0xFFFFD9D9),
+        ),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.error_outline, size: 17, color: Color(0xFFFF4D4F)),
+          Icon(Icons.error_outline, size: 17, color: p.danger),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
               message,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 12.5,
                 height: 1.65,
-                color: Color(0xFFB91C1C),
+                color: p.danger,
               ),
             ),
           ),
@@ -897,6 +933,7 @@ class _SyncPageState extends State<SyncPage> {
   }
 
   Widget _buildFooter() {
+    final p = context.palette;
     // 注意：首次进入时 _lastSyncAt 为 null，必须先判空再格式化
     final lastSyncAt = _lastSyncAt;
     final lastLine = lastSyncAt == null
@@ -910,23 +947,23 @@ class _SyncPageState extends State<SyncPage> {
         if (lastSyncAt != null) ...[
           Text(
             lastLine,
-            style: const TextStyle(fontSize: 12, color: _kMuted, height: 1.6),
+            style: TextStyle(fontSize: 12, color: p.textTertiary, height: 1.6),
           ),
           const SizedBox(height: 12),
         ],
         TextButton(
           onPressed: _busy ? null : _resetState,
           style: TextButton.styleFrom(padding: EdgeInsets.zero),
-          child: const Text(
+          child: Text(
             '重置同步状态',
-            style: TextStyle(fontSize: 12.5, color: _kMuted),
+            style: TextStyle(fontSize: 12.5, color: p.textTertiary),
           ),
         ),
         const SizedBox(height: 4),
-        const Text(
+        Text(
           '同步是双向的：服务端上被网页改过的内容会更新到手机，'
           '手机上新增的内容也会上传到服务端。API Key 等敏感字段不在同步范围内。',
-          style: TextStyle(fontSize: 12, color: Color(0xFFAAAAAA), height: 1.7),
+          style: TextStyle(fontSize: 12, color: p.textTertiary, height: 1.7),
         ),
       ],
     );
@@ -939,14 +976,15 @@ class _Label extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return Padding(
       padding: const EdgeInsets.only(bottom: 7),
       child: Text(
         text,
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 12.5,
           fontWeight: FontWeight.w600,
-          color: Color(0xFF555555),
+          color: p.textSecondary,
         ),
       ),
     );

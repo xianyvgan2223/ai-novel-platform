@@ -16,6 +16,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../../../core/config/deepseek_models.dart';
+import 'package:deepseekapp/core/theme/app_palette.dart';
 import '../../../../../core/widgets/settings_kit.dart';
 import '../../../shared/data/outline_db_helper.dart';
 import '../../../shared/domain/outline_setting.dart';
@@ -113,7 +114,7 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
       title: '编辑系统提示',
       controller: _systemCtrl,
       hint: _defaultSystemPrompt(),
-      accentColor: kSettingsTitle,
+      accentColor: context.palette.textPrimary,
     );
   }
 
@@ -125,13 +126,14 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     // 一键生成大纲专属的克制中性配色：不改 settings_kit 默认值，
     // 只在本页子树内把强调色换成炭黑 + 中性灰。
     return SettingsAccent(
-      color: kSettingsTitle,
-      soft: kSettingsChipBg,
+      color: p.textPrimary,
+      soft: p.surfaceMuted,
       child: Scaffold(
-        backgroundColor: kSettingsPageBg,
+        backgroundColor: p.background,
         appBar: SettingsAppBar(
           title: '大纲生成设置',
           // 加载中保存按钮显示为禁用态（与改造前 AppBar 的禁用语义一致）。
@@ -139,8 +141,8 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
           saveEnabled: !_loading,
         ),
         body: _loading
-            ? const Center(
-                child: CircularProgressIndicator(color: kSettingsSubtitle),
+            ? Center(
+                child: CircularProgressIndicator(color: p.textTertiary),
               )
             : ListView(
                 padding: EdgeInsets.only(

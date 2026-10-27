@@ -2,6 +2,7 @@
 // 跑团角色卡创建页 — 六维属性 / 职业 / 技能熟练
 
 import 'package:flutter/material.dart';
+import 'package:deepseekapp/core/theme/app_palette.dart';
 import '../../model/character_sheet.dart';
 import '../../data/trpg_db_service.dart';
 import 'trpg_game_page.dart';
@@ -121,34 +122,35 @@ class _TrpgCharacterCreatePageState extends State<TrpgCharacterCreatePage> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
+      backgroundColor: p.background,
       appBar: AppBar(
         toolbarHeight: 44,
-        backgroundColor: Colors.white,
+        backgroundColor: p.surface,
         elevation: 0,
         scrolledUnderElevation: 0,
-        title: const Text(
+        title: Text(
           '创建角色',
           style: TextStyle(
             fontSize: 15,
             fontWeight: FontWeight.w600,
-            color: Color(0xFF333333),
+            color: p.textPrimary,
           ),
         ),
         centerTitle: true,
         actions: [
           TextButton(
             onPressed: _save,
-            child: const Text(
+            child: Text(
               '开始冒险',
-              style: TextStyle(fontSize: 13, color: Color(0xFF4D6BFE)),
+              style: TextStyle(fontSize: 13, color: p.accent),
             ),
           ),
         ],
-        bottom: const PreferredSize(
-          preferredSize: Size.fromHeight(1),
-          child: Divider(height: 1, color: Color(0xFFEEEEEE)),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: Divider(height: 1, color: p.border),
         ),
       ),
       body: ListView(
@@ -192,7 +194,7 @@ class _TrpgCharacterCreatePageState extends State<TrpgCharacterCreatePage> {
                     icon: const Icon(Icons.casino, size: 16),
                     label: const Text('随机生成（4d6取高3）'),
                     style: TextButton.styleFrom(
-                      foregroundColor: const Color(0xFF4D6BFE),
+                      foregroundColor: p.accent,
                       padding: const EdgeInsets.symmetric(horizontal: 8),
                       minimumSize: const Size(0, 32),
                     ),
@@ -222,8 +224,8 @@ class _TrpgCharacterCreatePageState extends State<TrpgCharacterCreatePage> {
                       _skilledSkills.remove(e.key);
                     }
                   }),
-                  selectedColor: const Color(0xFF4D6BFE).withValues(alpha: 0.15),
-                  checkmarkColor: const Color(0xFF4D6BFE),
+                  selectedColor: p.accent.withValues(alpha: 0.15),
+                  checkmarkColor: p.accent,
                   visualDensity: VisualDensity.compact,
                 );
               }).toList(),
@@ -235,12 +237,12 @@ class _TrpgCharacterCreatePageState extends State<TrpgCharacterCreatePage> {
             TextField(
               controller: _backgroundCtrl,
               maxLines: 4,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 hintText: '角色的背景、动机等（喂给主持人）',
-                hintStyle: TextStyle(fontSize: 13, color: Color(0xFFBBBBBB)),
+                hintStyle: TextStyle(fontSize: 13, color: p.textTertiary),
                 border: InputBorder.none,
               ),
-              style: const TextStyle(fontSize: 13, color: Color(0xFF333333)),
+              style: TextStyle(fontSize: 13, color: p.textPrimary),
             ),
           ),
           const SizedBox(height: 24),
@@ -249,8 +251,8 @@ class _TrpgCharacterCreatePageState extends State<TrpgCharacterCreatePage> {
             child: ElevatedButton(
               onPressed: _save,
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF4D6BFE),
-                foregroundColor: Colors.white,
+                backgroundColor: p.accent,
+                foregroundColor: p.onAccent,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10),
                 ),
@@ -265,31 +267,36 @@ class _TrpgCharacterCreatePageState extends State<TrpgCharacterCreatePage> {
   }
 
   Widget _sectionTitle(String title) {
+    final p = context.palette;
     return Padding(
       padding: const EdgeInsets.only(left: 4, bottom: 8),
       child: Text(
         title,
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 12,
           fontWeight: FontWeight.w600,
-          color: Color(0xFF666666),
+          color: p.textSecondary,
         ),
       ),
     );
   }
 
   Widget _card(Widget child) {
+    final p = context.palette;
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: p.surface,
         borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 6,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        border: p.isDark ? Border.all(color: p.border) : null,
+        boxShadow: p.isDark
+            ? null
+            : [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.04),
+                  blurRadius: 6,
+                  offset: const Offset(0, 2),
+                ),
+              ],
       ),
       padding: const EdgeInsets.all(14),
       child: child,
@@ -318,9 +325,10 @@ class _TrpgCharacterCreatePageState extends State<TrpgCharacterCreatePage> {
     List<String> items,
     ValueChanged<String> onChanged,
   ) {
+    final p = context.palette;
     return Row(
       children: [
-        Text(label, style: const TextStyle(fontSize: 13, color: Color(0xFF666666))),
+        Text(label, style: TextStyle(fontSize: 13, color: p.textSecondary)),
         const SizedBox(width: 12),
         Expanded(
           child: DropdownButtonFormField<String>(
@@ -329,7 +337,7 @@ class _TrpgCharacterCreatePageState extends State<TrpgCharacterCreatePage> {
                 .map((e) => DropdownMenuItem(value: e, child: Text(e)))
                 .toList(),
             onChanged: (v) => onChanged(v ?? value),
-            style: const TextStyle(fontSize: 13, color: Color(0xFF333333)),
+            style: TextStyle(fontSize: 13, color: p.textPrimary),
             decoration: const InputDecoration(
               isDense: true,
               contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -342,16 +350,17 @@ class _TrpgCharacterCreatePageState extends State<TrpgCharacterCreatePage> {
   }
 
   Widget _infoRow(String label, String value) {
+    final p = context.palette;
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(label, style: const TextStyle(fontSize: 13, color: Color(0xFF666666))),
+        Text(label, style: TextStyle(fontSize: 13, color: p.textSecondary)),
         Text(
           value,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 13,
             fontWeight: FontWeight.w600,
-            color: Color(0xFF333333),
+            color: p.textPrimary,
           ),
         ),
       ],
@@ -359,6 +368,7 @@ class _TrpgCharacterCreatePageState extends State<TrpgCharacterCreatePage> {
   }
 
   Widget _abilitySlider(String key, String label) {
+    final p = context.palette;
     final value = _abilities[key]!;
     final mod = CharacterSheet.modifierOf(value);
     return Padding(
@@ -376,7 +386,7 @@ class _TrpgCharacterCreatePageState extends State<TrpgCharacterCreatePage> {
               max: 18,
               divisions: 15,
               label: '$value',
-              activeColor: const Color(0xFF4D6BFE),
+              activeColor: p.accent,
               onChanged: (v) => setState(() => _abilities[key] = v.round()),
             ),
           ),
@@ -385,10 +395,10 @@ class _TrpgCharacterCreatePageState extends State<TrpgCharacterCreatePage> {
             child: Text(
               '$value (${mod >= 0 ? '+' : ''}$mod)',
               textAlign: TextAlign.right,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
-                color: Color(0xFF333333),
+                color: p.textPrimary,
               ),
             ),
           ),
@@ -398,11 +408,12 @@ class _TrpgCharacterCreatePageState extends State<TrpgCharacterCreatePage> {
   }
 
   Widget _armorSlider() {
+    final p = context.palette;
     return Row(
       children: [
-        const Text(
+        Text(
           '护甲加值',
-          style: TextStyle(fontSize: 13, color: Color(0xFF666666)),
+          style: TextStyle(fontSize: 13, color: p.textSecondary),
         ),
         Expanded(
           child: Slider(
@@ -411,16 +422,16 @@ class _TrpgCharacterCreatePageState extends State<TrpgCharacterCreatePage> {
             max: 5,
             divisions: 5,
             label: '$_armorBonus',
-            activeColor: const Color(0xFF4D6BFE),
+            activeColor: p.accent,
             onChanged: (v) => setState(() => _armorBonus = v.round()),
           ),
         ),
         Text(
           '$_armorBonus',
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 12,
             fontWeight: FontWeight.w600,
-            color: Color(0xFF333333),
+            color: p.textPrimary,
           ),
         ),
       ],

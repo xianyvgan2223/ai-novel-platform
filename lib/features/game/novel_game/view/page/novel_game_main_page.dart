@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:deepseekapp/core/theme/app_palette.dart';
 import 'package:deepseekapp/core/config/route_names.dart';
 import 'package:deepseekapp/features/chat/presentation/settings_page.dart';
 import 'package:deepseekapp/features/game/novel_game/model/entity/character_entity.dart';
@@ -100,20 +101,21 @@ class _NovelGameMainPageState extends State<NovelGameMainPage> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     final characters = widget.controller.characters;
     final copies = widget.controller.copies;
     final runningCopy = widget.controller.runningCopy;
     final unreadCount = widget.controller.unreadRecordCount;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
+      backgroundColor: p.background,
       body: SafeArea(
         child: Column(
           children: [
             _buildTopBar(unreadCount),
             _buildDevNotice(),
             Expanded(flex: 3, child: _buildCharacterList(characters)),
-            Divider(height: 1, color: Colors.grey.shade300),
+            Divider(height: 1, color: p.border),
             Expanded(flex: 7, child: _buildCopyList(copies, runningCopy)),
             if (runningCopy != null)
               SizedBox(
@@ -129,17 +131,18 @@ class _NovelGameMainPageState extends State<NovelGameMainPage> {
   }
 
   Widget _buildTopBar(int unreadCount) {
+    final p = context.palette;
     return Container(
       padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
-      color: Colors.white,
+      color: p.surface,
       child: Row(
         children: [
-          const Text(
+          Text(
             '小说创作',
             style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.bold,
-              color: Color(0xFF333333),
+              color: p.textPrimary,
             ),
           ),
           const Spacer(),
@@ -171,17 +174,27 @@ class _NovelGameMainPageState extends State<NovelGameMainPage> {
   }
 
   Widget _buildDevNotice() {
+    final p = context.palette;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      color: const Color(0xFFFFF8E1),
-      child: const Row(
+      color: p.isDark
+          ? p.warning.withValues(alpha: 0.14)
+          : const Color(0xFFFFF8E1),
+      child: Row(
         children: [
-          Icon(Icons.construction, size: 14, color: Color(0xFFE6A817)),
-          SizedBox(width: 6),
+          Icon(
+            Icons.construction,
+            size: 14,
+            color: p.isDark ? p.warning : const Color(0xFFE6A817),
+          ),
+          const SizedBox(width: 6),
           Text(
             '功能开发中，部分功能可能不稳定',
-            style: TextStyle(fontSize: 11, color: Color(0xFFB8860B)),
+            style: TextStyle(
+              fontSize: 11,
+              color: p.isDark ? p.warning : const Color(0xFFB8860B),
+            ),
           ),
         ],
       ),
@@ -189,28 +202,29 @@ class _NovelGameMainPageState extends State<NovelGameMainPage> {
   }
 
   Widget _buildCharacterList(List<CharacterEntity> characters) {
+    final p = context.palette;
     return Padding(
       padding: const EdgeInsets.fromLTRB(4, 3, 4, 2),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Padding(
-            padding: EdgeInsets.only(left: 2, bottom: 2),
+          Padding(
+            padding: const EdgeInsets.only(left: 2, bottom: 2),
             child: Text(
               '人物卡',
               style: TextStyle(
                 fontSize: 10,
                 fontWeight: FontWeight.w600,
-                color: Color(0xFF666666),
+                color: p.textSecondary,
               ),
             ),
           ),
           Expanded(
             child: characters.isEmpty
-                ? const Center(
+                ? Center(
                     child: Text(
                       '暂无人物',
-                      style: TextStyle(color: Color(0xFFCCCCCC), fontSize: 10),
+                      style: TextStyle(color: p.textTertiary, fontSize: 10),
                     ),
                   )
                 : SingleChildScrollView(
@@ -236,28 +250,29 @@ class _NovelGameMainPageState extends State<NovelGameMainPage> {
   }
 
   Widget _buildCopyList(List<CopyEntity> copies, CopyEntity? runningCopy) {
+    final p = context.palette;
     return Padding(
       padding: const EdgeInsets.fromLTRB(4, 2, 4, 3),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Padding(
-            padding: EdgeInsets.only(left: 2, bottom: 2),
+          Padding(
+            padding: const EdgeInsets.only(left: 2, bottom: 2),
             child: Text(
               '副本列表',
               style: TextStyle(
                 fontSize: 10,
                 fontWeight: FontWeight.w600,
-                color: Color(0xFF666666),
+                color: p.textSecondary,
               ),
             ),
           ),
           Expanded(
             child: copies.isEmpty
-                ? const Center(
+                ? Center(
                     child: Text(
                       '暂无副本',
-                      style: TextStyle(color: Color(0xFFCCCCCC), fontSize: 10),
+                      style: TextStyle(color: p.textTertiary, fontSize: 10),
                     ),
                   )
                 : SingleChildScrollView(
@@ -301,17 +316,18 @@ class _ActionButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return GestureDetector(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
         decoration: BoxDecoration(
-          color: const Color(0xFF4A90D9),
+          color: p.accent,
           borderRadius: BorderRadius.circular(3),
         ),
         child: Text(
           label,
-          style: const TextStyle(color: Colors.white, fontSize: 10),
+          style: TextStyle(color: p.onAccent, fontSize: 10),
         ),
       ),
     );

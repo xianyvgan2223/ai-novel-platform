@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:deepseekapp/core/theme/app_palette.dart';
 
 class AiLoadingWidget extends StatelessWidget {
   final String? message;
@@ -7,25 +8,27 @@ class AiLoadingWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
+    final foreground = p.isDark ? p.textPrimary : Colors.white;
     return Container(
-      color: Colors.black54,
+      color: p.isDark ? p.surfaceElevated : Colors.black54,
       padding: const EdgeInsets.symmetric(horizontal: 12),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const SizedBox(
+          SizedBox(
             width: 14,
             height: 14,
             child: CircularProgressIndicator(
               strokeWidth: 1.5,
-              color: Colors.white,
+              color: foreground,
             ),
           ),
           if (message != null) ...[
             const SizedBox(width: 8),
             Text(
               message!,
-              style: const TextStyle(color: Colors.white, fontSize: 11),
+              style: TextStyle(color: foreground, fontSize: 11),
             ),
           ],
         ],

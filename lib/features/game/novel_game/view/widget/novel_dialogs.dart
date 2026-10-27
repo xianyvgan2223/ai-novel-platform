@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:deepseekapp/core/theme/app_palette.dart';
 
 /// 创建副本弹窗
 class CreateCopyDialog extends StatefulWidget {
@@ -22,7 +23,9 @@ class _CreateCopyDialogState extends State<CreateCopyDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return AlertDialog(
+      backgroundColor: p.surfaceElevated,
       titlePadding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
       title: const Text('新副本', style: TextStyle(fontSize: 13)),
       contentPadding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
@@ -158,7 +161,9 @@ class _CreateCharacterDialogState extends State<CreateCharacterDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return AlertDialog(
+      backgroundColor: p.surfaceElevated,
       titlePadding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
       title: const Text('新人物', style: TextStyle(fontSize: 13)),
       contentPadding: const EdgeInsets.fromLTRB(16, 8, 16, 0),

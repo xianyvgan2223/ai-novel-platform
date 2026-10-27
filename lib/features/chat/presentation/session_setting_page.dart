@@ -17,6 +17,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/theme/app_palette.dart';
 import '../../../core/widgets/settings_kit.dart';
 import '../application/chat_controller.dart'; // chatProvider
 import '../data/chat_session_service.dart';
@@ -49,6 +50,7 @@ class _SessionSettingsPageState extends ConsumerState<SessionSettingsPage> {
     final chatCtrl = ref.read(chatProvider);
     final session = chatCtrl.currentSession;
     if (session == null) return;
+    final p = context.palette;
 
     final newPrompt = _controller.text.trim();
 
@@ -63,10 +65,10 @@ class _SessionSettingsPageState extends ConsumerState<SessionSettingsPage> {
       } catch (_) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('保存失败'),
-              backgroundColor: kSettingsDanger,
-              duration: Duration(seconds: 1),
+            SnackBar(
+              content: const Text('保存失败'),
+              backgroundColor: p.danger,
+              duration: const Duration(seconds: 1),
             ),
           );
         }
@@ -76,10 +78,10 @@ class _SessionSettingsPageState extends ConsumerState<SessionSettingsPage> {
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('会话设置已保存'),
-          backgroundColor: kSettingsPrimary,
-          duration: Duration(seconds: 1),
+        SnackBar(
+          content: const Text('会话设置已保存'),
+          backgroundColor: p.accent,
+          duration: const Duration(seconds: 1),
         ),
       );
       Navigator.of(context).pop();
@@ -102,9 +104,10 @@ class _SessionSettingsPageState extends ConsumerState<SessionSettingsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     final filled = _controller.text.trim().isNotEmpty;
     return Scaffold(
-      backgroundColor: kSettingsPageBg,
+      backgroundColor: p.background,
       appBar: SettingsAppBar(title: '会话设置', onSave: _onSave),
       body: ListView(
         padding: EdgeInsets.only(
@@ -132,9 +135,8 @@ class _SessionSettingsPageState extends ConsumerState<SessionSettingsPage> {
                 minLines: 5,
                 maxLines: 10,
                 statusText: filled ? '已填写' : '未填写',
-                statusColor: filled ? kSettingsSuccess : kSettingsValue,
-                statusBackground:
-                    filled ? kSettingsSuccessSoft : kSettingsChipBg,
+                statusColor: filled ? p.success : p.textSecondary,
+                statusBackground: filled ? p.successSoft : p.surfaceMuted,
                 onExpand: _openEnlargeEditor,
                 // 输入时刷新「已填写 / 未填写」徽标；保存仍从 controller 读。
                 onChanged: (_) => setState(() {}),

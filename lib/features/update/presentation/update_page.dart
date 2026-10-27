@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:deepseekapp/core/theme/app_palette.dart';
 import '../../../core/config/app_version.dart';
 import '../data/app_update_service.dart';
 
@@ -147,6 +148,7 @@ class _UpdatePageState extends State<UpdatePage> {
   }
 
   Widget _currentVersionCard(BuildContext context) {
+    final p = context.palette;
     return _panel(
       context,
       child: Row(
@@ -161,7 +163,7 @@ class _UpdatePageState extends State<UpdatePage> {
                 const SizedBox(height: 2),
                 Text(
                   'v$kAppVersion${_currentVersionCode > 0 ? '（versionCode $_currentVersionCode）' : ''}',
-                  style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+                  style: TextStyle(color: p.textSecondary, fontSize: 13),
                 ),
               ],
             ),
@@ -187,6 +189,7 @@ class _UpdatePageState extends State<UpdatePage> {
   }
 
   Widget _errorCard(BuildContext context) {
+    final p = context.palette;
     return _panel(
       context,
       child: Column(
@@ -194,13 +197,13 @@ class _UpdatePageState extends State<UpdatePage> {
         children: [
           Row(
             children: [
-              Icon(Icons.error_outline_rounded, color: Colors.red.shade600),
+              Icon(Icons.error_outline_rounded, color: p.danger),
               const SizedBox(width: 8),
               const Text('检查失败', style: TextStyle(fontWeight: FontWeight.w600)),
             ],
           ),
           const SizedBox(height: 10),
-          Text('$_error', style: TextStyle(color: Colors.grey.shade700)),
+          Text('$_error', style: TextStyle(color: p.textSecondary)),
           const SizedBox(height: 14),
           Align(
             alignment: Alignment.centerRight,
@@ -212,11 +215,12 @@ class _UpdatePageState extends State<UpdatePage> {
   }
 
   Widget _latestCard(AppUpdateInfo info) {
+    final p = context.palette;
     return _panel(
       context,
       child: Row(
         children: [
-          Icon(Icons.check_circle_rounded, color: Colors.green.shade600, size: 26),
+          Icon(Icons.check_circle_rounded, color: p.success, size: 26),
           const SizedBox(width: 12),
           Expanded(
             child: Text(
@@ -230,6 +234,7 @@ class _UpdatePageState extends State<UpdatePage> {
   }
 
   Widget _updateCard(BuildContext context, AppUpdateInfo info) {
+    final p = context.palette;
     return _panel(
       context,
       child: Column(
@@ -237,7 +242,7 @@ class _UpdatePageState extends State<UpdatePage> {
         children: [
           Row(
             children: [
-              Icon(Icons.system_update_rounded, color: Theme.of(context).colorScheme.primary),
+              Icon(Icons.system_update_rounded, color: p.accent),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
@@ -249,12 +254,12 @@ class _UpdatePageState extends State<UpdatePage> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
-                    color: Colors.red.shade50,
+                    color: p.dangerSoft,
                     borderRadius: BorderRadius.circular(999),
                   ),
                   child: Text(
                     '必须更新',
-                    style: TextStyle(color: Colors.red.shade700, fontSize: 12),
+                    style: TextStyle(color: p.danger, fontSize: 12),
                   ),
                 ),
             ],
@@ -262,7 +267,7 @@ class _UpdatePageState extends State<UpdatePage> {
           const SizedBox(height: 10),
           Text(
             '安装包 ${info.sizeText} · versionCode ${info.versionCode}',
-            style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+            style: TextStyle(color: p.textSecondary, fontSize: 13),
           ),
           if (info.changelog.trim().isNotEmpty) ...[
             const SizedBox(height: 14),
@@ -270,7 +275,7 @@ class _UpdatePageState extends State<UpdatePage> {
               width: double.infinity,
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                color: p.surfaceMuted,
                 borderRadius: BorderRadius.circular(10),
               ),
               child: SelectableText(
@@ -290,7 +295,7 @@ class _UpdatePageState extends State<UpdatePage> {
               _progress > 0
                   ? '正在下载 ${(_progress * 100).toStringAsFixed(1)}%'
                   : '正在连接电脑…',
-              style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+              style: TextStyle(color: p.textSecondary, fontSize: 13),
             ),
           ] else
             SizedBox(
@@ -307,12 +312,13 @@ class _UpdatePageState extends State<UpdatePage> {
   }
 
   Widget _panel(BuildContext context, {required Widget child}) {
+    final p = context.palette;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
+        color: p.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.withValues(alpha: 0.18)),
+        border: Border.all(color: p.border),
       ),
       child: child,
     );

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:deepseekapp/core/theme/app_palette.dart';
 import '../../model/entity/copy_entity.dart';
 import '../../model/entity/copy_record_entity.dart';
 import '../../model/entity/skill_entity.dart';
@@ -74,15 +75,16 @@ class _CopyDetailPageState extends State<CopyDetailPage> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
+      backgroundColor: p.background,
       appBar: AppBar(
         title: Text(
           _copy?.copyName ?? '副本详情',
           style: const TextStyle(fontSize: 15),
         ),
-        backgroundColor: Colors.white,
-        elevation: 0.5,
+        backgroundColor: p.surface,
+        elevation: p.isDark ? 0 : 0.5,
         centerTitle: true,
       ),
       body: _loading
@@ -92,11 +94,12 @@ class _CopyDetailPageState extends State<CopyDetailPage> {
   }
 
   Widget _buildContent() {
+    final p = context.palette;
     if (_latestRecord == null && _charStories.isEmpty) {
-      return const Center(
+      return Center(
         child: Text(
           '暂无经历数据',
-          style: TextStyle(fontSize: 13, color: Color(0xFF999999)),
+          style: TextStyle(fontSize: 13, color: p.textTertiary),
         ),
       );
     }
@@ -112,14 +115,14 @@ class _CopyDetailPageState extends State<CopyDetailPage> {
         ],
         if (_charStories.isNotEmpty) ...[
           const SizedBox(height: 8),
-          const Padding(
-            padding: EdgeInsets.only(left: 2, bottom: 4),
+          Padding(
+            padding: const EdgeInsets.only(left: 2, bottom: 4),
             child: Text(
               '角色经历',
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
-                color: Color(0xFF333333),
+                color: p.textPrimary,
               ),
             ),
           ),
@@ -133,11 +136,13 @@ class _CopyDetailPageState extends State<CopyDetailPage> {
   }
 
   Widget _buildInfoCard() {
+    final p = context.palette;
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: p.surface,
         borderRadius: BorderRadius.circular(8),
+        border: p.isDark ? Border.all(color: p.border) : null,
       ),
       child: Row(
         children: [
@@ -147,18 +152,18 @@ class _CopyDetailPageState extends State<CopyDetailPage> {
               children: [
                 Text(
                   _copy!.copyName,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.bold,
-                    color: Color(0xFF333333),
+                    color: p.textPrimary,
                   ),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   _formatTime(_copy!.createTime),
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 11,
-                    color: Color(0xFF999999),
+                    color: p.textTertiary,
                   ),
                 ),
               ],
@@ -168,12 +173,12 @@ class _CopyDetailPageState extends State<CopyDetailPage> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
-                color: const Color(0xFF4CAF50).withValues(alpha: 0.1),
+                color: p.successSoft,
                 borderRadius: BorderRadius.circular(4),
               ),
-              child: const Text(
+              child: Text(
                 '已生成',
-                style: TextStyle(fontSize: 10, color: Color(0xFF4CAF50)),
+                style: TextStyle(fontSize: 10, color: p.success),
               ),
             ),
         ],
@@ -182,29 +187,31 @@ class _CopyDetailPageState extends State<CopyDetailPage> {
   }
 
   Widget _buildSectionCard(String title, String content) {
+    final p = context.palette;
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: p.surface,
         borderRadius: BorderRadius.circular(8),
+        border: p.isDark ? Border.all(color: p.border) : null,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             title,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w600,
-              color: Color(0xFF333333),
+              color: p.textPrimary,
             ),
           ),
           const SizedBox(height: 8),
           Text(
             content,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 12,
-              color: Color(0xFF555555),
+              color: p.textSecondary,
               height: 1.6,
             ),
           ),
@@ -214,11 +221,19 @@ class _CopyDetailPageState extends State<CopyDetailPage> {
   }
 
   Widget _buildCharStoryCard(_CharStoryInfo info) {
+    final p = context.palette;
+    final skillColor = p.isDark
+        ? const Color(0xFFFFB74D)
+        : const Color(0xFFE65100);
+    final equipColor = p.isDark
+        ? const Color(0xFFCE93D8)
+        : const Color(0xFF6A1B9A);
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: p.surface,
         borderRadius: BorderRadius.circular(8),
+        border: p.isDark ? Border.all(color: p.border) : null,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -229,26 +244,26 @@ class _CopyDetailPageState extends State<CopyDetailPage> {
                 width: 24,
                 height: 24,
                 decoration: BoxDecoration(
-                  color: const Color(0xFF4A90D9).withValues(alpha: 0.15),
+                  color: p.accent.withValues(alpha: 0.15),
                   shape: BoxShape.circle,
                 ),
                 alignment: Alignment.center,
                 child: Text(
                   info.charName.isNotEmpty ? info.charName[0] : '?',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.bold,
-                    color: Color(0xFF4A90D9),
+                    color: p.accent,
                   ),
                 ),
               ),
               const SizedBox(width: 8),
               Text(
                 info.charName,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
-                  color: Color(0xFF333333),
+                  color: p.textPrimary,
                 ),
               ),
             ],
@@ -257,21 +272,21 @@ class _CopyDetailPageState extends State<CopyDetailPage> {
             const SizedBox(height: 8),
             Text(
               info.story,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 12,
-                color: Color(0xFF555555),
+                color: p.textSecondary,
                 height: 1.6,
               ),
             ),
           ],
           if (info.skills.isNotEmpty) ...[
             const SizedBox(height: 8),
-            const Text(
+            Text(
               '技能',
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w600,
-                color: Color(0xFF888888),
+                color: p.textTertiary,
               ),
             ),
             const SizedBox(height: 4),
@@ -285,16 +300,18 @@ class _CopyDetailPageState extends State<CopyDetailPage> {
                     vertical: 2,
                   ),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFF9800).withValues(alpha: 0.1),
+                    color: const Color(0xFFFF9800).withValues(
+                      alpha: p.isDark ? 0.18 : 0.1,
+                    ),
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: Text(
                     s.skillDesc != null && s.skillDesc!.isNotEmpty
                         ? '${s.skillName}: ${s.skillDesc}'
                         : s.skillName,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 10,
-                      color: Color(0xFFE65100),
+                      color: skillColor,
                     ),
                   ),
                 );
@@ -303,12 +320,12 @@ class _CopyDetailPageState extends State<CopyDetailPage> {
           ],
           if (info.equipment.isNotEmpty) ...[
             const SizedBox(height: 8),
-            const Text(
+            Text(
               '装备',
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w600,
-                color: Color(0xFF888888),
+                color: p.textTertiary,
               ),
             ),
             const SizedBox(height: 4),
@@ -322,16 +339,18 @@ class _CopyDetailPageState extends State<CopyDetailPage> {
                     vertical: 2,
                   ),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF9C27B0).withValues(alpha: 0.1),
+                    color: const Color(0xFF9C27B0).withValues(
+                      alpha: p.isDark ? 0.18 : 0.1,
+                    ),
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: Text(
                     e.equipAttr != null && e.equipAttr!.isNotEmpty
                         ? '${e.equipName}: ${e.equipAttr}'
                         : e.equipName,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 10,
-                      color: Color(0xFF6A1B9A),
+                      color: equipColor,
                     ),
                   ),
                 );

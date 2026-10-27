@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
+import 'package:deepseekapp/core/theme/app_palette.dart';
 import '../../controller/outline_edit_controller.dart';
 import '../../model/outline_edit_chat_message.dart';
 import '../../model/outline_edit_draft.dart';
@@ -151,6 +152,7 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
   }
 
   Widget _buildHeader(OutlineEditController controller) {
+    final p = context.palette;
     final draft = controller.aiTargetDraft;
     final String label;
     if (draft == null) {
@@ -168,7 +170,7 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
       padding: const EdgeInsets.fromLTRB(16, 10, 4, 6),
       child: Row(
         children: [
-          const Icon(Icons.auto_awesome, size: 18, color: Color(0xFF4D6BFE)),
+          Icon(Icons.auto_awesome, size: 18, color: p.accent),
           const SizedBox(width: 6),
           const Text(
             'AI 生成大纲',
@@ -178,16 +180,16 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
           Expanded(
             child: Text(
               label.isEmpty ? '' : '当前：$label',
-              style: const TextStyle(fontSize: 11, color: Color(0xFF999999)),
+              style: TextStyle(fontSize: 11, color: p.textTertiary),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
           ),
           IconButton(
-            icon: const Icon(
+            icon: Icon(
               Icons.delete_sweep_outlined,
               size: 20,
-              color: Color(0xFF999999),
+              color: p.textTertiary,
             ),
             tooltip: '清空对话',
             onPressed: controller.chatting ? null : controller.clearChat,
@@ -203,15 +205,15 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
                   controller.injectSelectedEvents ||
                       controller.injectPriorMajors ||
                       controller.injectNextMajor
-                  ? const Color(0xFF4D6BFE)
-                  : const Color(0xFF999999),
+                  ? p.accent
+                  : p.textTertiary,
             ),
             tooltip: _optionsExpanded ? '收起选项' : '展开选项',
             onPressed: () =>
                 setState(() => _optionsExpanded = !_optionsExpanded),
           ),
           IconButton(
-            icon: const Icon(Icons.close, size: 20, color: Color(0xFF666666)),
+            icon: Icon(Icons.close, size: 20, color: p.textSecondary),
             tooltip: '关闭',
             onPressed: () => Navigator.of(context).pop(),
           ),
@@ -299,9 +301,10 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
     required bool value,
     required ValueChanged<bool> onChanged,
   }) {
+    final p = context.palette;
     return Material(
       // 底色交给 Material，InkWell 的水波才不会被自己盖住
-      color: value ? const Color(0xFFF3F6FF) : Colors.white,
+      color: value ? p.accentSoft : p.surface,
       child: InkWell(
         onTap: () => onChanged(!value),
         child: Padding(
@@ -311,7 +314,7 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
               Icon(
                 icon,
                 size: 15,
-                color: value ? const Color(0xFF4D6BFE) : const Color(0xFFBBBBBB),
+                color: value ? p.accent : p.textTertiary,
               ),
               const SizedBox(width: 6),
               Expanded(
@@ -323,17 +326,15 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w500,
-                        color: value
-                            ? const Color(0xFF4D6BFE)
-                            : const Color(0xFF777777),
+                        color: value ? p.accent : p.textSecondary,
                       ),
                     ),
                     Text(
                       subtitle,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 10,
                         height: 1.3,
-                        color: Color(0xFFAAAAAA),
+                        color: p.textTertiary,
                       ),
                     ),
                   ],
@@ -352,6 +353,7 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
   /// 内容随编辑实时更新，整条气泡随对话列表一起滚动（不固定在上方），
   /// 长概要也能完整看到。
   Widget _buildOutlineBubble(OutlineEditDraft draft) {
+    final p = context.palette;
     final summary = draft.summary;
     return Align(
       alignment: Alignment.centerLeft,
@@ -360,44 +362,44 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
         margin: const EdgeInsets.only(bottom: 10, right: 20),
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
         decoration: BoxDecoration(
-          color: const Color(0xFFEFF3FF),
+          color: p.accentSoft,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: const Color(0xFFD8E0FF)),
+          border: Border.all(color: p.borderStrong),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                const Icon(
+                Icon(
                   Icons.description_outlined,
                   size: 13,
-                  color: Color(0xFF4D6BFE),
+                  color: p.accent,
                 ),
                 const SizedBox(width: 4),
-                const Text(
+                Text(
                   '当前大纲',
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
-                    color: Color(0xFF4D6BFE),
+                    color: p.accent,
                   ),
                 ),
                 const Spacer(),
                 if (draft.isDirty)
-                  const Text(
+                  Text(
                     '未保存',
-                    style: TextStyle(fontSize: 10, color: Color(0xFFFF9800)),
+                    style: TextStyle(fontSize: 10, color: p.warning),
                   ),
               ],
             ),
             const SizedBox(height: 6),
             Text(
               draft.title.isEmpty ? '（未命名章节）' : draft.title,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
-                color: Color(0xFF333333),
+                color: p.textPrimary,
               ),
             ),
             const SizedBox(height: 4),
@@ -409,8 +411,8 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
                 fontSize: 12,
                 height: 1.6,
                 color: summary.isEmpty
-                    ? const Color(0xFFAAAAAA)
-                    : const Color(0xFF555555),
+                    ? p.textTertiary
+                    : p.textSecondary,
               ),
             ),
           ],
@@ -421,24 +423,25 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
 
   /// 对话为空时的引导（排在大纲气泡下方）
   Widget _buildEmptyHint() {
-    return const Padding(
-      padding: EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+    final p = context.palette;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
       child: Column(
         children: [
-          Icon(Icons.forum_outlined, size: 32, color: Color(0xFFDDDDDD)),
-          SizedBox(height: 10),
+          Icon(Icons.forum_outlined, size: 32, color: p.textTertiary),
+          const SizedBox(height: 10),
           Text(
             '和 AI 聊聊这一节怎么写',
-            style: TextStyle(fontSize: 12, color: Color(0xFF999999)),
+            style: TextStyle(fontSize: 12, color: p.textTertiary),
           ),
-          SizedBox(height: 4),
+          const SizedBox(height: 4),
           Text(
             'AI 会读取小说设定、所属大事件与前后章节大纲，只生成大纲，不改动正文',
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 11,
               height: 1.5,
-              color: Color(0xFFBBBBBB),
+              color: p.textTertiary,
             ),
           ),
         ],
@@ -477,6 +480,7 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
     OutlineEditChatMessage msg,
     OutlineEditDraft? draft,
   ) {
+    final p = context.palette;
     if (msg.isUser) {
       return Align(
         alignment: Alignment.centerRight,
@@ -484,15 +488,15 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
           margin: const EdgeInsets.only(bottom: 10, left: 40),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
-            color: const Color(0xFF4D6BFE),
+            color: p.bubbleUser,
             borderRadius: BorderRadius.circular(10),
           ),
           child: SelectableText(
             msg.content,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 13,
               height: 1.5,
-              color: Colors.white,
+              color: p.bubbleUserText,
             ),
           ),
         ),
@@ -505,26 +509,26 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
         margin: const EdgeInsets.only(bottom: 10, right: 24),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          color: const Color(0xFFF5F6FA),
+          color: p.bubbleAssistant,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: const Color(0xFFE8ECF4)),
+          border: Border.all(color: p.border),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (msg.hasThinking) _ThinkingPanel(thinking: msg.thinking),
             if (trimming.isEmpty && msg.streaming)
-              const Row(
+              Row(
                 children: [
-                  SizedBox(
+                  const SizedBox(
                     width: 12,
                     height: 12,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   ),
-                  SizedBox(width: 8),
+                  const SizedBox(width: 8),
                   Text(
                     '生成中...',
-                    style: TextStyle(fontSize: 12, color: Color(0xFF999999)),
+                    style: TextStyle(fontSize: 12, color: p.textTertiary),
                   ),
                 ],
               )
@@ -536,10 +540,10 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
               //「复制」按钮（_actionButton('复制', ...)）。
               Text(
                 msg.streaming ? '${msg.content}▍' : msg.content,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 13,
                   height: 1.6,
-                  color: Color(0xFF333333),
+                  color: p.bubbleAssistantText,
                 ),
               ),
             if (!msg.streaming &&
@@ -583,11 +587,12 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
   }
 
   Widget _actionButton(String label, VoidCallback onPressed) {
+    final p = context.palette;
     return OutlinedButton(
       onPressed: onPressed,
       style: OutlinedButton.styleFrom(
-        foregroundColor: const Color(0xFF4D6BFE),
-        side: const BorderSide(color: Color(0xFFC7D2FE)),
+        foregroundColor: p.accent,
+        side: BorderSide(color: p.borderStrong),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
         minimumSize: Size.zero,
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -599,18 +604,19 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
   }
 
   Widget _buildError(OutlineEditController controller) {
+    final p = context.palette;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-      color: const Color(0xFFFFF3F3),
+      color: p.dangerSoft,
       child: Row(
         children: [
-          const Icon(Icons.error_outline, size: 14, color: Color(0xFFE53935)),
+          Icon(Icons.error_outline, size: 14, color: p.danger),
           const SizedBox(width: 6),
           Expanded(
             child: Text(
               controller.chatError,
-              style: const TextStyle(fontSize: 11, color: Color(0xFFE53935)),
+              style: TextStyle(fontSize: 11, color: p.danger),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
@@ -621,6 +627,7 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
   }
 
   Widget _buildQuickPrompts(OutlineEditController controller) {
+    final p = context.palette;
     final enabled = !controller.chatting;
     return SizedBox(
       height: 40,
@@ -637,19 +644,15 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
               padding: const EdgeInsets.symmetric(horizontal: 10),
               alignment: Alignment.center,
               decoration: BoxDecoration(
-                color: enabled
-                    ? const Color(0xFFF2F4F8)
-                    : const Color(0xFFF8F9FB),
+                color: p.surfaceMuted,
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: const Color(0xFFE8ECF4)),
+                border: Border.all(color: p.border),
               ),
               child: Text(
                 prompt,
                 style: TextStyle(
                   fontSize: 11,
-                  color: enabled
-                      ? const Color(0xFF4D6BFE)
-                      : const Color(0xFFBBBBBB),
+                  color: enabled ? p.accent : p.textTertiary,
                 ),
               ),
             ),
@@ -660,13 +663,14 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
   }
 
   Widget _buildInput(OutlineEditController controller) {
+    final p = context.palette;
     final chatting = controller.chatting;
     return SafeArea(
       top: false,
       child: Container(
         padding: const EdgeInsets.fromLTRB(12, 4, 8, 8),
-        decoration: const BoxDecoration(
-          border: Border(top: BorderSide(color: Color(0xFFEEEEEE))),
+        decoration: BoxDecoration(
+          border: Border(top: BorderSide(color: p.border)),
         ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.end,
@@ -680,9 +684,9 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
                 textInputAction: TextInputAction.newline,
                 decoration: InputDecoration(
                   hintText: '描述你的要求，例如：把本节概要改成主角初遇反派',
-                  hintStyle: const TextStyle(
+                  hintStyle: TextStyle(
                     fontSize: 12,
-                    color: Color(0xFFBBBBBB),
+                    color: p.textTertiary,
                   ),
                   isDense: true,
                   contentPadding: const EdgeInsets.symmetric(
@@ -690,14 +694,14 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
                     vertical: 10,
                   ),
                   filled: true,
-                  fillColor: const Color(0xFFF8F9FB),
+                  fillColor: p.surfaceMuted,
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(10),
-                    borderSide: const BorderSide(color: Color(0xFFE8ECF4)),
+                    borderSide: BorderSide(color: p.border),
                   ),
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(10),
-                    borderSide: const BorderSide(color: Color(0xFFE8ECF4)),
+                    borderSide: BorderSide(color: p.border),
                   ),
                 ),
                 style: const TextStyle(fontSize: 13, height: 1.4),
@@ -706,15 +710,15 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
             const SizedBox(width: 4),
             chatting
                 ? IconButton(
-                    icon: const Icon(
+                    icon: Icon(
                       Icons.stop_circle_outlined,
-                      color: Color(0xFFE53935),
+                      color: p.danger,
                     ),
                     tooltip: '停止生成',
                     onPressed: controller.stopChat,
                   )
                 : IconButton(
-                    icon: const Icon(Icons.send, color: Color(0xFF4D6BFE)),
+                    icon: Icon(Icons.send, color: p.accent),
                     tooltip: '发送',
                     onPressed: () => _send(),
                   ),
@@ -737,6 +741,7 @@ class _InsetSizedSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     final screenHeight = MediaQuery.heightOf(context);
     final insets = MediaQuery.viewInsetsOf(context).bottom;
     // 键盘弹出时压缩面板高度，保证标题栏与输入框始终可见；
@@ -748,9 +753,9 @@ class _InsetSizedSheet extends StatelessWidget {
       padding: EdgeInsets.only(bottom: insets),
       child: Container(
         height: height,
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        decoration: BoxDecoration(
+          color: p.surfaceElevated,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
         ),
         child: child,
       ),
@@ -773,6 +778,7 @@ class _ThinkingPanelState extends State<_ThinkingPanel> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
       child: Column(
@@ -787,14 +793,14 @@ class _ThinkingPanelState extends State<_ThinkingPanel> {
                 Icon(
                   _expanded ? Icons.expand_less : Icons.expand_more,
                   size: 14,
-                  color: const Color(0xFF999999),
+                  color: p.textTertiary,
                 ),
                 const SizedBox(width: 2),
                 Text(
                   '思考过程（${widget.thinking.characters.length} 字）',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 11,
-                    color: Color(0xFF999999),
+                    color: p.textTertiary,
                   ),
                 ),
               ],
@@ -806,16 +812,16 @@ class _ThinkingPanelState extends State<_ThinkingPanel> {
               margin: const EdgeInsets.only(top: 4),
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: const Color(0xFFFAFAFC),
+                color: p.surfaceMuted,
                 borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: const Color(0xFFEEEEEE)),
+                border: Border.all(color: p.border),
               ),
               child: Text(
                 widget.thinking,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 11,
                   height: 1.5,
-                  color: Color(0xFF888888),
+                  color: p.textSecondary,
                 ),
               ),
             ),
@@ -841,6 +847,7 @@ class _MiniSwitch extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return GestureDetector(
       onTap: () => onChanged(!value),
       behavior: HitTestBehavior.opaque,
@@ -851,23 +858,25 @@ class _MiniSwitch extends StatelessWidget {
         padding: const EdgeInsets.all(_inset),
         alignment: value ? Alignment.centerRight : Alignment.centerLeft,
         decoration: BoxDecoration(
-          color: value ? const Color(0xFF4D6BFE) : const Color(0xFFE4E9F2),
+          color: value ? p.accent : p.switchInactive,
           borderRadius: BorderRadius.circular(_height / 2),
         ),
         child: AnimatedContainer(
           duration: _duration,
           width: _height - _inset * 2,
           height: _height - _inset * 2,
-          decoration: const BoxDecoration(
-            color: Colors.white,
+          decoration: BoxDecoration(
+            color: p.isDark ? p.textPrimary : Colors.white,
             shape: BoxShape.circle,
-            boxShadow: [
-              BoxShadow(
-                color: Color(0x1F000000),
-                blurRadius: 3,
-                offset: Offset(0, 1),
-              ),
-            ],
+            boxShadow: p.isDark
+                ? null
+                : const [
+                    BoxShadow(
+                      color: Color(0x1F000000),
+                      blurRadius: 3,
+                      offset: Offset(0, 1),
+                    ),
+                  ],
           ),
         ),
       ),

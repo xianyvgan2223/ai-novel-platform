@@ -4,6 +4,7 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:deepseekapp/core/theme/app_palette.dart';
 import '../application/history_controller.dart';
 import '../application/chat_controller.dart'; // chatProvider
 import '../domain/chat_session.dart';
@@ -90,6 +91,7 @@ class _HistoryDrawerState extends ConsumerState<HistoryDrawer> {
   /// 一键同步：优先用已保存的地址；没配过就自动在局域网里找电脑
   Future<void> _quickSync() async {
     if (_syncing) return;
+    final p = context.palette;
     final messenger = ScaffoldMessenger.of(context);
     setState(() {
       _syncing = true;
@@ -116,9 +118,12 @@ class _HistoryDrawerState extends ConsumerState<HistoryDrawer> {
       });
       messenger.showSnackBar(
         SnackBar(
-          content: Text('同步完成：${report.summary}'),
+          content: Text(
+            '同步完成：${report.summary}',
+            style: TextStyle(color: p.onAccent),
+          ),
           duration: const Duration(seconds: 4),
-          backgroundColor: const Color(0xFF10B981),
+          backgroundColor: p.success,
         ),
       );
     } catch (e) {
@@ -126,12 +131,15 @@ class _HistoryDrawerState extends ConsumerState<HistoryDrawer> {
       setState(() => _syncStatus = '');
       messenger.showSnackBar(
         SnackBar(
-          content: Text(SyncService.describeError(e)),
+          content: Text(
+            SyncService.describeError(e),
+            style: TextStyle(color: p.onAccent),
+          ),
           duration: const Duration(seconds: 8),
-          backgroundColor: const Color(0xFFFF4D4F),
+          backgroundColor: p.danger,
           action: SnackBarAction(
             label: '同步设置',
-            textColor: Colors.white,
+            textColor: p.onAccent,
             onPressed: _openSyncPage,
           ),
         ),
@@ -168,13 +176,14 @@ class _HistoryDrawerState extends ConsumerState<HistoryDrawer> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     // 占屏幕宽度 70%，超出屏幕时留出右侧间隙
     final screenWidth = MediaQuery.widthOf(context);
     final width = screenWidth * HistoryDrawer.widthFactor;
 
     return Drawer(
       width: width,
-      backgroundColor: Colors.white,
+      backgroundColor: p.surfaceElevated,
       elevation: 4,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.only(
@@ -193,6 +202,7 @@ class _HistoryDrawerState extends ConsumerState<HistoryDrawer> {
   }
 
   Widget _buildContent() {
+    final p = context.palette;
     final historyCtrl = ref.watch(historyProvider);
 
     return Column(
@@ -200,20 +210,20 @@ class _HistoryDrawerState extends ConsumerState<HistoryDrawer> {
         _buildHeader(),
         Expanded(
           child: !historyCtrl.isLoaded
-              ? const Center(
-                  child: CircularProgressIndicator(color: Color(0xFF4D6BFE)),
+              ? Center(
+                  child: CircularProgressIndicator(color: p.accent),
                 )
               : Column(
                   children: [
                     // 「新建对话」始终可用，没有历史会话时也能新建
                     _NewSessionButton(onTap: _onNewSession),
-                    const Divider(height: 1, color: Color(0xFFEEEEEE)),
+                    Divider(height: 1, color: p.border),
                     Expanded(child: _buildSessionList(historyCtrl.sessions)),
                   ],
                 ),
         ),
         // 底部固定的数据同步入口
-        const Divider(height: 1, color: Color(0xFFEEEEEE)),
+        Divider(height: 1, color: p.border),
         SafeArea(
           top: false,
           child: _SyncEntry(
@@ -228,9 +238,10 @@ class _HistoryDrawerState extends ConsumerState<HistoryDrawer> {
 
   /// 抽屉顶部标题栏
   Widget _buildHeader() {
+    final p = context.palette;
     return Container(
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: Color(0xFFEEEEEE), width: 1)),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: p.border, width: 1)),
       ),
       child: SafeArea(
         bottom: false,
@@ -239,21 +250,21 @@ class _HistoryDrawerState extends ConsumerState<HistoryDrawer> {
           child: Row(
             children: [
               const SizedBox(width: 16),
-              const Expanded(
+              Expanded(
                 child: Text(
                   '历史会话',
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w600,
-                    color: Color(0xFF333333),
+                    color: p.textPrimary,
                   ),
                 ),
               ),
               IconButton(
-                icon: const Icon(
+                icon: Icon(
                   Icons.close,
                   size: 18,
-                  color: Color(0xFF999999),
+                  color: p.textTertiary,
                 ),
                 tooltip: '关闭',
                 onPressed: _closeDrawer,
@@ -266,11 +277,12 @@ class _HistoryDrawerState extends ConsumerState<HistoryDrawer> {
   }
 
   Widget _buildSessionList(List<ChatSession> sessions) {
+    final p = context.palette;
     if (sessions.isEmpty) {
-      return const Center(
+      return Center(
         child: Text(
           '暂无历史会话',
-          style: TextStyle(fontSize: 14, color: Color(0xFF999999)),
+          style: TextStyle(fontSize: 14, color: p.textTertiary),
         ),
       );
     }
@@ -278,10 +290,10 @@ class _HistoryDrawerState extends ConsumerState<HistoryDrawer> {
     return ListView.separated(
       padding: const EdgeInsets.symmetric(vertical: 8),
       itemCount: sessions.length,
-      separatorBuilder: (_, _) => const Divider(
+      separatorBuilder: (_, _) => Divider(
         height: 1,
         indent: 16,
-        color: Color(0xFFEEEEEE),
+        color: p.border,
       ),
       itemBuilder: (context, index) {
         final session = sessions[index];
@@ -300,31 +312,39 @@ class _HistoryDrawerState extends ConsumerState<HistoryDrawer> {
   void _showDeleteConfirm(ChatSession session) {
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        title: const Text(
-          '删除对话',
-          style: TextStyle(fontSize: 16, color: Color(0xFF333333)),
-        ),
-        content: const Text(
-          '确定要删除该对话记录吗？',
-          style: TextStyle(fontSize: 14, color: Color(0xFF666666)),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('取消', style: TextStyle(color: Color(0xFF999999))),
+      builder: (ctx) {
+        final p = ctx.palette;
+        return AlertDialog(
+          backgroundColor: p.surfaceElevated,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
           ),
-          TextButton(
-            onPressed: () {
-              _onDeleteSession(session.id!);
-              Navigator.of(ctx).pop();
-            },
-            child: const Text('删除', style: TextStyle(color: Color(0xFFFF4D4F))),
+          title: Text(
+            '删除对话',
+            style: TextStyle(fontSize: 16, color: p.textPrimary),
           ),
-        ],
-      ),
+          content: Text(
+            '确定要删除该对话记录吗？',
+            style: TextStyle(fontSize: 14, color: p.textSecondary),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: Text(
+                '取消',
+                style: TextStyle(color: p.textTertiary),
+              ),
+            ),
+            TextButton(
+              onPressed: () {
+                _onDeleteSession(session.id!);
+                Navigator.of(ctx).pop();
+              },
+              child: Text('删除', style: TextStyle(color: p.danger)),
+            ),
+          ],
+        );
+      },
     );
   }
 }
@@ -344,6 +364,7 @@ class _SyncEntry extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return InkWell(
       onTap: syncing ? null : onTap,
       child: Padding(
@@ -356,22 +377,22 @@ class _SyncEntry extends StatelessWidget {
                     height: 20,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Icon(
+                : Icon(
                     Icons.cloud_sync_outlined,
                     size: 20,
-                    color: Color(0xFF4D6BFE),
+                    color: p.accent,
                   ),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
+                  Text(
                     '数据同步',
                     style: TextStyle(
                       fontSize: 13.5,
                       fontWeight: FontWeight.w500,
-                      color: Color(0xFF333333),
+                      color: p.textPrimary,
                     ),
                   ),
                   const SizedBox(height: 2),
@@ -379,9 +400,7 @@ class _SyncEntry extends StatelessWidget {
                     status.isEmpty ? '与电脑上的 Web 服务双向同步' : status,
                     style: TextStyle(
                       fontSize: 12,
-                      color: status.isEmpty
-                          ? const Color(0xFF999999)
-                          : const Color(0xFF4D6BFE),
+                      color: status.isEmpty ? p.textTertiary : p.accent,
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -389,7 +408,7 @@ class _SyncEntry extends StatelessWidget {
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right, size: 18, color: Color(0xFFCCCCCC)),
+            Icon(Icons.chevron_right, size: 18, color: p.textTertiary),
           ],
         ),
       ),
@@ -405,20 +424,21 @@ class _NewSessionButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return InkWell(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        child: const Row(
+        child: Row(
           children: [
-            Icon(Icons.add_circle_outline, size: 22, color: Color(0xFF4D6BFE)),
-            SizedBox(width: 12),
+            Icon(Icons.add_circle_outline, size: 22, color: p.accent),
+            const SizedBox(width: 12),
             Text(
               '新建对话',
               style: TextStyle(
                 fontSize: 15,
                 fontWeight: FontWeight.w500,
-                color: Color(0xFF4D6BFE),
+                color: p.accent,
               ),
             ),
           ],
@@ -455,6 +475,7 @@ class _SessionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return InkWell(
       onTap: onTap,
       onLongPress: onDelete,
@@ -473,7 +494,7 @@ class _SessionTile extends StatelessWidget {
                     style: TextStyle(
                       fontSize: titleFontSize,
                       fontWeight: FontWeight.w500,
-                      color: const Color(0xFF333333),
+                      color: p.textPrimary,
                     ),
                   ),
                 ),
@@ -482,7 +503,7 @@ class _SessionTile extends StatelessWidget {
                   _formatTime(session.createTime),
                   style: TextStyle(
                     fontSize: timeFontSize,
-                    color: const Color(0xFFBBBBBB),
+                    color: p.textTertiary,
                   ),
                 ),
               ],
@@ -494,7 +515,7 @@ class _SessionTile extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontSize: previewFontSize,
-                color: const Color(0xFF999999),
+                color: p.textTertiary,
               ),
             ),
           ],

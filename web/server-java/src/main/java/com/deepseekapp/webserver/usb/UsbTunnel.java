@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -30,10 +31,12 @@ public class UsbTunnel {
     private String adbPath;
 
     private volatile boolean running = true;
+    private volatile Thread thread;
+    private final AtomicBoolean cleanedUp = new AtomicBoolean(false);
     private boolean staleChecked;
     private Set<String> known = new LinkedHashSet<>();
 
-    private UsbTunnel(int port, Path dataDir, String adbPath) {
+    public UsbTunnel(int port, Path dataDir, String adbPath) {
         this.port = port;
         this.dataDir = dataDir;
         this.stateFile = dataDir.resolve("usb-tunnel-state.json");
@@ -60,6 +63,7 @@ public class UsbTunnel {
     }
 
     private void run() {
+        thread = Thread.currentThread();
         if (!locateAdb()) {
             System.err.println("""
 
@@ -82,12 +86,59 @@ public class UsbTunnel {
                   这个窗口可以最小化，按 Ctrl+C 退出。
                 """.formatted(port, port));
 
+        prepareState();
+        Runtime.getRuntime().addShutdownHook(new Thread(this::stop));
+        loop();
+    }
+
+    /**
+     * 由 Spring 后端启动后调用：在后台线程里持续守护隧道。
+     * adb 不可用时只打印警告，不让整个 Web 服务退出。
+     */
+    public void runDaemon() {
+        thread = Thread.currentThread();
+        if (!locateAdb()) {
+            System.err.println("[usb] 找不到 adb，自动 USB 隧道未启动；局域网同步仍然可用。");
+            return;
+        }
+        System.out.println("[usb] 自动 USB 隧道已启动（端口 " + port + "），等待已授权设备…");
+        prepareState();
+        boolean firstRun = true;
+        while (running && !Thread.currentThread().isInterrupted()) {
+            firstRun = tick(firstRun);
+            try {
+                Thread.sleep(INTERVAL_MS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        cleanupOnStop();
+    }
+
+    /** 停止守护并清理本进程建立的隧道（可重复调用） */
+    public void stop() {
+        running = false;
+        Thread current = thread;
+        if (current != null && current != Thread.currentThread()) {
+            current.interrupt();
+            try {
+                current.join(3000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        cleanupOnStop();
+    }
+
+    private void prepareState() {
         staleChecked = readState().isEmpty();
         if (staleChecked) {
             writeState(List.of());
         }
+    }
 
-        Runtime.getRuntime().addShutdownHook(new Thread(this::shutdown));
+    private void loop() {
         boolean firstRun = true;
         while (running) {
             firstRun = tick(firstRun);
@@ -98,6 +149,7 @@ public class UsbTunnel {
                 break;
             }
         }
+        cleanupOnStop();
     }
 
     private boolean tick(boolean firstRun) {
@@ -143,13 +195,15 @@ public class UsbTunnel {
         return false;
     }
 
-    private void shutdown() {
-        running = false;
-        for (String serial : known) {
+    private void cleanupOnStop() {
+        if (!cleanedUp.compareAndSet(false, true)) {
+            return;
+        }
+        for (String serial : new LinkedHashSet<>(known)) {
             removeTunnel(serial);
         }
         writeState(List.of());
-        System.out.println("\n[usb] 已退出，隧道已清理。");
+        System.out.println("[usb] USB 隧道已停止，隧道已清理。");
     }
 
     // ───────────────────────────── adb ─────────────────────────────

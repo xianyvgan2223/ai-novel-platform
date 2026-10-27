@@ -2,6 +2,7 @@
 // 游戏中心 — 多游戏切换首页
 
 import 'package:flutter/material.dart';
+import 'package:deepseekapp/core/theme/app_palette.dart';
 import 'novel_game_page.dart';
 import 'character_chat/view/character_select_page.dart';
 import 'trpg/view/page/trpg_home_page.dart';
@@ -35,25 +36,26 @@ class GameHubPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
+      backgroundColor: p.background,
       appBar: AppBar(
         toolbarHeight: 44,
-        backgroundColor: Colors.white,
+        backgroundColor: p.surface,
         elevation: 0,
         scrolledUnderElevation: 0,
-        title: const Text(
+        title: Text(
           '游戏中心',
           style: TextStyle(
             fontSize: 15,
             fontWeight: FontWeight.w600,
-            color: Color(0xFF333333),
+            color: p.textPrimary,
           ),
         ),
         centerTitle: true,
-        bottom: const PreferredSize(
+        bottom: PreferredSize(
           preferredSize: Size.fromHeight(1),
-          child: Divider(height: 1, color: Color(0xFFEEEEEE)),
+          child: Divider(height: 1, color: p.border),
         ),
       ),
       body: Padding(
@@ -61,14 +63,14 @@ class GameHubPage extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Padding(
-              padding: EdgeInsets.only(left: 4, bottom: 12),
+            Padding(
+              padding: const EdgeInsets.only(left: 4, bottom: 12),
               child: Text(
                 '选择游戏',
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w500,
-                  color: Color(0xFF666666),
+                  color: p.textSecondary,
                 ),
               ),
             ),
@@ -137,19 +139,23 @@ class _GameCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return GestureDetector(
       onTap: onTap,
       child: Container(
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: p.surface,
           borderRadius: BorderRadius.circular(12),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.06),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ],
+          border: p.isDark ? Border.all(color: p.border) : null,
+          boxShadow: p.isDark
+              ? null
+              : [
+                  BoxShadow(
+                    color: p.shadow,
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
         ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -166,10 +172,10 @@ class _GameCard extends StatelessWidget {
             const SizedBox(height: 12),
             Text(
               game.name,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w600,
-                color: Color(0xFF333333),
+                color: p.textPrimary,
               ),
             ),
             const SizedBox(height: 6),
@@ -180,9 +186,9 @@ class _GameCard extends StatelessWidget {
                 textAlign: TextAlign.center,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 11,
-                  color: Color(0xFF999999),
+                  color: p.textTertiary,
                   height: 1.3,
                 ),
               ),

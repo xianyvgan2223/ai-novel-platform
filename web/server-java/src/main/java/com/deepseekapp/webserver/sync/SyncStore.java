@@ -6,6 +6,8 @@ import com.deepseekapp.webserver.db.DatabaseManager.DeviceScope;
 import com.deepseekapp.webserver.db.Db;
 import com.deepseekapp.webserver.db.SchemaCatalog;
 import com.deepseekapp.webserver.util.Json;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -28,6 +30,8 @@ import java.util.TreeMap;
  */
 @Component
 public class SyncStore {
+
+    private static final Logger log = LoggerFactory.getLogger(SyncStore.class);
 
     private final DatabaseManager db;
     private final SchemaCatalog schema;
@@ -622,9 +626,15 @@ public class SyncStore {
                         results.add(result(change, "conflict", null, null, longValue(prev.get("rev"), 0), null));
                         continue;
                     }
-                    Map<String, Object> r = removeRow(deviceId, dbKey, table, pkNum, deviceId);
-                    accepted++;
-                    results.add(result(change, "applied", r.get("rev"), r.get("seq"), null, null));
+                    try {
+                        Map<String, Object> r = removeRow(deviceId, dbKey, table, pkNum, deviceId);
+                        accepted++;
+                        results.add(result(change, "applied", r.get("rev"), r.get("seq"), null, null));
+                    } catch (RuntimeException e) {
+                        log.warn("推送删除失败 {}.{} pk={}：{}", dbKey, table, pkNum, e.getMessage());
+                        results.add(result(change, "error", null, null, null,
+                                friendlyWriteError(dbKey, table, pkNum, e)));
+                    }
                     continue;
                 }
 
@@ -684,9 +694,17 @@ public class SyncStore {
 
                 Map<String, Object> seeded = new LinkedHashMap<>(row);
                 seeded.put(schema.primaryKey(dbKey, table), pkNum);
-                Map<String, Object> r = writeRow(deviceId, dbKey, table, seeded, deviceId);
-                accepted++;
-                results.add(result(change, "applied", r.get("rev"), r.get("seq"), null, null));
+                try {
+                    Map<String, Object> r = writeRow(deviceId, dbKey, table, seeded, deviceId);
+                    accepted++;
+                    results.add(result(change, "applied", r.get("rev"), r.get("seq"), null, null));
+                } catch (RuntimeException e) {
+                    // 单行失败（常见是父记录缺失导致外键约束）不应该让整次同步 500：
+                    // 返回 status=error，App 会显示在同步报告的 errors 里，其余行继续写。
+                    log.warn("推送写入失败 {}.{} pk={}：{}", dbKey, table, pkNum, e.getMessage());
+                    results.add(result(change, "error", null, null, null,
+                            friendlyWriteError(dbKey, table, pkNum, e)));
+                }
             }
 
             Map<String, Object> out = new LinkedHashMap<>();
@@ -697,6 +715,14 @@ public class SyncStore {
             out.put("results", results);
             return out;
         });
+    }
+
+    private String friendlyWriteError(String dbKey, String table, long pk, RuntimeException e) {
+        String raw = e.getMessage() == null ? "" : e.getMessage();
+        if (raw.contains("FOREIGN KEY") || raw.contains("FOREIGNKEY")) {
+            return "父记录不存在，已跳过 " + dbKey + "." + table + "（pk=" + pk + "）";
+        }
+        return "写入失败：" + (raw.isEmpty() ? e.getClass().getSimpleName() : raw);
     }
 
     private Map<String, Object> result(Map<String, Object> change, String status, Object rev, Object seq,

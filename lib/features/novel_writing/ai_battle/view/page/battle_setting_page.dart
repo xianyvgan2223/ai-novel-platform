@@ -17,6 +17,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../../../../../core/config/deepseek_models.dart';
+import 'package:deepseekapp/core/theme/app_palette.dart';
 import '../../../../../core/widgets/settings_kit.dart';
 import '../../model/battle_model.dart';
 import '../../model/db/battle_db_helper.dart';
@@ -98,13 +99,14 @@ class _BattleSettingPageState extends State<BattleSettingPage> {
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     final modelOptions = [
       for (final id in _models)
         SettingsSelectOption(id, DeepSeekModels.toDisplayName(id) ?? id),
     ];
 
     return Scaffold(
-      backgroundColor: kSettingsPageBg,
+      backgroundColor: p.background,
       appBar: SettingsAppBar(
         title: '战斗设置',
         // 与改造前一致：加载中「保存」仍占位，但置灰不可点。
@@ -112,8 +114,8 @@ class _BattleSettingPageState extends State<BattleSettingPage> {
         saveEnabled: !_loading,
       ),
       body: _loading
-          ? const Center(
-              child: CircularProgressIndicator(color: kSettingsPrimary),
+          ? Center(
+              child: CircularProgressIndicator(color: p.accent),
             )
           : ListView(
               padding: EdgeInsets.only(
