@@ -9,6 +9,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter_displaymode/flutter_displaymode.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/config/app_preferences.dart';
+import 'core/config/app_version.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/theme_mode_controller.dart';
 import 'features/chat/presentation/chat_page.dart';
@@ -19,6 +20,9 @@ import 'features/novel_writing/outline_listening/background/outline_listen_sessi
 import 'features/novel_writing/outline_listening/background/outline_listening_notification.dart';
 import 'features/novel_writing/outline_listening/view/page/outline_listen_page.dart';
 import 'features/sync/application/sync_poller.dart';
+import 'features/update/data/app_update_service.dart';
+import 'features/update/data/update_announcement.dart';
+import 'features/update/presentation/update_announcement_dialog.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -44,6 +48,10 @@ void main() async {
       child: const MyApp(),
     ),
   );
+  // 首帧后再清理：只删已经装上的旧更新包，避免安装器还在读文件时误删。
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    unawaited(AppUpdateService().cleanupInstalledUpdates());
+  });
 }
 
 /// 掉帧排查开关（默认全关，release 直接跳过，不影响正常运行）。
@@ -115,6 +123,39 @@ class _MyAppState extends ConsumerState<MyApp> {
     super.initState();
     _installOutlineNotificationHandler();
     _installListenNotificationHandler();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _maybeShowUpdateAnnouncement();
+    });
+  }
+
+  /// 首次打开某个新版本时显示一次更新公告；同一 releaseId 不再重复。
+  Future<void> _maybeShowUpdateAnnouncement() async {
+    try {
+      final seen = await AppPreferences.get(
+        AppPreferences.updateAnnouncementKey,
+      );
+      if (seen == kAppReleaseId) return;
+      if (currentUpdateAnnouncement.releaseId != kAppReleaseId) {
+        await AppPreferences.set(
+          AppPreferences.updateAnnouncementKey,
+          kAppReleaseId,
+        );
+        return;
+      }
+      // 先标记已读，避免 App 在公告打开期间被杀后反复弹出。
+      await AppPreferences.set(
+        AppPreferences.updateAnnouncementKey,
+        kAppReleaseId,
+      );
+      if (!mounted) return;
+      await Future<void>.delayed(const Duration(milliseconds: 350));
+      if (!mounted) return;
+      final context = _navigatorKey.currentContext;
+      if (context == null || !context.mounted) return;
+      await showUpdateAnnouncementDialog(context, currentUpdateAnnouncement);
+    } catch (e) {
+      debugPrint('[update] 更新公告显示失败：$e');
+    }
   }
 
   /// 通知栏「大纲生成进度」点击 → 回到「一键生成大纲」页面查看当前生成详情。

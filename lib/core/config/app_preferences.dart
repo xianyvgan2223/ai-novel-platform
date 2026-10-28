@@ -11,6 +11,9 @@ class AppPreferences {
 
   static const String themeModeKey = 'theme_mode';
 
+  /// 上一次已经看过更新公告的 releaseId（如 5.2.1+6）。
+  static const String updateAnnouncementKey = 'last_seen_update_release';
+
   static Future<String?> get(String key) async {
     final db = await DatabaseHelper.database;
     final rows = await db.query(

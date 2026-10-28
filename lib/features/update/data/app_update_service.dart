@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -125,6 +126,54 @@ class AppUpdateService {
       throw AppUpdateException(e.message ?? '调起安装失败');
     }
     return file.path;
+  }
+
+  /// App 启动时清理已经装上的更新包。
+  ///
+  /// 只删除磁盘上 APK 的 versionCode 小于等于当前已安装版本的包：
+  /// - 更新成功后，下载的 APK 变成“旧包”，下次启动删掉；
+  /// - 下载了但还没安装 / 安装被取消的包版本更高，保留，方便直接重试；
+  /// - 损坏或读不出版本的包不动，避免误删。
+  Future<void> cleanupInstalledUpdates() async {
+    if (!Platform.isAndroid) return;
+    try {
+      final currentVersion = await currentVersionCode();
+      final externalDir = await getExternalStorageDirectory();
+      if (externalDir == null) return;
+      final updateDir = Directory('${externalDir.path}/update');
+      if (!await updateDir.exists()) return;
+
+      await for (final entity in updateDir.list()) {
+        if (entity is! File ||
+            !entity.path.toLowerCase().endsWith('.apk')) {
+          continue;
+        }
+        int apkVersion;
+        try {
+          apkVersion =
+              await _channel.invokeMethod<int>(
+                'apkVersionCode',
+                <String, Object?>{'path': entity.path},
+              ) ??
+              -1;
+        } on MissingPluginException {
+          return;
+        } on PlatformException catch (e) {
+          debugPrint('[update] 读取 APK 版本失败：${entity.path} ${e.message}');
+          continue;
+        }
+        if (apkVersion > 0 && apkVersion <= currentVersion) {
+          try {
+            await entity.delete();
+            debugPrint('[update] 已清理已安装的更新包：${entity.path}');
+          } catch (e) {
+            debugPrint('[update] 删除更新包失败：${entity.path} $e');
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('[update] 清理更新包失败：$e');
+    }
   }
 
   Future<bool> canInstallPackages() async {

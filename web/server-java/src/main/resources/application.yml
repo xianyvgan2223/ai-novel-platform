@@ -10,6 +10,10 @@ spring:
     name: deepseekapp-web-sync
   mvc:
     throw-exception-if-no-handler-found: false
+    async:
+      # APK 有 100MB+，慢速局域网下下载可能超过 Servlet 默认的 30s 异步超时；
+      # 这里放宽到 30 分钟，避免下载到一半被容器切断。
+      request-timeout: 30m
 
 logging:
   charset:

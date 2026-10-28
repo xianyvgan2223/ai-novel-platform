@@ -25,6 +25,18 @@ class AppUpdateChannel(private val context: Context) {
             when (call.method) {
                 "versionCode" -> result.success(currentVersionCode())
                 "canInstallPackages" -> result.success(canInstallPackages())
+                "apkVersionCode" -> {
+                    val path = call.argument<String>("path")
+                    if (path.isNullOrBlank()) {
+                        result.error("bad_args", "缺少 APK 路径", null)
+                    } else {
+                        try {
+                            result.success(apkVersionCode(File(path)))
+                        } catch (e: Exception) {
+                            result.error("apk_info_failed", e.message ?: "读取 APK 版本失败", null)
+                        }
+                    }
+                }
                 "openInstallPermission" -> {
                     try {
                         openInstallPermission()
@@ -64,6 +76,19 @@ class AppUpdateChannel(private val context: Context) {
     private fun canInstallPackages(): Boolean {
         return Build.VERSION.SDK_INT < Build.VERSION_CODES.O ||
             context.packageManager.canRequestPackageInstalls()
+    }
+
+    /** 读取磁盘上 APK 的 versionCode；文件损坏/不可读时返回 -1。 */
+    @Suppress("DEPRECATION")
+    private fun apkVersionCode(file: File): Long {
+        if (!file.exists()) return -1L
+        val info = context.packageManager.getPackageArchiveInfo(file.absolutePath, 0)
+            ?: return -1L
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            info.longVersionCode
+        } else {
+            info.versionCode.toLong()
+        }
     }
 
     private fun openInstallPermission() {

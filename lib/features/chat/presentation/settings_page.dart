@@ -27,6 +27,7 @@ import '../../../core/theme/app_palette.dart';
 import '../../../core/theme/theme_mode_controller.dart';
 import '../../../core/widgets/settings_kit.dart';
 import '../../sync/presentation/sync_page.dart';
+import '../../update/presentation/update_changelog_page.dart';
 import '../../update/presentation/update_page.dart';
 import '../application/chat_controller.dart'; // chatProvider
 import '../application/setting_controller.dart';
@@ -164,6 +165,12 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     ).push(MaterialPageRoute<void>(builder: (_) => const UpdatePage()));
   }
 
+  void _openChangelog() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const UpdateChangelogPage()),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
@@ -221,7 +228,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             children: [
               SettingsSelectRow(
                 key: _k('theme_mode'),
-                label: '夜间模式',
+                label: '主题',
                 value: themeModeValue,
                 options: const [
                   SettingsSelectOption(
@@ -553,6 +560,14 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 title: '检查更新',
                 subtitle: '从电脑同步服务下载并安装新版本',
                 onTap: _openUpdate,
+              ),
+              SettingsActionRow(
+                icon: Icons.history_rounded,
+                iconColor: p.accent,
+                softColor: p.accentSoft,
+                title: '更新日志',
+                subtitle: '回看每个版本的更新公告',
+                onTap: _openChangelog,
               ),
             ],
           ),
