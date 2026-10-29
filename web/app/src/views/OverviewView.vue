@@ -78,8 +78,8 @@ function openTable(db: string, table: string) {
         <div class="eb-title">还没有任何数据</div>
         <div class="eb-desc">
           去「同步与备份」上传手机 App 导出的 .db 文件即可开始；
-          想先看看界面效果，可以在 <span class="mono">web/server</span> 目录执行
-          <span class="mono">npm run seed</span> 生成演示数据。
+          想先看看界面效果，可以把 <span class="mono">web/server/data</span> 复制一份到
+          <span class="mono">data-demo2</span>，再用 <span class="mono">DATA_DIR</span> 指向它启动。
         </div>
       </div>
       <el-button type="primary" @click="router.push('/sync')">去导入数据</el-button>
@@ -108,7 +108,7 @@ function openTable(db: string, table: string) {
           </div>
           <div class="card-body">
             <el-descriptions v-if="store.health" :column="2" size="default" border>
-              <el-descriptions-item label="Node 版本">
+              <el-descriptions-item label="JVM 版本">
                 <span class="mono">{{ store.health.node }}</span>
               </el-descriptions-item>
               <el-descriptions-item label="已运行">{{ store.health.uptimeSeconds }} 秒</el-descriptions-item>

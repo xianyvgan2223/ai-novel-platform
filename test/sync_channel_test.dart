@@ -4,8 +4,7 @@
 /// 没有服务时会自动跳过，不会让 `flutter test` 变红。
 ///
 /// 想完整验证（含 USB 隧道）：
-///   cd web/server; npm start          # 另开一个窗口
-///   npm run usb                       # 建 USB 隧道（可选）
+///   cd web/server-java; .\mvnw.cmd spring-boot:run   # 默认会自动建 USB 隧道
 ///   flutter test test/sync_channel_test.dart
 library;
 
@@ -60,7 +59,7 @@ void main() {
 
     test('回环地址能认出同步服务', () async {
       if (!serverUp) {
-        markTestSkipped('电脑上没跑同步服务（web/server 执行 npm start 后重跑）');
+        markTestSkipped('电脑上没跑同步服务（web/server-java 启动后端后重跑）');
         return;
       }
       final service = await probeSyncService(AddressResolver.usbTunnelUrl());

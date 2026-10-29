@@ -8,7 +8,7 @@ dist/
 data/*
 !data/.gitkeep
 
-# npm run seed 生成的演示数据（可随时重新生成）
+# 演示数据目录（复制真实 data 得到，可随时删除重建）
 data-demo/
 
 # Spring Boot 版发布的 APK（体积大，属于运行时数据，不提交）

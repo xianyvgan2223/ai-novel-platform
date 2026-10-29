@@ -121,7 +121,19 @@ public class SyncController {
     @GetMapping("/pending")
     public Map<String, Object> pending(HttpServletRequest request) {
         String deviceId = request.getParameter("deviceId");
-        return Api.ok(syncStore.claimPendingRequest(deviceId == null ? "" : deviceId));
+        // 只查看、不领取：手机端要先弹窗询问用户是否同意
+        return Api.ok(syncStore.peekPendingRequest(deviceId == null ? "" : deviceId));
+    }
+
+    /** 手机用户同意后领取请求（领取才会变成 claimed） */
+    @PostMapping("/request/{id}/claim")
+    public Map<String, Object> claim(@PathVariable long id, HttpServletRequest request) {
+        String deviceId = request.getParameter("deviceId");
+        Map<String, Object> claimed = syncStore.claimSyncRequest(id, deviceId == null ? "" : deviceId);
+        if (claimed == null) {
+            throw new ApiException(404, "同步请求不存在，或不属于这台设备");
+        }
+        return Api.ok(claimed);
     }
 
     @GetMapping("/request/{id}")

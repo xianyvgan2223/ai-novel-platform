@@ -18,7 +18,7 @@ import java.util.Map;
 /**
  * App 数据库结构定义（由 resources/schema.json 驱动）。
  *
- * <p>schema.json 是从原 Node 版 schema.js 一次性导出的，字段含义与 App 侧
+ * <p>schema.json 是唯一权威副本，字段含义与 App 侧
  * database_helper.dart / novel_db_helper.dart 保持一致。以后改表结构时只需要
  * 改这份 JSON 并递增 appVersion。</p>
  */

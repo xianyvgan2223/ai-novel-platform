@@ -35,3 +35,9 @@ app:
   max-page-size: ${MAX_PAGE_SIZE:500}
   web-device-id: ${WEB_DEVICE_ID:web-console}
   web-id-base: ${WEB_ID_BASE:1000000000}
+  # ── AI 写作 ──
+  # 密钥优先读这里（环境变量）；留空时会自动读取 web/server/.env 里的 DEEPSEEK_API_KEY
+  deepseek-api-key: ${DEEPSEEK_API_KEY:}
+  deepseek-base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
+  deepseek-model: ${DEEPSEEK_MODEL:deepseek-chat}
+  ai-timeout-ms: ${AI_TIMEOUT_MS:180000}

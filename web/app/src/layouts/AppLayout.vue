@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { ChatDotRound, DataLine, Delete, Grid, Iphone, Monitor, Refresh, RefreshRight } from '@element-plus/icons-vue';
+import { ChatDotRound, DataLine, Delete, Grid, Iphone, MagicStick, Monitor, Refresh, RefreshRight } from '@element-plus/icons-vue';
 import { api, formatTime } from '@/api';
 import { useServerStore } from '@/stores/server';
 import { activeDeviceId, deviceEpoch, setActiveDevice } from '@/stores/device';
@@ -29,12 +29,12 @@ async function syncPhone() {
   if (phoneSyncBusy.value) return;
   phoneSyncBusy.value = true;
   phoneSyncHint.value = syncTargetDevice.value
-    ? '已请求 ' + syncTargetDevice.value + '，等待响应…'
-    : '已请求，等待手机响应…';
+    ? '已请求 ' + syncTargetDevice.value + '，等待手机上确认…'
+    : '已请求，等待手机上确认…';
   phoneSyncPercent.value = null;
   try {
     const request = await api.requestPhoneSync(syncTargetDevice.value);
-    const deadline = Date.now() + 60000;
+    const deadline = Date.now() + 120000;
 
     while (Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 1500));
@@ -51,24 +51,29 @@ async function syncPhone() {
       }
 
       if (status.status === 'claimed') {
-        if (!progress) phoneSyncHint.value = '手机已接收，正在同步…';
+        if (!progress) phoneSyncHint.value = '手机已收到请求，等待手机上确认…';
       } else if (status.status === 'done') {
         phoneSyncHint.value = '';
         phoneSyncPercent.value = null;
-        ElMessage.success('手机同步完成' + (status.result ? '：' + status.result : ''));
+        ElMessage.success('整库同步完成' + (status.result ? '：' + status.result : ''));
         await Promise.all([store.refreshStats(), store.refreshOverview().catch(() => undefined)]);
+        return;
+      } else if (status.status === 'rejected') {
+        phoneSyncHint.value = '';
+        phoneSyncPercent.value = null;
+        ElMessage.warning('手机拒绝了本次同步，数据没有改动');
         return;
       } else if (status.status === 'failed') {
         phoneSyncHint.value = '';
         phoneSyncPercent.value = null;
-        ElMessage.error('手机同步失败' + (status.result ? '：' + status.result : ''));
+        ElMessage.error('整库同步失败' + (status.result ? '：' + status.result : ''));
         return;
       }
     }
 
     phoneSyncHint.value = '';
     phoneSyncPercent.value = null;
-    ElMessage.warning('手机没有响应（60 秒）。请确认手机 App 正在运行、且已配置过同步地址。');
+    ElMessage.warning('手机没有响应（120 秒）。请确认手机 App 正在运行，并在手机上点「同意同步」。');
   } catch (err) {
     phoneSyncHint.value = '';
     phoneSyncPercent.value = null;
@@ -131,7 +136,14 @@ const navItems = [
   { path: '/sync', label: '同步与备份', icon: RefreshRight, match: (p: string) => p.startsWith('/sync') },
 ];
 
-const activeMenu = computed(() => navItems.find((item) => item.match(route.path))?.path ?? '/');
+const creativeItems = [
+  { path: '/writing', label: '写作优化', icon: MagicStick },
+];
+
+const activeMenu = computed(() => {
+  if (route.path.startsWith('/writing')) return '/writing';
+  return navItems.find((item) => item.match(route.path))?.path ?? '/';
+});
 const pageTitle = computed(() => (route.meta.title as string | undefined) ?? '总览');
 
 onMounted(() => {
@@ -154,6 +166,20 @@ onMounted(() => {
         </div>
       </div>
 
+      <div class="nav-label">创作</div>
+      <nav class="nav nav-static">
+        <router-link
+          v-for="item in creativeItems"
+          :key="item.path"
+          :to="item.path"
+          class="nav-item"
+          :class="{ active: activeMenu === item.path }"
+        >
+          <el-icon class="nav-icon"><component :is="item.icon" /></el-icon>
+          <span>{{ item.label }}</span>
+        </router-link>
+      </nav>
+
       <div class="nav-label">数据</div>
       <nav class="nav">
         <router-link
@@ -174,11 +200,11 @@ onMounted(() => {
             <span class="foot-dot" :class="store.online ? 'on' : 'off'" />
             <span>{{ store.online ? '服务在线' : '服务离线' }}</span>
           </div>
-          <div class="foot-meta mono">Node {{ store.health.node }} · API v{{ store.health.apiVersion }}</div>
+          <div class="foot-meta mono">JVM {{ store.health.node }} · API v{{ store.health.apiVersion }}</div>
         </div>
         <div v-else class="foot-card">
           <div class="foot-row"><span class="foot-dot off" /><span>服务未连接</span></div>
-          <div class="foot-meta">请在 web/server 执行 npm start</div>
+          <div class="foot-meta">请在 web/server-java 执行 mvnw spring-boot:run</div>
         </div>
       </div>
     </aside>
@@ -263,7 +289,7 @@ onMounted(() => {
             {{ store.online ? '同步服务已连接' : '未连接同步服务' }}
           </div>
           <el-tooltip
-            content="让手机 App 把数据同步过来（需要手机 App 正在运行）"
+            content="请求手机做一次整库同步：上传手机变化 + 拉回电脑上的修改（手机会弹窗确认）"
             placement="bottom-end"
           >
             <el-button :loading="phoneSyncBusy" :icon="Iphone" @click="syncPhone">同步手机</el-button>
@@ -281,7 +307,7 @@ onMounted(() => {
           show-icon
           :closable="false"
           title="无法连接同步服务"
-          :description="store.lastError + ' —— 请先启动服务端（web/server 目录执行 npm start），然后点右上角刷新。'"
+          :description="store.lastError + ' —— 请先启动服务端（web/server-java 目录执行 mvnw spring-boot:run），然后点右上角刷新。'"
           style="margin: 18px 28px 0"
         />
         <router-view v-slot="{ Component }">
@@ -360,6 +386,12 @@ onMounted(() => {
   gap: 2px;
   padding: 4px 12px;
   flex: 1;
+}
+
+/* 创作分组只占自身高度，剩余空间留给数据分组 */
+.nav-static {
+  flex: 0 0 auto;
+  padding-bottom: 12px;
 }
 
 .nav-item {

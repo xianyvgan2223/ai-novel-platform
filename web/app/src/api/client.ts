@@ -134,6 +134,86 @@ export async function download(path: string, fallbackName: string): Promise<void
   URL.revokeObjectURL(objectUrl);
 }
 
+export interface StreamHandlers {
+  onDelta?: (text: string) => void;
+  onDone?: (info: Record<string, unknown>) => void;
+}
+
+/**
+ * POST 后按 SSE 逐段读取（写作优化用）。
+ * 服务端约定每行 `data: {"type":"delta"|"done"|"error", ...}`。
+ * 传 AbortSignal 可以在生成中途停止，已收到的内容由调用方保留。
+ */
+export async function postStream(
+  path: string,
+  body: unknown,
+  handlers: StreamHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
+  const url = BASE + path;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: headers({ 'Content-Type': 'application/json', Accept: 'text/event-stream' }),
+    body: JSON.stringify(body),
+    signal,
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    let message = '请求失败：HTTP ' + res.status;
+    try {
+      message = (JSON.parse(text) as Envelope<unknown>).error ?? message;
+    } catch {
+      /* 保留默认提示 */
+    }
+    throw new ApiError(message, res.status, url);
+  }
+  if (!res.body) throw new ApiError('服务端没有返回流式响应', res.status, url);
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let finished = false;
+
+  const handleBlock = (block: string) => {
+    const data = block
+      .split('\n')
+      .filter((line) => line.startsWith('data:'))
+      .map((line) => line.slice(5).trim())
+      .join('');
+    if (!data) return;
+
+    let event: { type?: string; text?: string; error?: string; [key: string]: unknown };
+    try {
+      event = JSON.parse(data);
+    } catch {
+      return;
+    }
+
+    if (event.type === 'delta' && event.text) {
+      handlers.onDelta?.(event.text);
+    } else if (event.type === 'error') {
+      throw new ApiError(event.error ?? 'AI 生成失败', 500, url);
+    } else if (event.type === 'done') {
+      finished = true;
+      handlers.onDone?.(event);
+    }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const blocks = buffer.split('\n\n');
+    buffer = blocks.pop() ?? '';
+    for (const block of blocks) handleBlock(block);
+  }
+
+  buffer += decoder.decode();
+  if (buffer.trim()) handleBlock(buffer);
+  if (!finished) handlers.onDone?.({});
+}
+
 function buildUrl(path: string, params?: Record<string, unknown>): string {
   const url = new URL(BASE + path, window.location.origin);
   for (const [key, value] of Object.entries(params ?? {})) {

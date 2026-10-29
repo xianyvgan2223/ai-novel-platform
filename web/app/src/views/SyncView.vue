@@ -7,7 +7,7 @@
  *      手机之间不会互相同步（见 docs/同步协议.md 第 2 节）
  *   2. 零改造：App 导出 .db → 这里上传导入；这里导出 .db → App 导入
  *      导入 / 导出都作用于「当前选中的设备」
- *   3. 「请手机同步」：让某台手机把本机数据推上来
+ *   3. 「请求整库同步」：让某台手机把整库变化推上来，并拉回电脑上的修改（手机会弹窗确认）
  */
 import { computed, onMounted, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
@@ -135,8 +135,8 @@ async function requestSync(deviceId: string) {
   try {
     const request = await api.requestPhoneSync(deviceId === 'web-console' ? '' : deviceId);
     ElMessage.success(
-      '已发起同步请求（' + (request.targetDevice || '任意手机') + '，待办 #' + request.id + '）。' +
-        '手机 App 在前台时会领取并执行。',
+      '已发起整库同步请求（' + (request.targetDevice || '任意手机') + '，待办 #' + request.id + '）。' +
+        '手机 App 在前台时会弹窗确认，同意后才执行。',
     );
     await refresh();
   } catch (err) {
@@ -298,7 +298,7 @@ onMounted(refresh);
         <h3><span class="step">3</span> 设备与数据隔离</h3>
         <div class="row-gap">
           <span class="seq-badge mono">当前设备水位 seq = {{ deviceSeq }}</span>
-          <el-button size="small" @click="requestSync('web-console')">请求手机同步</el-button>
+          <el-button size="small" @click="requestSync('web-console')">请求整库同步</el-button>
           <el-button size="small" @click="prune">清理本设备旧日志</el-button>
         </div>
       </div>
@@ -339,7 +339,7 @@ onMounted(refresh);
             <el-button size="small" text type="primary" @click="pickDevice(row.deviceId)">
               {{ row.deviceId === activeDeviceId ? '查看中' : '查看' }}
             </el-button>
-            <el-button size="small" text @click="requestSync(row.deviceId)">请它同步</el-button>
+            <el-button size="small" text @click="requestSync(row.deviceId)">请求整库同步</el-button>
             <el-popconfirm
               v-if="row.deviceId !== 'web-console'"
               title="删除服务端为这台设备保存的全部数据？手机本地不受影响。"

@@ -388,7 +388,7 @@ class _SyncEntry extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '数据同步',
+                    '整库同步',
                     style: TextStyle(
                       fontSize: 13.5,
                       fontWeight: FontWeight.w500,
@@ -397,7 +397,7 @@ class _SyncEntry extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    status.isEmpty ? '与电脑上的 Web 服务双向同步' : status,
+                    status.isEmpty ? '与电脑双向同步整库数据' : status,
                     style: TextStyle(
                       fontSize: 12,
                       color: status.isEmpty ? p.textTertiary : p.accent,

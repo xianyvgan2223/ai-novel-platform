@@ -1,9 +1,9 @@
 /// lib/features/sync/presentation/sync_page.dart
 ///
-/// 数据同步页：找电脑（USB 隧道 / 局域网自动识别）→ 点一下双向同步。
+/// 整库同步页：找电脑（USB 隧道 / 局域网自动识别）→ 点一下双向同步整库数据。
 ///
 /// 连接通道按可靠性自动挑：
-///   USB 隧道（电脑上跑着 npm run usb）→ 上次的地址 → 历史地址 → 热点网关 →
+///   USB 隧道（电脑上跑着 Java 后端，默认自动建隧道）→ 上次的地址 → 历史地址 → 热点网关 →
 ///   广播自报 → 扫描局域网。
 library;
 
@@ -48,7 +48,7 @@ class _SyncPageState extends State<SyncPage> {
   bool _showAdvanced = false;
 
   // ── 连接通道 ──
-  /// USB 隧道是否已就绪（电脑上执行了 npm run usb 且手机插着数据线）
+  /// USB 隧道是否已就绪（后端已启动并自动建好隧道，且手机插着数据线）
   bool _usbReady = false;
   /// 当前通道种类
   ChannelKind? _channelKind;
@@ -175,7 +175,7 @@ class _SyncPageState extends State<SyncPage> {
           _progress = '';
           _usbReady = false;
         });
-        _toast('USB 隧道还没通：电脑上执行 npm run usb 后重试', error: true);
+        _toast('USB 隧道还没通：确认电脑上后端已启动、手机插着数据线后重试', error: true);
         return;
       }
       await SyncService.useUrl(_kUsbUrl, kind: ChannelKind.usb);
@@ -234,7 +234,7 @@ class _SyncPageState extends State<SyncPage> {
           if (!mounted) return;
           setState(() {
             _progress = '';
-            _error = '没找到电脑。USB 方式：电脑上执行 npm run usb，'
+            _error = '没找到电脑。USB 方式：确认电脑上后端已启动（默认自动建隧道），'
                 '手机地址填 $_kUsbUrl；Wi-Fi 方式：确认两边在同一网络。';
           });
           _toast('连接失败', error: true);
@@ -381,7 +381,7 @@ class _SyncPageState extends State<SyncPage> {
           onPressed: () => Navigator.of(context).pop(),
         ),
         title: Text(
-          '数据同步',
+          '整库同步',
           style: TextStyle(
             fontSize: 16,
             fontWeight: FontWeight.w600,
@@ -452,7 +452,7 @@ class _SyncPageState extends State<SyncPage> {
             ],
           ),
           const SizedBox(height: 8),
-          _bullet('USB 数据线：电脑上执行一次 npm run usb，隧道就通了；'
+          _bullet('USB 数据线：电脑上启动后端即可（隧道会自动建立）；'
               '不看 Wi-Fi、不怕防火墙，地址固定填 $_kUsbUrl'),
           _bullet('Wi-Fi / 热点：手机与电脑连同一个网络，点下面的「自动找电脑」即可'),
         ],
@@ -515,7 +515,7 @@ class _SyncPageState extends State<SyncPage> {
           Text(
             _usbReady
                 ? '手机正通过数据线连接电脑（地址 $currentUrl）'
-                : '插上数据线后，在电脑的 web/server 目录执行 npm run usb',
+                : '插上数据线后，启动电脑上的后端即可（USB 隧道会自动建立）',
             style: TextStyle(
               fontSize: 12,
               height: 1.6,
@@ -770,7 +770,7 @@ class _SyncPageState extends State<SyncPage> {
               )
             : const Icon(Icons.sync, size: 18),
         label: Text(
-          _busy ? '同步中…' : '立即同步',
+          _busy ? '同步中…' : '整库同步',
           style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
         ),
         style: ElevatedButton.styleFrom(
@@ -961,8 +961,8 @@ class _SyncPageState extends State<SyncPage> {
         ),
         const SizedBox(height: 4),
         Text(
-          '同步是双向的：服务端上被网页改过的内容会更新到手机，'
-          '手机上新增的内容也会上传到服务端。API Key 等敏感字段不在同步范围内。',
+          '整库同步是双向的：手机会把整库数据的变化上传到电脑，电脑上改过的内容也会拉回手机。'
+          'API Key 等敏感字段不在同步范围内。电脑发起同步时，手机会先弹窗让你确认。',
           style: TextStyle(fontSize: 12, color: p.textTertiary, height: 1.7),
         ),
       ],

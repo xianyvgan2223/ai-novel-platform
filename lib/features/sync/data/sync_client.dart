@@ -198,7 +198,7 @@ class SyncClient {
         case DioExceptionType.connectionError:
           throw SyncException(
             '连不上同步服务：${_dio.options.baseUrl}\n'
-            'USB 方式：电脑上执行 npm run usb，手机地址填 http://127.0.0.1:3210\n'
+            'USB 方式：启动电脑上的后端即可（隧道会自动建立），手机地址填 http://127.0.0.1:3210\n'
             'Wi-Fi 方式：确认手机与电脑在同一 Wi-Fi（或电脑连手机热点）、'
             '电脑服务已启动、Windows 防火墙已放行端口',
           );
@@ -247,8 +247,9 @@ class SyncClient {
     }
   }
 
-  /// 领取网页发起的「请同步」待办；没有待办返回 null
-  Future<SyncRequestInfo?> claimPendingRequest() async {
+  /// 查看网页发起的「整库同步」待办；**只读，不改状态**。
+  /// 手机端先弹窗询问用户，同意后再调用 [claimRequest] 领取。
+  Future<SyncRequestInfo?> peekPendingRequest() async {
     try {
       final res = await _dio.get<dynamic>('/api/sync/pending', queryParameters: <String, dynamic>{
         'deviceId': deviceId,
@@ -258,6 +259,19 @@ class SyncClient {
       final data = body['data'];
       if (data is! Map) return null;
       return SyncRequestInfo.fromJson(Map<String, dynamic>.from(data));
+    } catch (e) {
+      _fail(e);
+    }
+  }
+
+  /// 用户同意后领取指定的同步请求（服务端状态变为 claimed）
+  Future<SyncRequestInfo> claimRequest(int id) async {
+    try {
+      final res = await _dio.post<dynamic>(
+        '/api/sync/request/$id/claim',
+        queryParameters: <String, dynamic>{'deviceId': deviceId},
+      );
+      return SyncRequestInfo.fromJson(_unwrap(res));
     } catch (e) {
       _fail(e);
     }

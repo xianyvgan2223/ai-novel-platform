@@ -1,9 +1,10 @@
 /** api/index.ts —— 所有后端接口的集中入口（组件里只调用这里） */
-import { del, download, get, getWithMeta, post, put, uploadBinary } from './client';
+import { del, download, get, getWithMeta, post, postStream, put, uploadBinary } from './client';
 import type {
-  Catalog, ConflictInfo, DbKey, DeleteResult, DeviceList, HealthInfo, ImportReport,
-  PagedMeta, Row, Stats, SyncOverview, SyncRequestInfo, WriteResult,
+  Catalog, ConflictInfo, DbKey, DeleteResult, DeviceList, DrawPayload, DrawResult, HealthInfo,
+  ImportReport, OptimizePayload, PagedMeta, Row, Stats, SyncOverview, SyncRequestInfo, WriteResult,
 } from './types';
+import type { StreamHandlers } from './client';
 
 export const api = {
   // ── 服务与元数据 ──
@@ -44,6 +45,15 @@ export const api = {
   requestPhoneSync: (targetDevice = '') =>
     post<SyncRequestInfo>('/api/sync/request', { targetDevice }),
   syncRequestStatus: (id: number) => get<SyncRequestInfo>('/api/sync/request/' + id),
+
+  // ── AI 写作（服务端代理，浏览器不持有密钥）──
+  writing: {
+    /** 流式改写，onDelta 收到的是正文增量 */
+    optimize: (payload: OptimizePayload, handlers: StreamHandlers, signal?: AbortSignal) =>
+      postStream('/api/writing/optimize', payload, handlers, signal),
+    /** 抽卡：短篇点子 / 长篇大纲骨架 */
+    draw: (payload: DrawPayload) => post<DrawResult>('/api/writing/draw', payload),
+  },
 };
 
 export * from './types';

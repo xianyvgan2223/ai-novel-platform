@@ -41,6 +41,7 @@ export interface HealthInfo {
   apiVersion: number;
   serverTime: number;
   uptimeSeconds: number;
+  /** 后端运行时版本（Java 版返回 JVM 版本） */
   node: string;
   dataDir: string;
   authRequired: boolean;
@@ -160,8 +161,8 @@ export interface SyncRequestInfo {
   targetDevice: string;
   requestedBy: string;
   requestedAt: number;
-  /** pending=等待手机领取 / claimed=手机已领取 / done=完成 / failed=失败 */
-  status: 'pending' | 'claimed' | 'done' | 'failed';
+  /** pending=等待手机确认 / claimed=手机已领取 / done=完成 / failed=失败 / rejected=手机拒绝 */
+  status: 'pending' | 'claimed' | 'done' | 'failed' | 'rejected';
   claimedAt: number | null;
   finishedAt: number | null;
   result: string;
@@ -187,6 +188,56 @@ export interface DeleteResult {
   deleted: { table: string; pk: number; rev: number; seq: number }[];
   count: number;
   rootPk: number;
+}
+
+/** ── 写作优化 ── */
+
+export type WritingAction = 'polish' | 'deai' | 'expand' | 'condense' | 'continue' | 'structure';
+
+export type WritingStyle = 'original' | 'plain' | 'literary' | 'restrained' | 'hot' | 'suspense' | 'ancient';
+
+export type WritingStrength = 'light' | 'medium' | 'strong';
+
+export interface OptimizePayload {
+  text: string;
+  actions: WritingAction[];
+  style?: WritingStyle;
+  strength?: WritingStrength;
+  /** 额外要求，例如「删掉所有比喻」 */
+  extra?: string;
+}
+
+export type DrawKind = 'short' | 'outline';
+
+export interface DrawPayload {
+  kind: DrawKind;
+  genre?: string;
+  keywords?: string;
+  perspective?: string;
+  count?: number;
+  extra?: string;
+}
+
+export interface WritingCardField {
+  label: string;
+  value: string;
+}
+
+export interface WritingCard {
+  title: string;
+  logline: string;
+  fields: WritingCardField[];
+}
+
+export interface DrawResult {
+  kind: DrawKind;
+  cards: WritingCard[];
+}
+
+/** 写作优化流式事件的结束信息 */
+export interface OptimizeDoneInfo {
+  chars?: number;
+  elapsedMs?: number;
 }
 
 /** 模块标识 → 中文名（与 schema.js 的 module 字段对应） */

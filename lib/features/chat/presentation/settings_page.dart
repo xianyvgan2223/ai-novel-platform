@@ -549,8 +549,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 icon: Icons.sync_rounded,
                 iconColor: p.accent,
                 softColor: p.accentSoft,
-                title: '数据同步',
-                subtitle: '与电脑 Web 服务双向同步',
+                title: '整库同步',
+                subtitle: '与电脑双向同步：手机整库上传，电脑修改也会回传',
                 onTap: _openSync,
               ),
               SettingsActionRow(

@@ -11,7 +11,7 @@ import '../../sync/application/sync_service.dart';
 
 /// 应用内更新：检查版本 → 下载 APK → 校验 SHA-256 → 调起系统安装器。
 ///
-/// 服务地址复用「设置 → 数据同步」里已保存的地址；没有配置时按现有解析链找一次。
+/// 服务地址复用「设置 → 整库同步」里已保存的地址；没有配置时按现有解析链找一次。
 class AppUpdateService {
   static const MethodChannel _channel = MethodChannel('deepseek_app/update');
 
@@ -202,7 +202,7 @@ class AppUpdateService {
     }
     baseUrl = baseUrl.replaceAll(RegExp(r'/+$'), '');
     if (baseUrl.isEmpty) {
-      throw const AppUpdateException('请先在「设置 → 数据同步」里连接电脑');
+      throw const AppUpdateException('请先在「设置 → 整库同步」里连接电脑');
     }
     return baseUrl;
   }

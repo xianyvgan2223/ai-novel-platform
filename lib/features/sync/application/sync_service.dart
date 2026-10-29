@@ -56,6 +56,9 @@ class SyncReport {
     parts.add('上传 $pushed 条');
     if (unchanged > 0) parts.add('内容未变 $unchanged 条');
     if (conflicts > 0) parts.add('冲突 $conflicts 条');
+    // 失败行不计入 accepted，但必须出现在摘要里，
+    // 否则页面和网页端只看到「上传 N 条」就以为全部成功。
+    if (errors.isNotEmpty) parts.add('失败 ${errors.length} 条');
     return parts.join('，');
   }
 }
@@ -77,6 +80,21 @@ class PendingSyncOutcome {
       : handled = false,
         summary = '',
         error = null;
+}
+
+/// 一条等待手机用户确认的整库同步请求（网页发起）
+class PendingSyncCandidate {
+  final SyncRequestInfo request;
+  final String baseUrl;
+  final String deviceId;
+  final String token;
+
+  const PendingSyncCandidate({
+    required this.request,
+    required this.baseUrl,
+    required this.deviceId,
+    required this.token,
+  });
 }
 
 class SyncService {
@@ -279,41 +297,62 @@ class SyncService {
     return resolved?.baseUrl;
   }
 
-  /// 检查电脑（网页）有没有发起「请同步」待办；有就执行并回报。
+  /// 检查电脑（网页）有没有发起「整库同步」待办。
   ///
-  /// 返回值 handled=false 表示这次什么都没做（没配过地址 / 网络不通 / 没有待办），
-  /// 轮询方据此决定要不要提示用户 —— 网络抖动不应该每 5 秒弹一次错误。
-  static Future<PendingSyncOutcome> handlePendingRequest({
+  /// **只读**：只返回候选请求，由界面弹窗询问用户是否同意；
+  /// 同意后再调用 [executePendingCandidate]，拒绝则调用 [rejectPendingCandidate]。
+  static Future<PendingSyncCandidate?> peekPendingRequest({
     void Function(String message, {int? current, int? total})? onProgress,
   }) async {
     final url = await getBaseUrl();
     // 之前完全没连过：先按通道链找一次（含 USB 隧道），找不到就安静地跳过
     if (url.isEmpty) {
-      final resolved = await resolveAddress(onProgress: onProgress);
-      if (resolved == null) return PendingSyncOutcome.idle();
+      final found = await resolveAddress(onProgress: onProgress);
+      if (found == null) return null;
     }
 
     // 用缓存/解析出的地址；最近连过就不再重复解析
     final resolved = await resolveAddress(onProgress: onProgress);
-    if (resolved == null) return PendingSyncOutcome.idle();
+    if (resolved == null) return null;
 
     final deviceId = await ensureDeviceId();
     final token = await getToken();
     final client = SyncClient(baseUrl: resolved.baseUrl, deviceId: deviceId, token: token);
 
-    SyncRequestInfo? claimed;
     try {
-      claimed = await client.claimPendingRequest();
+      final request = await client.peekPendingRequest();
+      if (request == null) return null;
+      return PendingSyncCandidate(
+        request: request,
+        baseUrl: resolved.baseUrl,
+        deviceId: deviceId,
+        token: token,
+      );
     } catch (_) {
       // 连接问题：让下一次轮询重新解析地址（可能换了网络或拔了数据线）
       clearResolveCache();
+      return null;
+    }
+  }
+
+  /// 用户同意后执行：领取待办 → 拉取电脑修改 + 上传本机变化 → 回报结果
+  static Future<PendingSyncOutcome> executePendingCandidate(
+    PendingSyncCandidate candidate, {
+    void Function(String message, {int? current, int? total})? onProgress,
+  }) async {
+    final request = candidate.request;
+    final client = SyncClient(
+      baseUrl: candidate.baseUrl,
+      deviceId: candidate.deviceId,
+      token: candidate.token,
+    );
+
+    try {
+      await client.claimRequest(request.id);
+    } catch (_) {
+      // 请求已被领走或过期：本轮什么都不做，等网页重新发起
       return PendingSyncOutcome.idle();
     }
-    if (claimed == null) return PendingSyncOutcome.idle();
-
-    final request = claimed; // 提升为非空局部变量，闭包里才能安全引用
-    onProgress?.call('收到电脑的同步请求…');
-    final runUrl = resolved.baseUrl;
 
     // 进度一边给本机界面，一边回传服务端（网页那边就能显示实时进度）。
     // 节流到约 0.7 秒一次，免得把接口刷爆。
@@ -329,15 +368,15 @@ class SyncService {
     }
 
     try {
-      report('开始同步…');
-      final report0 = await run(
-        baseUrl: runUrl,
-        token: token,
+      report('开始整库同步…');
+      final result = await run(
+        baseUrl: candidate.baseUrl,
+        token: candidate.token,
         deviceName: '我的手机',
         onProgress: report,
       );
-      await client.completeRequest(request.id, status: 'done', result: report0.summary);
-      return PendingSyncOutcome(handled: true, summary: report0.summary, error: null);
+      await client.completeRequest(request.id, status: 'done', result: result.summary);
+      return PendingSyncOutcome(handled: true, summary: result.summary, error: null);
     } catch (e) {
       final message = e is SyncException ? e.message : e.toString();
       try {
@@ -346,6 +385,24 @@ class SyncService {
         // 回报失败也无所谓，网页那边会超时提示
       }
       return PendingSyncOutcome(handled: true, summary: '', error: message);
+    }
+  }
+
+  /// 用户拒绝：回报 rejected，网页端会显示「手机拒绝了本次同步」
+  static Future<void> rejectPendingCandidate(PendingSyncCandidate candidate) async {
+    final client = SyncClient(
+      baseUrl: candidate.baseUrl,
+      deviceId: candidate.deviceId,
+      token: candidate.token,
+    );
+    try {
+      await client.completeRequest(
+        candidate.request.id,
+        status: 'rejected',
+        result: '手机拒绝了本次同步',
+      );
+    } catch (_) {
+      // 回报失败不影响本机；网页会按超时处理
     }
   }
 
@@ -372,8 +429,8 @@ class SyncService {
       throw SyncException(
         '没有找到电脑上的同步服务。\n'
         '最省事的方式（USB 数据线）：\n'
-        '  ① 电脑上另开一个窗口执行  npm run usb\n'
-        '  ② 手机 App「设置 → 数据同步」里服务地址填 http://127.0.0.1:3210\n'
+        '  ① 启动电脑上的 Java 后端（USB 隧道会自动建立）\n'
+        '  ② 手机 App「设置 → 整库同步」里服务地址填 http://127.0.0.1:3210\n'
         '走 Wi-Fi 时请确认：手机与电脑连同一个 Wi-Fi（或电脑连手机热点）、'
         '电脑上服务已启动、Windows 防火墙已放行 3210 端口。',
       );
@@ -478,13 +535,17 @@ class SyncService {
       final Database db = await _openDb(target.db);
       final List<Map<String, Object?>> rows;
       try {
-        rows = await db.query(target.table);
+        rows = await _queryAllRowsBatched(db, target.table);
       } catch (e) {
         // 该表在本机不存在（例如老版本还没建），或整表读取失败——跳过。
-        // 不要静默：像 outline_records 里有单行超过 Android CursorWindow 2 MB 上限时，
-        // 整张表会悄悄停止同步，这里把原因打出来。
+        // 原因要写进同步报告，否则用户只会看到子表的外键错误。
         debugPrint('[sync] 跳过表 ${target.db}.${target.table}：$e');
         report.skippedTables++;
+        final reason = e.toString();
+        report.errors.add(
+          '${target.label}：读取失败，已跳过（'
+          '${reason.length > 160 ? '${reason.substring(0, 160)}…' : reason}）',
+        );
         continue;
       }
 
@@ -622,6 +683,122 @@ class SyncService {
   static Future<Database> _openDb(String dbName) {
     if (dbName == 'novel') return NovelDbHelper().database;
     return DatabaseHelper.database;
+  }
+
+  /// 分批读取整表。
+  ///
+  /// Android 的 CursorWindow 一次只能装约 2MB；`db.query(表)` 一次性读全表时，
+  /// 像 `outline_records`（整部大纲 / 骨架 / 人物档案）这种大表会直接抛异常，
+  /// 整张表被静默跳过 —— 结果就是章节推上去了、作品没推，父记录永远不存在。
+  /// 这里按批读取，窗口溢出时自动减半，直到能读出来为止。
+  static Future<List<Map<String, Object?>>> _queryAllRowsBatched(
+    Database db,
+    String table,
+  ) async {
+    final rows = <Map<String, Object?>>[];
+    var offset = 0;
+    var batchSize = 32;
+    while (true) {
+      final List<Map<String, Object?>> batch;
+      try {
+        batch = await db.query(
+          table,
+          orderBy: 'id',
+          limit: batchSize,
+          offset: offset,
+        );
+      } catch (_) {
+        if (batchSize > 1) {
+          batchSize = batchSize ~/ 2;
+          continue;
+        }
+        // 单行都装不进 CursorWindow（整部作品的大纲/骨架可能超过 2MB）：
+        // 改为按列、分块读取，避开整行一次性装载。
+        return _queryAllRowsChunked(db, table);
+      }
+      rows.addAll(batch);
+      if (batch.length < batchSize) break;
+      offset += batch.length;
+    }
+    return rows;
+  }
+
+  /// 单行超过 CursorWindow 时的兜底：先查每行每个文本列的长度（结果很小），
+  /// 再把超长文本按块 `substr` 拼回来。
+  static Future<List<Map<String, Object?>>> _queryAllRowsChunked(
+    Database db,
+    String table,
+  ) async {
+    final info = await db.rawQuery('PRAGMA table_info("$table")');
+    if (info.isEmpty) {
+      throw StateError('表不存在：$table');
+    }
+
+    final columns = <String>[];
+    final textColumns = <String>[];
+    for (final column in info) {
+      final name = column['name'] as String;
+      columns.add(name);
+      final type = (column['type'] as String? ?? '').toUpperCase();
+      if (type.contains('TEXT')) textColumns.add(name);
+    }
+
+    final shortColumns = columns.where((c) => !textColumns.contains(c)).toList();
+    final selectParts = <String>[
+      ...shortColumns.map((c) => '"$c"'),
+      ...textColumns.map((c) => 'length("$c") AS "__len_$c"'),
+    ];
+    final baseRows = await db.rawQuery(
+      'SELECT ${selectParts.join(', ')} FROM "$table" ORDER BY id',
+    );
+
+    // 20 万字符以内直接一次读取（约 600KB），超过就按 10 万字符分块
+    const inlineLimit = 200000;
+    const chunk = 100000;
+
+    final rows = <Map<String, Object?>>[];
+    for (final base in baseRows) {
+      final row = <String, Object?>{};
+      for (final c in shortColumns) {
+        row[c] = base[c];
+      }
+
+      final id = base['id'];
+      for (final c in textColumns) {
+        final lengthValue = base['__len_$c'];
+        if (lengthValue == null) {
+          row[c] = null; // 原值为 NULL，保持 NULL
+          continue;
+        }
+        final total = (lengthValue as num).toInt();
+        if (total == 0) {
+          row[c] = '';
+          continue;
+        }
+        if (total <= inlineLimit) {
+          final part = await db.rawQuery(
+            'SELECT "$c" AS v FROM "$table" WHERE id = ?',
+            [id],
+          );
+          row[c] = part.isEmpty ? '' : part.first['v'];
+          continue;
+        }
+
+        final buffer = StringBuffer();
+        var start = 1;
+        while (start <= total) {
+          final part = await db.rawQuery(
+            'SELECT substr("$c", ?, ?) AS v FROM "$table" WHERE id = ?',
+            [start, chunk, id],
+          );
+          buffer.write(part.isEmpty ? '' : (part.first['v'] as String? ?? ''));
+          start += chunk;
+        }
+        row[c] = buffer.toString();
+      }
+      rows.add(row);
+    }
+    return rows;
   }
 
   static Future<Set<String>?> _columnsOf(

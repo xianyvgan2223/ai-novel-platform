@@ -866,22 +866,43 @@ public class SyncStore {
         });
     }
 
-    public Map<String, Object> claimPendingRequest(String deviceId) {
+    /** 只查看有没有待办，不改变状态：手机端弹窗确认后再调用 claimSyncRequest */
+    public Map<String, Object> peekPendingRequest(String deviceId) {
         return db.meta(meta -> {
             Map<String, Object> row = Db.queryOne(meta,
                     "SELECT * FROM sync_requests WHERE status = 'pending' AND (target_device = '' OR target_device = ?) " +
                             "ORDER BY id ASC LIMIT 1", deviceId == null ? "" : deviceId);
+            return row == null ? null : mapSyncRequest(row);
+        });
+    }
+
+    /** 手机用户同意后领取指定请求；已被领走时直接返回当前状态，不重复改 */
+    public Map<String, Object> claimSyncRequest(long id, String deviceId) {
+        return db.meta(meta -> {
+            Map<String, Object> row = Db.queryOne(meta, "SELECT * FROM sync_requests WHERE id = ?", id);
             if (row == null) {
                 return null;
             }
-            long id = longValue(row.get("id"), 0);
-            Db.update(meta, "UPDATE sync_requests SET status = ?, claimed_at = ? WHERE id = ?", "claimed", now(), id);
+            String target = row.get("target_device") == null ? "" : String.valueOf(row.get("target_device"));
+            String device = deviceId == null ? "" : deviceId;
+            if (!target.isEmpty() && !target.equals(device)) {
+                return null;
+            }
+            if ("pending".equals(str(row.get("status")))) {
+                Db.update(meta,
+                        "UPDATE sync_requests SET status = ?, claimed_at = ? WHERE id = ? AND status = 'pending'",
+                        "claimed", now(), id);
+            }
             return getSyncRequest(id);
         });
     }
 
     public Map<String, Object> completeSyncRequest(long id, String status, String result) {
-        String finalStatus = "failed".equals(status) ? "failed" : "done";
+        String finalStatus = switch (status == null ? "" : status) {
+            case "failed" -> "failed";
+            case "rejected" -> "rejected";
+            default -> "done";
+        };
         db.meta(meta -> {
             Db.update(meta, "UPDATE sync_requests SET status = ?, finished_at = ?, result = ? WHERE id = ?",
                     finalStatus, now(), result == null ? "" : (result.length() > 500 ? result.substring(0, 500) : result), id);

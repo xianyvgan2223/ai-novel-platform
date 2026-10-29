@@ -20,6 +20,7 @@ import 'features/novel_writing/outline_listening/background/outline_listen_sessi
 import 'features/novel_writing/outline_listening/background/outline_listening_notification.dart';
 import 'features/novel_writing/outline_listening/view/page/outline_listen_page.dart';
 import 'features/sync/application/sync_poller.dart';
+import 'features/sync/application/sync_service.dart';
 import 'features/update/data/app_update_service.dart';
 import 'features/update/data/update_announcement.dart';
 import 'features/update/presentation/update_announcement_dialog.dart';
@@ -121,11 +122,42 @@ class _MyAppState extends ConsumerState<MyApp> {
   @override
   void initState() {
     super.initState();
+    // 电脑点「同步手机」后，手机会收到待办：先弹窗让用户决定，不擅自同步
+    SyncPoller.instance.confirmHandler = _confirmPendingSync;
     _installOutlineNotificationHandler();
     _installListenNotificationHandler();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _maybeShowUpdateAnnouncement();
     });
+  }
+
+  /// 电脑请求整库同步时先问用户；返回 null 表示界面还没就绪，下一轮再问
+  Future<bool?> _confirmPendingSync(PendingSyncCandidate _) async {
+    final context = _navigatorKey.currentContext;
+    if (context == null || !context.mounted) return null;
+    return showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('电脑请求整库同步'),
+        content: const Text(
+          '电脑请求把手机数据整库同步一次：\n'
+          '· 先拉取电脑上改过的内容\n'
+          '· 再把本机的新变化上传\n\n'
+          '不会删除本机数据；API Key 等敏感字段不在同步范围内。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('拒绝'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('同意同步'),
+          ),
+        ],
+      ),
+    );
   }
 
   /// 首次打开某个新版本时显示一次更新公告；同一 releaseId 不再重复。

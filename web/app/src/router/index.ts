@@ -20,6 +20,12 @@ export const router = createRouter({
       meta: { title: '对话会话' },
     },
     {
+      path: '/writing',
+      name: 'writing',
+      component: () => import('@/views/WritingView.vue'),
+      meta: { title: '写作优化' },
+    },
+    {
       path: '/sessions/:id',
       name: 'chat',
       component: () => import('@/views/ChatView.vue'),

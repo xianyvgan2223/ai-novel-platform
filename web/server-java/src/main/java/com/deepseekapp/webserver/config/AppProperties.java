@@ -20,6 +20,12 @@ public class AppProperties {
     private String webDeviceId = "web-console";
     private long webIdBase = 1_000_000_000L;
 
+    /** AI 写作：密钥可来自环境变量、application.yml，或 web/server/.env（见 WritingService） */
+    private String deepseekApiKey = "";
+    private String deepseekBaseUrl = "https://api.deepseek.com";
+    private String deepseekModel = "deepseek-chat";
+    private long aiTimeoutMs = 180000;
+
     public String getDataDir() {
         return dataDir;
     }
@@ -106,6 +112,38 @@ public class AppProperties {
 
     public void setWebIdBase(long webIdBase) {
         this.webIdBase = webIdBase;
+    }
+
+    public String getDeepseekApiKey() {
+        return deepseekApiKey;
+    }
+
+    public void setDeepseekApiKey(String deepseekApiKey) {
+        this.deepseekApiKey = deepseekApiKey;
+    }
+
+    public String getDeepseekBaseUrl() {
+        return deepseekBaseUrl;
+    }
+
+    public void setDeepseekBaseUrl(String deepseekBaseUrl) {
+        this.deepseekBaseUrl = deepseekBaseUrl;
+    }
+
+    public String getDeepseekModel() {
+        return deepseekModel;
+    }
+
+    public void setDeepseekModel(String deepseekModel) {
+        this.deepseekModel = deepseekModel;
+    }
+
+    public long getAiTimeoutMs() {
+        return aiTimeoutMs;
+    }
+
+    public void setAiTimeoutMs(long aiTimeoutMs) {
+        this.aiTimeoutMs = aiTimeoutMs;
     }
 
     public Path dataDirPath() {
