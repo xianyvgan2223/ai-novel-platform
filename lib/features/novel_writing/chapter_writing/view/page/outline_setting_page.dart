@@ -146,7 +146,7 @@ class _ChapterSettingPageState extends State<ChapterSettingPage> {
     return Scaffold(
       backgroundColor: p.background,
       appBar: SettingsAppBar(
-        title: '章节写作设置',
+        title: '小事件详写设置',
         // 加载中保存按钮显示为禁用态（与改造前 AppBar 的禁用语义一致）。
         onSave: _save,
         saveEnabled: !_loading,
@@ -166,8 +166,8 @@ class _ChapterSettingPageState extends State<ChapterSettingPage> {
                 // ── 1. 章节系统提示 ──
                 const SettingsSectionHeader(
                   icon: Icons.edit_note_rounded,
-                  title: '章节系统提示',
-                  subtitle: '写章节时使用的 AI 指令',
+                  title: '小事件系统提示',
+                  subtitle: '写小事件时使用的 AI 指令',
                   isFirst: true,
                 ),
                 SettingsCard(
@@ -228,7 +228,7 @@ class _ChapterSettingPageState extends State<ChapterSettingPage> {
                     SettingsSwitchRow(
                       key: const ValueKey('chapter_enable_story_state'),
                       label: '剧情状态账本',
-                      subtitle: '提炼状态伏笔，注入后续章节',
+                      subtitle: '提炼状态伏笔，注入后续小事件',
                       initialValue: _enableStoryState,
                       onChanged: (v) => setState(() => _enableStoryState = v),
                     ),
@@ -267,15 +267,15 @@ class _ChapterSettingPageState extends State<ChapterSettingPage> {
                 const SettingsNote(
                   text: '思考模式开启后，生成前进行深度思考，输出质量更高但耗时'
                       '更长、消耗更多 token；关闭可显著加快生成速度。\n\n'
-                      '剧情状态账本开启后，每写一章自动提炼角色状态、伏笔与悬念，'
-                      '注入后续章节，提升章节关联度（每章额外一次轻量调用）。',
+                      '剧情状态账本开启后，每写一个小事件自动提炼角色状态、伏笔与悬念，'
+                      '注入后续小事件，提升小事件之间的关联度（每次额外一次轻量调用）。',
                 ),
 
                 // ── 4. 章节字数 ──
                 const SettingsSectionHeader(
                   icon: Icons.format_list_numbered_rounded,
-                  title: '章节字数',
-                  subtitle: '章节字数范围，保存时自动校正顺序',
+                  title: '小事件字数',
+                  subtitle: '小事件字数范围，保存时自动校正顺序',
                 ),
                 SettingsCard(
                   children: [

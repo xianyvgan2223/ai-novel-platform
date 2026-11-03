@@ -768,11 +768,11 @@ class ChapterWriteController {
     for (final c in fullChapters) {
       final content = c.content.trim();
       buf.writeln('【${c.eventTitle}】');
-      buf.writeln(content.isEmpty ? '（本章暂无正文内容）' : content);
+      buf.writeln(content.isEmpty ? '（本小事件暂无正文内容）' : content);
       buf.writeln();
     }
     if (summaryChapters.isNotEmpty) {
-      buf.writeln('（更早章节小结）');
+      buf.writeln('（更早的小事件小结）');
       for (final c in summaryChapters) {
         var s = c.aiSummary.trim();
         if (s.isEmpty) {

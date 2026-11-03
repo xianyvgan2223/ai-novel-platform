@@ -395,7 +395,7 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
             ),
             const SizedBox(height: 6),
             Text(
-              draft.title.isEmpty ? '（未命名章节）' : draft.title,
+              draft.title.isEmpty ? '（未命名小事件）' : draft.title,
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
@@ -436,7 +436,7 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
           ),
           const SizedBox(height: 4),
           Text(
-            'AI 会读取小说设定、所属大事件与前后章节大纲，只生成大纲，不改动正文',
+            'AI 会读取小说设定、所属大事件与前后小事件大纲，只生成大纲，不改动正文',
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 11,

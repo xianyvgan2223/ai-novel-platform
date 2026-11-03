@@ -1,8 +1,12 @@
 /** api/index.ts —— 所有后端接口的集中入口（组件里只调用这里） */
 import { del, download, get, getWithMeta, post, postStream, put, uploadBinary } from './client';
 import type {
-  Catalog, ConflictInfo, DbKey, DeleteResult, DeviceList, DrawPayload, DrawResult, HealthInfo,
-  ImportReport, OptimizePayload, PagedMeta, Row, Stats, SyncOverview, SyncRequestInfo, WriteResult,
+  Catalog, ChapterGeneratePayload, ChapterRewritePayload, ChapterRewriteResult, ConflictInfo, DbKey, DeleteResult,
+  DeviceList, DrawPayload, DrawResult, HealthInfo, ImportReport, OptimizePayload, OutlineEditPayload,
+  OutlineFormatPayload, BattleGeneratePayload,
+  OutlineChatPayload,
+  OutlineGeneratePayload, OutlineSplitPayload, OutlineSplitResult, PagedMeta, Row, Stats, SyncOverview,
+  SyncRequestInfo, WriteResult,
 } from './types';
 import type { StreamHandlers } from './client';
 
@@ -53,6 +57,30 @@ export const api = {
       postStream('/api/writing/optimize', payload, handlers, signal),
     /** 抽卡：短篇点子 / 长篇大纲骨架 */
     draw: (payload: DrawPayload) => post<DrawResult>('/api/writing/draw', payload),
+    /** 小说创作（Spring AI）：大纲生成 / 章节生成 / 大纲改写，均为 SSE */
+    novel: {
+      generateOutline: (payload: OutlineGeneratePayload, handlers: StreamHandlers, signal?: AbortSignal) =>
+        postStream('/api/writing/novel/outline/generate', payload, handlers, signal),
+      generateChapter: (payload: ChapterGeneratePayload, handlers: StreamHandlers, signal?: AbortSignal) =>
+        postStream('/api/writing/novel/chapter/generate', payload, handlers, signal),
+      editOutline: (payload: OutlineEditPayload, handlers: StreamHandlers, signal?: AbortSignal) =>
+        postStream('/api/writing/novel/outline/edit', payload, handlers, signal),
+      /** 大纲编辑的 AI 多轮对话（SSE，纯文本） */
+      chatOutline: (payload: OutlineChatPayload, handlers: StreamHandlers, signal?: AbortSignal) =>
+        postStream('/api/writing/novel/outline/chat', payload, handlers, signal),
+      /** 把已有大纲拆成「大事件 → 章节」结构（非流式） */
+      splitOutline: (payload: OutlineSplitPayload) =>
+        post<OutlineSplitResult>('/api/writing/novel/outline/split', payload),
+      /** 多选事件 / 章节，批量改写标题与概要（非流式） */
+      rewriteChapters: (payload: ChapterRewritePayload) =>
+        post<ChapterRewriteResult>('/api/writing/novel/chapters/rewrite', payload),
+      /** 把粘贴的外部大纲重排成 App 固定格式（SSE） */
+      formatOutline: (payload: OutlineFormatPayload, handlers: StreamHandlers, signal?: AbortSignal) =>
+        postStream('/api/writing/novel/outline/format', payload, handlers, signal),
+      /** AI 写战斗：按三要素生成战斗场面（SSE） */
+      generateBattle: (payload: BattleGeneratePayload, handlers: StreamHandlers, signal?: AbortSignal) =>
+        postStream('/api/writing/novel/battle/generate', payload, handlers, signal),
+    },
   },
 };
 

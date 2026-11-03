@@ -129,7 +129,7 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
         backgroundColor: p.background,
         appBar: AppBar(
           title: Text(
-            widget.outline.title.isNotEmpty ? widget.outline.title : '大纲转章节',
+            widget.outline.title.isNotEmpty ? widget.outline.title : '小事件详写',
             style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
           ),
           backgroundColor: p.surface,
@@ -776,7 +776,7 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('批量删除'),
-        content: Text('确定删除已选 $count 个章节的已生成内容吗？删除后可重新生成。'),
+        content: Text('确定删除已选 $count 个小事件的已生成内容吗？删除后可重新生成。'),
         actions: [
           TextButton(
             onPressed: () => closeDialogSafely(ctx, result: false),
@@ -802,7 +802,7 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
     });
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(SnackBar(content: Text('已删除 ${items.length} 个章节的已生成内容')));
+    ).showSnackBar(SnackBar(content: Text('已删除 ${items.length} 个小事件的已生成内容')));
   }
 
   /// 打开章节内容查看全屏页面（替代弹窗，便于完整阅读）
@@ -1011,7 +1011,7 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('大纲已修改'),
-        content: const Text('检测到大纲内容已更新，是否重新解析章节结构？\n\n注意：已完成的章节正文内容将被保留。'),
+        content: const Text('检测到大纲内容已更新，是否重新解析小事件结构？\n\n注意：已完成的小事件正文内容将被保留。'),
         actions: [
           TextButton(
             onPressed: () => closeDialogSafely(ctx, result: false),
@@ -1058,7 +1058,7 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
               controller: ctrl,
               maxLines: null,
               decoration: InputDecoration(
-                hintText: '本章剧情账本（角色处境 / 时间地点 / 伏笔 / 悬念 / 冲突）。生成章节后自动提炼，可在此手动修改',
+                hintText: '本小事件剧情账本（角色处境 / 时间地点 / 伏笔 / 悬念 / 冲突）。生成后自动提炼，可在此手动修改',
                 border: const OutlineInputBorder(),
                 contentPadding: const EdgeInsets.all(10),
                 filled: true,
@@ -1085,7 +1085,7 @@ class _ChapterWritePageState extends State<ChapterWritePage> {
               if (mounted) setState(() {});
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
-                  content: Text('本章账本已保存'),
+                  content: Text('本小事件账本已保存'),
                   duration: Duration(seconds: 1),
                 ),
               );
@@ -1334,7 +1334,7 @@ class _ChapterTile extends StatelessWidget {
                   ),
                   const SizedBox(width: 4),
                   Text(
-                    '需先完成前面的章节才能生成',
+                    '需先完成前面的小事件才能生成',
                     style: TextStyle(fontSize: 11, color: p.textTertiary),
                   ),
                 ],
@@ -1422,7 +1422,7 @@ class _ChapterTile extends StatelessWidget {
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
-                      '正在提炼剧情状态与整章小结，可点「查看内容」查看进度',
+                      '正在提炼剧情状态与小事件小结，可点「查看内容」查看进度',
                       style: TextStyle(
                         fontSize: 11,
                         color: p.textSecondary,
@@ -1605,7 +1605,7 @@ class _ChapterViewPageState extends State<_ChapterViewPage> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      '正在提炼剧情状态与整章小结...',
+                      '正在提炼剧情状态与小事件小结...',
                       style: TextStyle(
                         fontSize: 12,
                         color: p.accent,
@@ -1847,7 +1847,7 @@ class _ChapterEditPageState extends State<_ChapterEditPage> {
                 readOnly: _saving,
                 textAlignVertical: TextAlignVertical.top,
                 decoration: InputDecoration(
-                  hintText: '在此编辑章节内容...',
+                  hintText: '在此编辑小事件内容...',
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
                     borderSide: BorderSide(color: p.borderStrong),
@@ -1888,7 +1888,7 @@ class _ChapterEditPageState extends State<_ChapterEditPage> {
     setState(() => _saving = false);
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('已保存，剧情账本与整章小结已更新'),
+        content: Text('已保存，剧情账本与小事件小结已更新'),
         duration: Duration(seconds: 2),
       ),
     );
@@ -1960,7 +1960,7 @@ class _ChapterProcessPanelState extends State<_ChapterProcessPanel> {
                 child: Text(
                   c.extractingStory
                       ? '正在提炼剧情状态账本...'
-                      : '正在提炼整章小结...',
+                      : '正在提炼小事件小结...',
                   style: TextStyle(
                     fontSize: 13,
                     color: p.accent,
@@ -2008,7 +2008,7 @@ class _ChapterProcessPanelState extends State<_ChapterProcessPanel> {
           ],
           _bubble(
             icon: Icons.notes,
-            title: '整章小结',
+            title: '小事件小结',
             content: c.chapterSummaryOutputText,
             emptyHint: '正在提炼中...',
             color: p.successSoft,
@@ -2111,7 +2111,7 @@ class _WordCountDialogState extends State<_WordCountDialog> {
     final p = context.palette;
     return AlertDialog(
       title: const Text(
-        '设置本章字数',
+        '设置本小事件字数',
         style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
       ),
       content: Column(
@@ -2119,7 +2119,7 @@ class _WordCountDialogState extends State<_WordCountDialog> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '输入本章目标字数，将覆盖设置中的默认范围',
+            '输入本小事件目标字数，将覆盖设置中的默认范围',
             style: TextStyle(fontSize: 12, color: p.textTertiary),
           ),
           const SizedBox(height: 10),

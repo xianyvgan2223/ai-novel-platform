@@ -391,9 +391,9 @@ class _FloatingBallState extends ConsumerState<_FloatingBall>
         width: _kBallSize,
         height: _kBallSize,
         decoration: BoxDecoration(
-          color: p.surfaceElevated,
+          // 蓝底白图标：悬浮球用主色实心圆，中间图标反白
+          color: p.accent,
           shape: BoxShape.circle,
-          border: Border.all(color: p.border),
           boxShadow: p.isDark
               ? null
               : const [
@@ -407,7 +407,7 @@ class _FloatingBallState extends ConsumerState<_FloatingBall>
         child: Stack(
           alignment: Alignment.center,
           children: [
-            Icon(Icons.chat_bubble, color: p.accent, size: 24),
+            Icon(Icons.chat_bubble, color: Colors.white, size: 24),
             // 回复生成中显示小红点
             if (isLoading)
               Positioned(
@@ -419,7 +419,7 @@ class _FloatingBallState extends ConsumerState<_FloatingBall>
                   decoration: BoxDecoration(
                     color: p.danger,
                     shape: BoxShape.circle,
-                    border: Border.all(color: p.surfaceElevated, width: 1.5),
+                    border: Border.all(color: p.accent, width: 1.5),
                   ),
                 ),
               ),

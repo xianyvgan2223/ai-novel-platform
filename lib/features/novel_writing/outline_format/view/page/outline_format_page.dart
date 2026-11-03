@@ -36,7 +36,7 @@ class _OutlineFormatPageState extends State<OutlineFormatPage> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          '大纲已保存，可前往「大纲转章节」使用',
+          '大纲已保存，可前往「小事件详写」使用',
           style: TextStyle(color: p.onAccent),
         ),
         backgroundColor: p.accent,
@@ -85,7 +85,7 @@ class _OutlineFormatPageState extends State<OutlineFormatPage> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      '在此粘贴您已有的大纲，点击「AI 格式化」后系统会自动将其转换为「大纲转章节」功能所需的格式。格式化后您还可以手动编辑调整。',
+                      '在此粘贴您已有的大纲，点击「AI 格式化」后系统会自动将其转换为「小事件详写」功能所需的格式。格式化后您还可以手动编辑调整。',
                       style: TextStyle(fontSize: 13, color: p.textSecondary),
                     ),
                   ),
@@ -279,7 +279,7 @@ class _OutlineFormatPageState extends State<OutlineFormatPage> {
               ),
               const SizedBox(height: 8),
               Text(
-                '保存后可在「大纲转章节」中选择此大纲生成章节内容',
+                '保存后可在「小事件详写」中选择此大纲生成正文内容',
                 style: TextStyle(fontSize: 12, color: p.textTertiary),
                 textAlign: TextAlign.center,
               ),

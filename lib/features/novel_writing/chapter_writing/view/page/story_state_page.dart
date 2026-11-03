@@ -475,7 +475,7 @@ class _StoryStatePageState extends State<StoryStatePage> {
                 const SizedBox(height: 20),
                 _buildSectionHeader(
                   title: '人物档案',
-                  subtitle: '描述与能力由 AI 随章节更新；性格仅由你修改，AI 不会覆盖',
+                  subtitle: '描述与能力由 AI 随小事件更新；性格仅由你修改，AI 不会覆盖',
                   trailing: OutlinedButton.icon(
                     onPressed: () => setState(() {
                       _characters = [..._characters, const CharacterProfile()];
@@ -492,7 +492,7 @@ class _StoryStatePageState extends State<StoryStatePage> {
                 ),
                 const SizedBox(height: 12),
                 if (_characters.isEmpty) ...[
-                  _buildEmptyCard('暂无人物档案，可添加人物、从大纲生成主角档案，或先写一章由系统自动提取'),
+                  _buildEmptyCard('暂无人物档案，可添加人物、从大纲生成主角档案，或先写一个小事件由系统自动提取'),
                   const SizedBox(height: 10),
                   Center(
                     child: OutlinedButton.icon(
@@ -537,8 +537,8 @@ class _StoryStatePageState extends State<StoryStatePage> {
                 _buildSectionHeader(
                   title: '剧情状态',
                   subtitle: _latestChapter != null
-                      ? '最新一章「' + _latestChapter!.eventTitle + '」的账本（AI 生成可手动修改；每章账本可在章节列表的「账本」按钮查看/回退）'
-                      : 'AI 每章完成后自动更新：角色处境 / 时间地点 / 伏笔 / 悬念 / 冲突',
+                      ? '最近小事件「' + _latestChapter!.eventTitle + '」的账本（AI 生成可手动修改；每个小事件账本可在小事件列表的「账本」按钮查看/回退）'
+                      : 'AI 每个小事件完成后自动更新：角色处境 / 时间地点 / 伏笔 / 悬念 / 冲突',
                 ),
                 const SizedBox(height: 12),
                 Container(
@@ -562,7 +562,7 @@ class _StoryStatePageState extends State<StoryStatePage> {
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: Text(
-                                    '暂无剧情状态，写完第一章后自动生成，也可点击「编辑」手动填写',
+                                    '暂无剧情状态，写完第一个小事件后自动生成，也可点击「编辑」手动填写',
                                     style: TextStyle(
                                       fontSize: 11,
                                       color: p.textTertiary,
@@ -615,7 +615,7 @@ class _StoryStatePageState extends State<StoryStatePage> {
                 const SizedBox(height: 20),
                 _buildSectionHeader(
                   title: '伏笔清单',
-                  subtitle: 'AI 从大纲提炼，章节写作时注入【伏笔清单】；可手动修改',
+                  subtitle: 'AI 从大纲提炼，小事件详写时注入【伏笔清单】；可手动修改',
                   trailing: (_regeneratingForeshadows ||
                           widget.controller.isRefreshingForeshadows)
                       ? Row(
@@ -1124,7 +1124,7 @@ class _CharacterEditorState extends State<_CharacterEditor> {
                 borderRadius: BorderRadius.circular(4),
               ),
               child: Text(
-                '主角 · 档案直接注入每章',
+                '主角 · 档案直接注入每个小事件',
                 style: TextStyle(
                   fontSize: 10,
                   fontWeight: FontWeight.w600,
@@ -1352,12 +1352,12 @@ class _ForeshadowProgressPageState extends State<_ForeshadowProgressPage> {
                 ),
                 const SizedBox(height: 20),
                 // ── 各章伏笔进度 ──
-                _sectionHeader('各章伏笔进度', '按章节顺序展示每章账本中的【伏笔】记录'),
+                _sectionHeader('各小事件伏笔进度', '按小事件顺序展示每个小事件账本中的【伏笔】记录'),
                 const SizedBox(height: 8),
                 if (_chapters.isEmpty)
                   _card(
                     child: Text(
-                      '（还没有已完成的章节，完成章节后每章账本会自动记录伏笔进展）',
+                      '（还没有已完成的小事件，完成小事件后每个小事件账本会自动记录伏笔进展）',
                       style: TextStyle(fontSize: 12, color: p.textTertiary),
                     ),
                   )
@@ -1392,7 +1392,7 @@ class _ForeshadowProgressPageState extends State<_ForeshadowProgressPage> {
                           const SizedBox(height: 8),
                           _extractForeshadowSection(c.storyState).isEmpty
                               ? Text(
-                                  '（本章账本无伏笔记录）',
+                                  '（本小事件账本无伏笔记录）',
                                   style: TextStyle(
                                     fontSize: 12,
                                     color: p.textTertiary,

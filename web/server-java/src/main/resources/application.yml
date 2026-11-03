@@ -8,6 +8,15 @@ server:
 spring:
   application:
     name: deepseekapp-web-sync
+  # Spring AI：OpenAI 兼容协议对接 DeepSeek，密钥从 web/server/.env 读取
+  ai:
+    openai:
+      api-key: ${DEEPSEEK_API_KEY:not-configured}
+      base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
+      chat:
+        options:
+          model: ${DEEPSEEK_MODEL:deepseek-chat}
+          temperature: 0.8
   mvc:
     throw-exception-if-no-handler-found: false
     async:

@@ -80,12 +80,12 @@ class ChapterWritePromptTemplate {
     // 仅小事件详写为章节正文；大事件是结构节点，不单独生成章节。
     // 明确限定文风：平实自然、克制修辞，避免模型堆砌比喻导致每章都像散文
     final roleInstruction = '''- 以自然流畅的叙述方式展开，包含场景描写、对话、心理活动
-- 语言平实克制，贴近通俗小说文风；整章比喻、排比等修辞手法不超过 1-2 处，禁止堆砌辞藻、空泛抒情
+- 语言平实克制，贴近通俗小说文风；全篇比喻、排比等修辞手法不超过 1-2 处，禁止堆砌辞藻、空泛抒情
 - 用具体的动作、环境细节和人物对话推进情节，不要用比喻或抽象修辞来渲染气氛
 - $wordCountText''';
     final prevEndingSection = prevEnding.isEmpty
         ? ''
-        : '\n\n【上一章小结】\n$prevEnding';
+        : '\n\n【上一个小事件小结】\n$prevEnding';
     final storyStateSection = storyState.trim().isEmpty
         ? ''
         : '\n\n【全局剧情状态】\n${storyState.trim()}';
@@ -104,7 +104,7 @@ class ChapterWritePromptTemplate {
         ? '- 剧情中涉及主角以外的其他人物时，先调用 get_character_profiles 工具查询其人物档案，再结合档案写作；未查询到的人物不要凭空设定其外貌、能力或性格'
         : '- 剧情中涉及主角以外的人物时，其外貌、能力与性格等设定细节尽量从简或保持模糊，不要展开设定';
     return '''
-你是一位小说作家。请根据以下大纲设定，完整写出指定事件的详细章节内容。
+你是一位小说作家。请根据以下大纲设定，完整写出指定事件的详细正文。
 
 【小说设定】
 类型：${outline.genre}
@@ -124,8 +124,8 @@ $nextSection
 【前文内容】$prevContent$prevEndingSection$storyStateSection$charactersSection$foreshadowsSection
 
 要求：
-- 本章开头必须承接【上一章小结】中的场景、时间与人物状态，禁止突兀跳转；如需切换时间/地点，先用一小段过渡衔接
-- 本章内容必须严格围绕【当前事件】与【事件概要】展开，禁止偏离大纲或编造大纲中不存在的情节
+- 本小事件开头必须承接【上一个小事件小结】中的场景、时间与人物状态，禁止突兀跳转；如需切换时间/地点，先用一小段过渡衔接
+- 本小事件内容必须严格围绕【当前事件】与【事件概要】展开，禁止偏离大纲或编造大纲中不存在的情节
 $roleInstruction
 - 结尾自然衔接【后续事件】中的下一个事件（若存在）$lastOfMajorHint
 - 若当前事件涉及【伏笔清单】中的伏笔，按其计划埋设或回收；清单未涉及的不要强行引入
@@ -216,11 +216,11 @@ class ChapterWriteService {
             '【冲突】未解决的冲突\n'
             '某分区没有内容时写「无」，不要合并、省略或改写分区标题。\n'
             '人物档案：每位角色给出 name（姓名）、description（外貌/身份/背景/现状描述）、'
-            'abilities（能力，含本章新增或变化的能力）。\n'
+            'abilities（能力，含本小事件新增或变化的能力）。\n'
             '档案提炼规则：description 与 abilities 只提炼人物自身的**稳定设定**'
             '（外貌/身份/背景/能力名称、类型、特点与强弱定位），'
             '禁止写入具体情节片段、战例或能力施展场景举例'
-            '（如"凭借一根树枝点杀丧尸"这类具体事例），避免后续章节生成时照搬这些例子。\n'
+            '（如"凭借一根树枝点杀丧尸"这类具体事例），避免后续小事件生成时照搬这些例子。\n'
             '性格规则：当前人物档案中**已存在**的人物，禁止输出 personality 字段，'
             '禁止修改或推断其性格（性格由用户维护）；对于当前人物档案中**未出现的新人物**，'
             '可依据正文推断其性格并填入 personality 字段（仅此首次提炼，之后由用户维护）。\n'
@@ -231,9 +231,9 @@ class ChapterWriteService {
         'content':
             '【前序剧情状态】\n${prevState.isEmpty ? '（暂无）' : prevState}\n\n'
             '【当前人物档案】\n$characterText\n\n'
-            '【本章事件】$eventTitle\n'
-            '【本章概要】$eventSummary\n\n'
-            '【本章正文】\n$chapterContent',
+            '【本小事件】$eventTitle\n'
+            '【本小事件概要】$eventSummary\n\n'
+            '【本小事件正文】\n$chapterContent',
       },
     ];
   }
@@ -281,7 +281,7 @@ class ChapterWriteService {
             '结合大纲内容合理补全优化；只写稳定的设定，不要写入具体情节或战例\n'
             'abilities：主角能力与特长（含成长潜力），只描述能力本身的名称、类型、特点与强弱定位，'
             '**禁止**举例能力的施展场景或战绩（如"凭借一根树枝点杀丧尸"这类具体事例），'
-            '避免章节生成时照搬这些例子；\n'
+            '避免小事件生成时照搬这些例子；\n'
             'personality：主角性格。若人设或大纲中明确描述了性格（如性格、脾气、处世方式等），'
             '如实提炼录入；完全没有提及则输出空字符串，不要自行编造。\n'
             '不要输出 JSON 以外的任何文字。\n'
@@ -312,7 +312,7 @@ class ChapterWriteService {
             '- description 只描述人物稳定设定（外貌/身份/背景/当前处境），不得写入具体情节片段或战例\n'
             '- abilities 只描述能力本身的名称、类型、特点与强弱定位，'
             '**禁止**能力施展场景举例或战绩（如"凭借一根树枝点杀丧尸"这类具体事例），'
-            '避免后续章节生成时照搬\n'
+            '避免后续小事件生成时照搬\n'
             '- personality 如实反映人设中明确描述的性格；人设未提及则输出空字符串，不要编造\n'
             '- 修正逻辑矛盾、与主角人设或大纲冲突的内容；不得新增大纲中不存在的能力或设定\n'
             '输出格式：先输出【审查意见】：简要逐条列出修正点（无需修改则写"未发现明显不合理之处"）；'
@@ -343,16 +343,16 @@ class ChapterWriteService {
         {
           'role': 'system',
           'content':
-              '你是小说章节提炼助手。请把给定的章节正文压缩为一份简明小结（800字以内），'
-              '保留：本章核心进展、结尾处的场景/时间/人物状态、结尾抛出的悬念或伏笔。'
+              '你是小说小事件提炼助手。请把给定的小事件正文压缩为一份简明小结（800字以内），'
+              '保留：本小事件核心进展、结尾处的场景/时间/人物状态、结尾抛出的悬念或伏笔。'
               '只输出小结本身，纯文本，不要任何多余说明。',
         },
         {
           'role': 'user',
           'content':
-              '【本章事件】$eventTitle\n'
-              '【本章概要】$eventSummary\n\n'
-              '【本章正文】\n$chapterContent',
+              '【本小事件】$eventTitle\n'
+              '【本小事件概要】$eventSummary\n\n'
+              '【本小事件正文】\n$chapterContent',
         },
       ],
     );
@@ -383,16 +383,16 @@ class ChapterWriteService {
         {
           'role': 'system',
           'content':
-              '你是小说章节提炼助手。请把给定的章节正文压缩为一份简明小结（800字以内），'
-              '保留：本章核心进展、结尾处的场景/时间/人物状态、结尾抛出的悬念或伏笔。'
+              '你是小说小事件提炼助手。请把给定的小事件正文压缩为一份简明小结（800字以内），'
+              '保留：本小事件核心进展、结尾处的场景/时间/人物状态、结尾抛出的悬念或伏笔。'
               '只输出小结本身，纯文本，不要任何多余说明。',
         },
         {
           'role': 'user',
           'content':
-              '【本章事件】$eventTitle\n'
-              '【本章概要】$eventSummary\n\n'
-              '【本章正文】\n$chapterContent',
+              '【本小事件】$eventTitle\n'
+              '【本小事件概要】$eventSummary\n\n'
+              '【本小事件正文】\n$chapterContent',
         },
       ],
       onChunk: (chunk) {
@@ -427,7 +427,7 @@ class ChapterWriteService {
       {
         'role': 'system',
         'content':
-            '你是小说章节审校助手。请审校给定的章节正文，找出并修正其中不合理之处。\n'
+            '你是小说小事件审校助手。请审校给定的小事件正文，找出并修正其中不合理之处。\n'
             '审校范围：逻辑不通、前后矛盾、细节与上文不符（时间/地点/人物状态/能力发挥）、'
             '表述错误、明显不合常识等。\n'
             '绝对不得改变：剧情走向与大纲规定的情节、伏笔的埋设与回收安排、'
@@ -439,9 +439,9 @@ class ChapterWriteService {
       {
         'role': 'user',
         'content':
-            '【本章事件】$eventTitle\n'
+            '【本小事件】$eventTitle\n'
             '【事件概要】$eventSummary\n\n'
-            '【上一章小结】\n${prevEnding.isEmpty ? '（无）' : prevEnding}\n\n'
+            '【上一个小事件小结】\n${prevEnding.isEmpty ? '（无）' : prevEnding}\n\n'
             '【全局剧情状态】\n${storyState.trim().isEmpty ? '（无）' : storyState.trim()}\n\n'
             '【人物档案】\n${characters.trim().isEmpty ? '（无）' : characters.trim()}\n\n'
             '【伏笔清单】\n${foreshadows.trim().isEmpty ? '（无）' : foreshadows.trim()}\n\n'

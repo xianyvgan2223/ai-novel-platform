@@ -11,12 +11,12 @@
 /// 由 `test/app_version_test.dart` 保证两者一致——只改一处时单测会先红。
 ///
 /// 发版时改 `pubspec.yaml` 的 `version:`，同步改这里。
-const String kAppVersion = '5.2.4';
+const String kAppVersion = '5.2.5';
 
 /// 构建号（与 pubspec.yaml 的 `+N` 保持一致）。
-const String kAppBuildNumber = '10';
+const String kAppBuildNumber = '11';
 
 /// 发版标识：用于「首次打开新版本时只显示一次更新公告」。
 /// 每次发版修改 kAppVersion / kAppBuildNumber 后，这里和
 /// currentUpdateAnnouncement.releaseId 要同步更新。
-const String kAppReleaseId = '5.2.4+10';
+const String kAppReleaseId = '5.2.5+11';

@@ -240,6 +240,141 @@ export interface OptimizeDoneInfo {
   elapsedMs?: number;
 }
 
+/** ── 小说创作（Spring AI）── */
+
+/** 单次模型调用的设置，来自网页「AI 设置」 */
+export interface AiRequestSettings {
+  model?: string;
+  temperature?: number;
+  maxTokens?: number;
+  systemPrompt?: string;
+}
+
+export interface OutlineGeneratePayload {
+  genre: string;
+  theme: string;
+  protagonist: string;
+  worldview: string;
+  majorCount: number;
+  minorCount: number;
+  extra?: string;
+  settings?: AiRequestSettings;
+}
+
+export interface GeneratedChapterRow {
+  index: number;
+  type: 'major' | 'minor';
+  title: string;
+  summary: string;
+}
+
+export interface GeneratedOutline {
+  title: string;
+  concept: string;
+  genre: string;
+  theme: string;
+  protagonist: string;
+  worldview: string;
+  charactersJson: string;
+  skeletonJson: string;
+  outlineText: string;
+  chapters: GeneratedChapterRow[];
+  majorCount: number;
+  minorCount: number;
+}
+
+export interface ChapterGeneratePayload {
+  title: string;
+  genre: string;
+  theme: string;
+  protagonist: string;
+  worldview: string;
+  outlineContent: string;
+  chapterTitle: string;
+  chapterSummary: string;
+  prevChapterTitle?: string;
+  prevChapterContent?: string;
+  nextChapterTitle?: string;
+  characters?: string;
+  foreshadows?: string;
+  storyState?: string;
+  minWords?: number;
+  maxWords?: number;
+  extra?: string;
+  settings?: AiRequestSettings;
+}
+
+export interface OutlineEditPayload {
+  outlineText: string;
+  instruction: string;
+  extra?: string;
+  settings?: AiRequestSettings;
+}
+
+/** 大纲编辑的 AI 多轮对话 */
+export interface OutlineChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface OutlineChatPayload {
+  chapterTitle: string;
+  chapterSummary: string;
+  outlineContext?: string;
+  selectedEvents?: { title: string; summary: string }[];
+  messages: OutlineChatMessage[];
+  settings?: AiRequestSettings;
+}
+
+export interface OutlineSplitPayload {
+  title?: string;
+  genre?: string;
+  theme?: string;
+  protagonist?: string;
+  worldview?: string;
+  outlineText: string;
+  settings?: AiRequestSettings;
+}
+
+export interface OutlineSplitResult {
+  actsJson: string;
+  chapters: GeneratedChapterRow[];
+  outlineText: string;
+}
+
+export interface ChapterRewriteItem {
+  index: number;
+  type?: string;
+  title: string;
+  summary: string;
+}
+
+export interface ChapterRewritePayload {
+  instruction?: string;
+  outlineContext?: string;
+  chapters: ChapterRewriteItem[];
+  settings?: AiRequestSettings;
+}
+
+export interface ChapterRewriteResult {
+  chapters: { index: number; title: string; summary: string }[];
+}
+
+/** 匹配大纲格式：把粘贴的外部大纲重排成 App 固定格式 */
+export interface OutlineFormatPayload {
+  input: string;
+  settings?: AiRequestSettings;
+}
+
+/** AI 写战斗：三要素 + 可选额外要求 */
+export interface BattleGeneratePayload {
+  skills?: string;
+  scene?: string;
+  result?: string;
+  extra?: string;
+  settings?: AiRequestSettings;
+}
+
 /** 模块标识 → 中文名（与 schema.js 的 module 字段对应） */
 export const MODULE_LABELS: Record<string, string> = {
   settings: '设置',

@@ -105,8 +105,8 @@ class NovelWritingPage extends StatelessWidget {
               _navRow(
                 context,
                 icon: Icons.auto_stories_rounded,
-                title: '大纲转章节',
-                subtitle: '按大纲拆分章节并生成正文',
+                title: '小事件详写',
+                subtitle: '按大纲拆分小事件并生成正文',
                 page: const ChapterListPage(),
               ),
               _navRow(

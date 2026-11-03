@@ -118,7 +118,7 @@ class OutlineEditService {
     String foreshadows = '',
   }) {
     final buf = StringBuffer()
-      ..writeln('你是小说大纲编辑助手，负责协助用户撰写、修改与细化**章节大纲**（事件标题与事件概要）。')
+      ..writeln('你是小说大纲编辑助手，负责协助用户撰写、修改与细化**小事件大纲**（事件标题与事件概要）。')
       ..writeln()
       ..writeln('输出要求：')
       ..writeln('- 用户要求写 / 改写 / 细化概要时，直接输出可填入【事件概要】的大纲文本：用简明的叙述句交代事件的起因、推进与结果，可分段或分点')
@@ -134,7 +134,7 @@ class OutlineEditService {
       ..writeln('主角：${_orNone(outline.protagonist)}')
       ..writeln('世界观：${_orNone(outline.worldview)}')
       ..writeln()
-      ..writeln('【当前事件】${isMajor ? "大事件" : "章节"} · ${_orNone(eventTitle)}');
+      ..writeln('【当前事件】${isMajor ? "大事件" : "小事件"} · ${_orNone(eventTitle)}');
     if (eventSummary.trim().isNotEmpty) {
       buf
         ..writeln('【当前事件概要】')
@@ -179,7 +179,7 @@ class OutlineEditService {
     if (storyState.trim().isNotEmpty) {
       buf
         ..writeln()
-        ..writeln('【已写章节的剧情状态】（供保持剧情连续，勿直接复述）')
+        ..writeln('【已写小事件的剧情状态】（供保持剧情连续，勿直接复述）')
         ..writeln(storyState.trim());
     }
     if (foreshadows.trim().isNotEmpty) {

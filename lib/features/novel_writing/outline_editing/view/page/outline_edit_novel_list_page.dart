@@ -42,7 +42,7 @@ class OutlineEditNovelListPage extends StatefulWidget {
   const OutlineEditNovelListPage({
     super.key,
     this.title = '大纲编辑',
-    this.hint = '点卡片选择章节编辑',
+    this.hint = '点卡片进入大纲编辑',
     this.emptyTitle = '还没有可编辑的小说',
     this.emptyHint = '请先在「一键生成大纲」中创建',
     this.onOpenNovel,
@@ -484,7 +484,7 @@ class _OutlineCard extends StatelessWidget {
                   children: [
                     Expanded(
                       child: Text(
-                        '未解析章节',
+                        '未解析小事件',
                         style: TextStyle(
                           fontSize: 10,
                           color: p.textTertiary,

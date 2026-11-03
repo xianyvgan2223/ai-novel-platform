@@ -73,7 +73,7 @@ export const useServerStore = defineStore('server', () => {
       { label: '对话会话', value: rowCount('deepseek', 'chat_sessions'), extra: 'chat_sessions' },
       { label: '对话消息', value: rowCount('deepseek', 'chat_messages'), extra: 'chat_messages' },
       { label: '小说作品', value: rowCount('deepseek', 'outline_records'), extra: 'outline_records' },
-      { label: '已生成章节', value: rowCount('deepseek', 'outline_chapters'), extra: 'outline_chapters' },
+      { label: '已生成小事件', value: rowCount('deepseek', 'outline_chapters'), extra: 'outline_chapters' },
       { label: '角色扮演会话', value: rowCount('deepseek', 'character_chat_sessions'), extra: 'character_chat_sessions' },
       { label: '世界书条目', value: rowCount('deepseek', 'world_info_entries'), extra: 'world_info_entries' },
       { label: '跑团战役', value: rowCount('deepseek', 'trpg_campaigns'), extra: 'trpg_campaigns' },

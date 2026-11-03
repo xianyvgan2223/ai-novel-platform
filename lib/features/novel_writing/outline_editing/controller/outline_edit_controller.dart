@@ -973,7 +973,7 @@ class OutlineEditController extends ChangeNotifier {
     if (text.isEmpty || chatting) return;
     final draft = aiTargetDraft;
     if (draft == null) {
-      chatError = '没有可编辑的章节';
+      chatError = '没有可编辑的小事件';
       _safeNotify();
       return;
     }
@@ -1123,7 +1123,7 @@ class OutlineEditController extends ChangeNotifier {
         break;
       }
     }
-    final label = c.eventType == 'major' ? '【大事件】' : '【章节】';
+    final label = c.eventType == 'major' ? '【大事件】' : '【小事件】';
     return '$label${title.isEmpty ? "（未命名）" : title}：${summary.isEmpty ? "（无概要）" : summary}';
   }
 

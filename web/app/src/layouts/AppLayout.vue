@@ -137,7 +137,7 @@ const navItems = [
 ];
 
 const creativeItems = [
-  { path: '/writing', label: '写作优化', icon: MagicStick },
+  { path: '/writing', label: '写作', icon: MagicStick },
 ];
 
 const activeMenu = computed(() => {

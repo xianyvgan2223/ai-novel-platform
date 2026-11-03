@@ -136,6 +136,8 @@ export async function download(path: string, fallbackName: string): Promise<void
 
 export interface StreamHandlers {
   onDelta?: (text: string) => void;
+  onStage?: (stage: { index: number; total: number; label: string }) => void;
+  onResult?: (data: Record<string, unknown>) => void;
   onDone?: (info: Record<string, unknown>) => void;
 }
 
@@ -183,7 +185,16 @@ export async function postStream(
       .join('');
     if (!data) return;
 
-    let event: { type?: string; text?: string; error?: string; [key: string]: unknown };
+    let event: {
+      type?: string;
+      text?: string;
+      error?: string;
+      index?: number;
+      total?: number;
+      label?: string;
+      data?: Record<string, unknown>;
+      [key: string]: unknown;
+    };
     try {
       event = JSON.parse(data);
     } catch {
@@ -192,6 +203,14 @@ export async function postStream(
 
     if (event.type === 'delta' && event.text) {
       handlers.onDelta?.(event.text);
+    } else if (event.type === 'stage') {
+      handlers.onStage?.({
+        index: Number(event.index ?? 0),
+        total: Number(event.total ?? 0),
+        label: String(event.label ?? ''),
+      });
+    } else if (event.type === 'result') {
+      handlers.onResult?.(event.data ?? {});
     } else if (event.type === 'error') {
       throw new ApiError(event.error ?? 'AI 生成失败', 500, url);
     } else if (event.type === 'done') {
