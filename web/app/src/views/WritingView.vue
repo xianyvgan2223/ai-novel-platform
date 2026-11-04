@@ -1,11 +1,17 @@
 <script setup lang="ts">
+import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 import {
-  Aim, DocumentCopy, EditPen, Headset, MagicStick, Promotion, Reading,
+  Aim, DocumentCopy, Download, EditPen, Headset, MagicStick, Promotion, Reading, Upload,
 } from '@element-plus/icons-vue';
 import PageHeader from '@/components/PageHeader.vue';
+import OutlineTxtExportDialog from './writing/OutlineTxtExportDialog.vue';
+import OutlineTxtImportDialog from './writing/OutlineTxtImportDialog.vue';
 
 const router = useRouter();
+
+const exportVisible = ref(false);
+const importVisible = ref(false);
 
 const features = [
   {
@@ -57,6 +63,30 @@ const features = [
     icon: Promotion,
   },
 ];
+
+/** 导出 / 导入大纲 txt：不跳转路由，分别打开对应弹窗（接在功能列表末尾） */
+const fileFeatures = [
+  {
+    key: 'export',
+    title: '导出大纲 txt',
+    subtitle: '选一部作品，把大纲正文原样存成 .txt 文件',
+    icon: Download,
+  },
+  {
+    key: 'import',
+    title: '导入大纲 txt',
+    subtitle: '选 .txt 文件新建作品大纲，不经过 AI',
+    icon: Upload,
+  },
+];
+
+function openFileFeature(key: string) {
+  if (key === 'export') {
+    exportVisible.value = true;
+  } else if (key === 'import') {
+    importVisible.value = true;
+  }
+}
 </script>
 
 <template>
@@ -81,7 +111,26 @@ const features = [
         </span>
         <span class="feature-arrow">›</span>
       </button>
+
+      <!-- 导出 / 导入大纲 txt：直接接在功能列表末尾，不单起分区标题 -->
+      <button
+        v-for="item in fileFeatures"
+        :key="item.key"
+        type="button"
+        class="feature-row"
+        @click="openFileFeature(item.key)"
+      >
+        <span class="feature-icon"><el-icon><component :is="item.icon" /></el-icon></span>
+        <span class="feature-main">
+          <span class="feature-title">{{ item.title }}</span>
+          <span class="feature-sub">{{ item.subtitle }}</span>
+        </span>
+        <span class="feature-arrow">›</span>
+      </button>
     </div>
+
+    <OutlineTxtExportDialog v-model="exportVisible" />
+    <OutlineTxtImportDialog v-model="importVisible" />
   </div>
 </template>
 

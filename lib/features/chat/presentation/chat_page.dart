@@ -596,7 +596,9 @@ class _ChatPageState extends ConsumerState<ChatPage> {
 
     return CupertinoScrollbar(
       controller: _scrollCtrl,
-      thumbVisibility: true,
+      // 只在滑动时显示：thumbVisibility 保持默认 false（不传 true）。
+      // 常显的滚动条在聊天页会一直压着消息列表右侧，很扎眼；默认行为是
+      // 开始滚动时淡入、停止滚动后自动淡出，内容不足一屏时不会出现。
       thickness: 6,
       radius: const Radius.circular(3),
       child: ListView.builder(
