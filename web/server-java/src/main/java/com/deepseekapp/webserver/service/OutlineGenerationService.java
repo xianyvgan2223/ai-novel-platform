@@ -12,9 +12,9 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 网页端「大纲生成」：分阶段调用模型，输出作品 + 大事件 + 章节两层结构。
+ * 网页端「大纲生成」：分阶段调用模型，输出作品 + 大事件 + 小事件两层结构。
  *
- * <p>阶段：定调 → 三幕骨架 → 分批精写主事件 → 分批展开章节。
+ * <p>阶段：定调 → 三幕骨架 → 分批精写大事件 → 分批展开小事件。
  * 每一步都通过 SSE 推给前端，最终 result 里带可直接保存的数据。</p>
  */
 @Service
@@ -70,7 +70,7 @@ public class OutlineGenerationService {
 
                 要求：
                 - 书名要有网文记忆点，不要用「XX的故事」这种平淡写法；
-                - concept 用 150~250 字写清核心冲突、主角目标与最大阻力；
+                - concept 写清核心冲突、主角目标与最大阻力；
                 - 人物写 3 个：主角、主要对手、关键配角。
 
                 严格 JSON：
@@ -87,13 +87,17 @@ public class OutlineGenerationService {
         JsonNode characters = conceptRoot.path("characters");
 
         // ── 阶段 2：三幕骨架 ──
-        sink.stage(2, TOTAL_STAGES, "规划三幕与 " + majorCount + " 个主事件");
+        sink.stage(2, TOTAL_STAGES, "规划三幕与 " + majorCount + " 个大事件");
         String skeletonPrompt = """
-                请规划全篇三幕结构，主事件总数必须严格等于 %d，按第一幕 30%%、第二幕 50%%、第三幕 20%% 分配
+                请规划全篇三幕结构，大事件总数必须严格等于 %d，按第一幕 30%%、第二幕 50%%、第三幕 20%% 分配
                 （无法整除时第二幕多分配余量）。
 
-                每个主事件只写标题与一句话定位（核心冲突 + 在故事弧线中的位置：铺垫/升级/转折/高潮/结局），
+                每个大事件只写标题与一句话定位（核心冲突 + 在故事弧线中的位置：铺垫/升级/转折/高潮/结局），
                 不要展开细节，不要在标题或定位里出现任何编号。
+                大事件之间要有递进关系：铺垫→冲突升级→危机加剧→高潮→收束；
+                人物成长：每一幕结尾主角有阶段性性格变化，全篇完成「缺陷暴露→挣扎蜕变→闭环」。
+                伏笔只做短线：每条伏笔必须能在 5 个大事件之内埋设并回收，不要写长线伏笔；
+                第三幕需覆盖前文主要伏笔的回收点。
 
                 严格 JSON：
                 {"acts":[{"act":"第一幕：开端","events":[{"title":"事件标题","position":"一句话定位"}]}]}
@@ -119,7 +123,7 @@ public class OutlineGenerationService {
         }
 
         // ── 阶段 3：分批精写 ──
-        sink.stage(3, TOTAL_STAGES, "精写主事件概述");
+        sink.stage(3, TOTAL_STAGES, "精写大事件概述");
         String skeletonDigest = digestSkeleton(flatEvents);
         for (int start = 0; start < flatEvents.size(); start += 5) {
             int end = Math.min(start + 5, flatEvents.size());
@@ -127,7 +131,7 @@ public class OutlineGenerationService {
             String prompt = buildEventSummaryPrompt(setting, title, concept, skeletonDigest, batch);
             JsonNode root = readObject(
                     streamCall(JSON_SYSTEM, prompt, sink, settings),
-                    "模型返回的主事件概述格式无法解析，请重试");
+                    "模型返回的大事件概述格式无法解析，请重试");
             JsonNode events = root.path("events");
             for (int i = 0; i < batch.size() && i < events.size(); i++) {
                 String summary = events.get(i).path("summary").asText("").trim();
@@ -137,15 +141,15 @@ public class OutlineGenerationService {
             }
         }
 
-        // ── 阶段 4：分批展开章节 ──
-        sink.stage(4, TOTAL_STAGES, "按主事件生成章节");
+        // ── 阶段 4：分批展开小事件 ──
+        sink.stage(4, TOTAL_STAGES, "按大事件生成小事件");
         for (int start = 0; start < flatEvents.size(); start += 2) {
             int end = Math.min(start + 2, flatEvents.size());
             List<Map<String, Object>> batch = flatEvents.subList(start, end);
             String prompt = buildChapterPrompt(setting, title, concept, batch, minorCount);
             JsonNode root = readObject(
                     streamCall(JSON_SYSTEM, prompt, sink, settings),
-                    "模型返回的章节列表格式无法解析，请重试");
+                    "模型返回的小事件列表格式无法解析，请重试");
             JsonNode events = root.path("events");
             for (int i = 0; i < batch.size() && i < events.size(); i++) {
                 JsonNode chapters = events.get(i).path("chapters");
@@ -168,7 +172,7 @@ public class OutlineGenerationService {
             }
         }
 
-        // ── 汇总：扁平章节列表 + 大纲正文（手机端可解析的规范格式）──
+        // ── 汇总：扁平事件列表 + 大纲正文（手机端可解析的规范格式）──
         List<Map<String, Object>> chapterRows = new ArrayList<>();
         StringBuilder outlineText = new StringBuilder();
         int index = 1;
@@ -255,9 +259,20 @@ public class OutlineGenerationService {
                     .append("（").append(str(batch.get(i).get("position"), "")).append("）\n");
         }
         return """
-                请精写以下本批主事件的完整概述（每个 150~300 字），标题必须与骨架完全一致、按顺序输出。
-                概述要写清：核心冲突、关键转折、牵扯人物、结束时留下的悬念；相邻事件要有递进，
-                不要重复已发生的情节，不要在正文里出现任何编号。
+                请精写以下本批大事件的完整概述，标题必须与骨架完全一致、按顺序输出。
+
+                大事件粒度（严格遵守）：
+                - 大事件 = 改变故事走向的重大阶段节点（如身份揭露、势力决裂、觉醒/蜕变、终局大战），
+                  应跨越时间与场景、可独立成章；
+                - 禁止把单个场景、单次对话、单一动作步骤当作大事件；
+                - 大事件数量多代表故事铺陈规模大，不代表粒度变细。
+
+                写作要求：
+                - 概述要写清：核心冲突、关键转折、牵扯人物、结束时留下的悬念；相邻事件要有递进，
+                  不要重复已发生的情节；
+                - 延续伏笔：已埋伏笔按计划回收；本批新埋伏笔要在概述中点明，并且必须能在 5 个大事件之内回收；
+                  不要写长线伏笔，已回收的伏笔不要再写；
+                - 不要在正文里出现任何编号。
 
                 严格 JSON：
                 {"events":[{"title":"与骨架一致的事件标题","summary":"完整概述"}]}
@@ -272,7 +287,7 @@ public class OutlineGenerationService {
                 全局骨架（仅标题与定位）：
                 %s
 
-                本批需要精写的主事件：
+                本批需要精写的大事件：
                 %s
                 """.formatted(batch.size(), setting, title, concept, skeletonDigest, batchText);
     }
@@ -286,13 +301,21 @@ public class OutlineGenerationService {
                     .append("概述：").append(str(event.get("summary"), "（无）")).append("\n\n");
         }
         return """
-                请为以下主事件各生成连续章节（小事件），每个主事件恰好 %d 章，
-                每章一个标题和 60~120 字概要。章节必须从该主事件的概述自然展开，
-                章与章之间有递进，不要跨过主事件范围，不要在标题或正文里出现编号。
+                请为以下大事件各生成连续的小事件，每个大事件恰好 %d 个小事件，
+                每个小事件一个标题和概要。小事件必须从该大事件的概述自然展开，
+                小事件之间有递进，不要跨过大事件范围，不要在标题或正文里出现编号。
 
-                严格 JSON：
-                {"events":[{"title":"主事件标题（原样）","chapters":[{"title":"章节标题","summary":"章节概要"}]}]}
-                必须恰好 %d 个主事件、每个恰好 %d 章。
+                ⚠️ 小事件写作要求：
+                1. 每个小事件必须是独立完整的情节单元，不是大事件的一个执行步骤；
+                2. 禁止把单个事件拆成时序步骤（例如「前往→发现→战斗→撤退」只算 1 个小事件）；
+                3. 每个小事件应引入新的角色、地点、冲突或转折，而不是单纯推进上一个事件；
+                4. 小事件组合起来必须完整覆盖该大事件概述里的全部关键情节、转折、场面、人物与伏笔；
+                5. 伏笔只做短线：本批涉及的伏笔必须能在 5 个大事件之内回收，不要设计长线伏笔；
+                   已经回收的伏笔不要再写。
+
+                严格 JSON（字段名 chapters 保持不变）：
+                {"events":[{"title":"大事件标题（原样）","chapters":[{"title":"小事件标题","summary":"小事件概要"}]}]}
+                必须恰好 %d 个大事件、每个恰好 %d 个小事件。
 
                 设定：
                 %s
@@ -300,7 +323,7 @@ public class OutlineGenerationService {
                 书名：%s
                 核心概念：%s
 
-                本批主事件：
+                本批大事件：
                 %s
                 """.formatted(minorCount, batch.size(), minorCount, setting, title, concept, batchText);
     }
@@ -478,7 +501,7 @@ public class OutlineGenerationService {
     }
 
     /**
-     * 事件 / 章节标题清洗：去掉两端装饰与模型回显的「大事件N：」前缀，
+     * 事件 / 小事件标题清洗：去掉两端装饰与模型回显的「大事件N：」前缀，
      * 保证写进正文的标题与手机端解析出的标题一致。
      */
     private static String cleanTitle(String raw) {

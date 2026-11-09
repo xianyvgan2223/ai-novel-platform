@@ -79,7 +79,7 @@ class _OutlineTxtExportSheet extends StatelessWidget {
             child: Align(
               alignment: Alignment.centerLeft,
               child: Text(
-                '导出该作品的大纲正文为 txt 文件（UTF-8）',
+                '导出该作品的大纲正文为 txt 文件（UTF-8）· 自动统一事件编号',
                 style: TextStyle(fontSize: 11.5, color: p.textTertiary),
               ),
             ),

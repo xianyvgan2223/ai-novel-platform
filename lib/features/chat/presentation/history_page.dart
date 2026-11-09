@@ -30,7 +30,7 @@ class HistoryDrawer extends ConsumerStatefulWidget {
   });
 
   /// 抽屉宽度占屏幕宽度的比例
-  static const double widthFactor = 0.8;
+  static const double widthFactor = 0.85;
 
   /// 会话条目标题的默认字号
   static const double defaultSessionTitleFontSize = 10;
@@ -177,7 +177,7 @@ class _HistoryDrawerState extends ConsumerState<HistoryDrawer> {
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
-    // 占屏幕宽度 70%，超出屏幕时留出右侧间隙
+    // 占屏幕宽度 85%，超出屏幕时留出右侧间隙
     final screenWidth = MediaQuery.widthOf(context);
     final width = screenWidth * HistoryDrawer.widthFactor;
 

@@ -4,7 +4,11 @@ import { computed, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import type { Row } from '@/api';
 import { loadOutline, loadOutlines } from './novelApi';
-import { outlineFileName } from './outlineTxtTransfer';
+import {
+  outlineFileName,
+  prepareOutlineTxtExportContent,
+  renderOutlineTxtDocument,
+} from './outlineTxtTransfer';
 
 const props = defineProps<{ modelValue: boolean }>();
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>();
@@ -76,13 +80,28 @@ async function exportOutline() {
   exporting.value = true;
   try {
     const row = await loadOutline(id);
-    const content = String(row.content ?? '');
-    if (!content.trim()) {
+    const rawContent = String(row.content ?? '');
+    if (!rawContent.trim()) {
       ElMessage.warning('这部作品还没有大纲正文');
       return;
     }
+    // 导出前自动规范事件 / 幕标题的写法与编号（只改标题行，概要原样保留；
+    // 数据库里的大纲正文不动）——txt 里不会带着重号 / 跳号出去。
+    const content = prepareOutlineTxtExportContent(rawContent);
     const title = exportTitleOf(row);
-    downloadTxt(outlineFileName(title), content);
+    // v2 结构化导出：正文 + 书名 / 类型 / 主题 / 主角简介 / 世界观 / 伏笔清单 /
+    // 人物档案，导入时原样还原（与手机端同一格式）
+    const text = renderOutlineTxtDocument({
+      title: String(row.title ?? '').trim(),
+      genre: String(row.genre ?? ''),
+      theme: String(row.theme ?? ''),
+      protagonist: String(row.protagonist ?? ''),
+      worldview: String(row.worldview ?? ''),
+      foreshadows: String(row.foreshadows ?? ''),
+      charactersJson: String(row.characters ?? ''),
+      content,
+    });
+    downloadTxt(outlineFileName(title), text);
     ElMessage.success(`已导出《${title}》大纲`);
     visible.value = false;
   } catch (err) {
@@ -107,7 +126,9 @@ watch(
   <el-dialog v-model="visible" title="导出大纲 txt" width="540px" top="10vh">
     <div v-loading="loading" class="export-body">
       <p class="dialog-desc">
-        选一部作品，把大纲正文原样导出为 <b>.txt</b> 文件（UTF-8 带 BOM，Windows 记事本可直接打开）。
+        选一部作品，把大纲正文和小说设定（类型 / 主题 / 主角简介 / 世界观 / 伏笔清单 / 人物档案）
+        导出为 <b>.txt</b> 文件（UTF-8 带 BOM，Windows 记事本可直接打开）。
+        导出时会自动统一事件 / 幕标题的写法与编号（大事件全篇连续、小事件在每个大事件内从 1 开始）。
       </p>
 
       <template v-if="hasOutlines">

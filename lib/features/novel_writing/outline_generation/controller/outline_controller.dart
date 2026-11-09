@@ -11,6 +11,7 @@ import '../service/outline_chunk_normalizer.dart';
 import '../../shared/domain/outline_setting.dart';
 import '../../shared/domain/outline_record.dart';
 import '../../shared/outline_event_syntax.dart';
+import '../../shared/outline_foreshadow_filter.dart';
 
 /// 大纲生成控制器，管理业务逻辑与状态
 ///
@@ -62,6 +63,9 @@ class OutlineController extends ChangeNotifier {
   static const int _maxChunkRetries = 2; // 展开块未收到内容时的网络失败自动重试次数
   static const int _maxContinuations = 5; // 展开块因 max_tokens 截断时的最大自动续写次数
   static const int _ledgerInterval = 2; // 每 N 批抽取一次伏笔账本（末批必定抽取）
+
+  /// 伏笔最多跨多少个大事件：超过仍未回收的，自动从账本里去掉（不再注入）。
+  static const int _foreshadowMaxAgeMajors = 5;
   static const Duration _throttleInterval = Duration(milliseconds: 300);
   static const String _progressFileName = 'outline_progress.json';
 
@@ -1374,7 +1378,7 @@ class OutlineController extends ChangeNotifier {
     themeController.text = record.theme;
     protagonistController.text = record.protagonist;
     worldViewController.text = record.worldview;
-    _fallbackForeshadows = record.foreshadows;
+    _fallbackForeshadows = filterResolvedForeshadowText(record.foreshadows);
 
     final skeletonMap = _decodeSkeleton(record.skeleton);
     // 「要求提示词」随 skeleton 保存：局部重新生成时回填，避免用户重新输入
@@ -1508,7 +1512,7 @@ class OutlineController extends ChangeNotifier {
     themeController.text = record.theme;
     protagonistController.text = record.protagonist;
     worldViewController.text = record.worldview;
-    _fallbackForeshadows = record.foreshadows;
+    _fallbackForeshadows = filterResolvedForeshadowText(record.foreshadows);
 
     final map = _decodeSkeleton(record.skeleton);
     // 「要求提示词」随 skeleton 保存，继续生成时回填
@@ -1576,7 +1580,8 @@ class OutlineController extends ChangeNotifier {
                     if (f['plan'] is String)
                       'plan': OutlineMetaRefCleaner.clean(f['plan'] as String),
                   },
-                ),
+                )
+                .where((f) => !_isResolvedForeshadow(f)),
           );
         _ledgerCharacters
           ..clear()
@@ -1726,9 +1731,11 @@ class OutlineController extends ChangeNotifier {
     );
     if (_cancelled || error != null) return false;
     if (r != null) {
-      _ledgerForeshadows
-        ..clear()
-        ..addAll(r.foreshadows);
+      // 基于编辑后的完整骨架重提炼：同样只留未回收的短线伏笔（已实现的丢弃）
+      _mergeLedgerForeshadows(
+        r.foreshadows,
+        currentMajorIndex: majorEventCount,
+      );
       _ledgerCharacters
         ..clear()
         ..addAll(r.characterStates);
@@ -1994,7 +2001,12 @@ class OutlineController extends ChangeNotifier {
           return false;
         }
         if (ledger != null) {
-          _ledgerForeshadows.addAll(ledger.foreshadows);
+          // 只保留未回收的短线伏笔：已实现的丢弃，跨 5 个大事件仍未回收的自动去掉
+          _mergeLedgerForeshadows(
+            ledger.foreshadows,
+            currentMajorIndex:
+                batch.globalStartIndex + batch.coarseEvents.length - 1,
+          );
           for (final c in ledger.characterStates) {
             if (!_ledgerCharacters.contains(c)) _ledgerCharacters.add(c);
           }
@@ -2170,20 +2182,88 @@ class OutlineController extends ChangeNotifier {
     return buf.toString().trim();
   }
 
+  /// 账本条目是否已经回收 / 兑现：不再注入后续批次与展开块。
+  bool _isResolvedForeshadow(Map<String, dynamic> f) {
+    final status = (f['status'] ?? '').toString();
+    return status.contains('已回收') ||
+        status.contains('已实现') ||
+        status.contains('已兑现') ||
+        status.contains('回收完成');
+  }
+
+  String _foreshadowKey(Map<String, dynamic> f) =>
+      OutlineMetaRefCleaner.clean((f['content'] ?? '').toString()).trim();
+
+  /// 合并伏笔账本：
+  /// - 已回收 / 已实现的伏笔直接丢弃，不再进账本、不再注入；
+  /// - 只做短线伏笔：某条伏笔跨过 [_foreshadowMaxAgeMajors] 个大事件仍未回收，
+  ///   自动从账本里去掉；
+  /// - 同一条伏笔（按内容匹配）沿用首次埋设时记下的 [plantedAt]，年龄从第一次出现算起。
+  ///
+  /// [currentMajorIndex] 是当前已精写到第几个大事件（全篇 1-based 序号）。
+  void _mergeLedgerForeshadows(
+    List<Map<String, dynamic>> incoming, {
+    required int currentMajorIndex,
+  }) {
+    final existing = <String, Map<String, dynamic>>{
+      for (final f in _ledgerForeshadows) _foreshadowKey(f): f,
+    };
+    final merged = <Map<String, dynamic>>[];
+
+    for (final f in incoming) {
+      final key = _foreshadowKey(f);
+      if (key.isEmpty) continue;
+      if (_isResolvedForeshadow(f)) {
+        existing.remove(key);
+        continue;
+      }
+      final prev = existing.remove(key);
+      final planted = prev?['plantedAt'];
+      if (planted is int &&
+          currentMajorIndex - planted >= _foreshadowMaxAgeMajors) {
+        // 模型这一批又把旧伏笔列出来了，但它已经跨过 5 个大事件仍未回收：
+        // 同样直接去掉，不因为它再次出现就续命
+        continue;
+      }
+      merged.add(<String, dynamic>{
+        ...?prev,
+        ...f,
+        'plantedAt': planted ?? currentMajorIndex,
+      });
+    }
+
+    // 本次模型没再提到的旧条目：保留，但跨过 5 个大事件还没回收的自动去掉
+    for (final f in existing.values) {
+      if (_isResolvedForeshadow(f)) continue;
+      final planted = f['plantedAt'];
+      final plantedAt = planted is int ? planted : currentMajorIndex;
+      if (currentMajorIndex - plantedAt >= _foreshadowMaxAgeMajors) continue;
+      merged.add(<String, dynamic>{...f, 'plantedAt': plantedAt});
+    }
+
+    _ledgerForeshadows
+      ..clear()
+      ..addAll(merged);
+  }
+
   /// 渲染已积累的伏笔账本文本，供后续批次与展开提示词注入。
   ///
-  /// 渲染前再清一遍编号引用（[OutlineMetaRefCleaner]）：续跑恢复的旧账本 /
-  /// 旧记录里可能带着「第54章」这类历史数据，不能让它重新进入提示词。
+  /// 只渲染**未回收**的伏笔（已实现的伏笔不再注入后续生成）；渲染前再清一遍
+  /// 编号引用（[OutlineMetaRefCleaner]）：续跑恢复的旧账本 / 旧记录里可能带着
+  /// 「第54章」这类历史数据，不能让它重新进入提示词。
   String _renderLedgerText() {
-    if (_ledgerForeshadows.isEmpty &&
+    final active = _ledgerForeshadows
+        .where((f) => !_isResolvedForeshadow(f))
+        .toList();
+    if (active.isEmpty &&
         _ledgerCharacters.isEmpty &&
         _ledgerUnresolved.isEmpty) {
       return '（暂无）';
     }
     final buf = StringBuffer();
-    if (_ledgerForeshadows.isNotEmpty) {
+    if (active.isNotEmpty) {
       buf.writeln('伏笔：');
-      for (final f in _ledgerForeshadows) {
+      for (final f in active) {
         buf.writeln(
           '- ${OutlineMetaRefCleaner.clean('${f['content'] ?? ''}')}'
           '（状态：${OutlineMetaRefCleaner.clean('${f['status'] ?? '已埋'}')}'
@@ -2206,6 +2286,8 @@ class OutlineController extends ChangeNotifier {
     return buf.toString().trim();
   }
 
+  /// 过滤纯文本伏笔清单里的「已回收 / 已实现」行（旧记录 / 局部重新生成兜底用，
+  /// 保证已实现的伏笔不会再被当成清单注入后续写作）。
   /// 生成批次进度标签（每批一格精写，需抽账本的批额外一格抽取）
   List<String> _buildBatchLabels(int totalBatches) => [
     for (int i = 0; i < totalBatches; i++) ...[
@@ -2696,9 +2778,12 @@ class OutlineController extends ChangeNotifier {
 
   /// 全局摘要：书名+概念+完整三幕骨架+伏笔账本，注入每个展开块提示词
   String _buildGlobalSummary() {
-    final ledgerPart = _ledgerForeshadows.isEmpty
-        ? ''
-        : '\n\n伏笔账本：\n${_renderLedgerText()}';
+    final hasActiveForeshadow = _ledgerForeshadows.any(
+      (f) => !_isResolvedForeshadow(f),
+    );
+    final ledgerPart = hasActiveForeshadow
+        ? '\n\n伏笔账本：\n${_renderLedgerText()}'
+        : '';
     return '${_step1Text ?? ''}\n\n完整三幕骨架：\n${_renderSkeleton()}$ledgerPart';
   }
 
@@ -2892,6 +2977,27 @@ class OutlineController extends ChangeNotifier {
   @visibleForTesting
   String get debugStepPreviewForTest => _stepPreview;
 
+  /// 伏笔账本合并 / 剪枝的测试钩子：按 [currentMajorIndex]（当前精写到第几个
+  /// 大事件，1-based）合并一批账本条目。
+  @visibleForTesting
+  void debugMergeLedgerForTest(
+    List<Map<String, dynamic>> incoming, {
+    required int currentMajorIndex,
+  }) => _mergeLedgerForeshadows(incoming, currentMajorIndex: currentMajorIndex);
+
+  /// 当前**将要注入提示词**的账本文本（只含未回收伏笔）。
+  @visibleForTesting
+  String get debugLedgerTextForTest => _renderLedgerText();
+
+  /// 当前账本条目（含内部标记 plantedAt，便于断言年龄剪枝）。
+  @visibleForTesting
+  List<Map<String, dynamic>> get debugLedgerForeshadowsForTest =>
+      List<Map<String, dynamic>>.unmodifiable(_ledgerForeshadows);
+
+  /// 落库时写入 `outline_records.foreshadows` 的文本（用来验「已实现的不再注入」）。
+  @visibleForTesting
+  String get debugRecordForeshadowsForTest => _buildRecord().foreshadows;
+
   /// 后台通知同步的测试钩子：直接摆出「生成中 / 检查点暂停 / 完成」等状态，
   /// 再触发一次 notifyListeners，验证通知文案与阶段切换（不发起任何网络请求）。
   @visibleForTesting
@@ -3043,7 +3149,7 @@ class OutlineController extends ChangeNotifier {
         },
         'completedChunks': _completedChunkCount,
         'rawText': rawText,
-        if (checkpointData != null) 'checkpoint': checkpointData,
+        'checkpoint': ?checkpointData,
       };
       // 串行化落盘：同一时刻仅一个写操作在途，后续写入排队依次执行，
       // 避免并发 writeAsString 覆盖竞态
@@ -3132,7 +3238,8 @@ class OutlineController extends ChangeNotifier {
           ..clear()
           ..addAll(
             (ledger['foreshadows'] as List?)
-                    ?.whereType<Map<String, dynamic>>() ??
+                    ?.whereType<Map<String, dynamic>>()
+                    .where((f) => !_isResolvedForeshadow(f)) ??
                 const [],
           );
         _ledgerCharacters

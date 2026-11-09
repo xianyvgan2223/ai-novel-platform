@@ -14,6 +14,7 @@ Future<String?> showOutlineTxtImportDialog(
   required int charCount,
   required int eventCount,
   required String preview,
+  String settingSummary = '',
 }) {
   return showDialog<String>(
     context: context,
@@ -23,6 +24,7 @@ Future<String?> showOutlineTxtImportDialog(
       charCount: charCount,
       eventCount: eventCount,
       preview: preview,
+      settingSummary: settingSummary,
     ),
   );
 }
@@ -34,12 +36,16 @@ class _OutlineTxtImportDialog extends StatefulWidget {
   final int eventCount;
   final String preview;
 
+  /// v2 结构化文件识别到的设定摘要（旧版纯正文 txt 为空串）
+  final String settingSummary;
+
   const _OutlineTxtImportDialog({
     required this.fileName,
     required this.initialTitle,
     required this.charCount,
     required this.eventCount,
     required this.preview,
+    required this.settingSummary,
   });
 
   @override
@@ -164,6 +170,24 @@ class _OutlineTxtImportDialogState extends State<_OutlineTxtImportDialog> {
                 '共 ${widget.charCount} 字 · 识别到 ${widget.eventCount} 个事件',
                 style: TextStyle(fontSize: 11.5, color: p.textTertiary),
               ),
+              if (widget.settingSummary.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: p.accentSoft,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    '已识别小说设定：${widget.settingSummary}',
+                    style: TextStyle(fontSize: 11.5, color: p.textSecondary),
+                  ),
+                ),
+              ],
               const SizedBox(height: 10),
               if (noEvents)
                 Container(

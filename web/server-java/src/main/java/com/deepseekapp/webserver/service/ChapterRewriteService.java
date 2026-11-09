@@ -11,7 +11,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 大纲编辑里的「多选 AI 改写」：一次改写多个事件 / 章节的标题与概要。
+ * 大纲编辑里的「多选 AI 改写」：一次改写多个事件 / 小事件的标题与概要。
  */
 @Service
 public class ChapterRewriteService {
@@ -72,7 +72,7 @@ public class ChapterRewriteService {
         user.append("""
                 要求：
                 - 条目的数量和顺序必须保持不变，index 原样返回；
-                - 标题简洁、有钩子；概要写清冲突与结果，60~120 字；
+                - 标题简洁、有钩子；概要写清冲突与结果；
                 - 不要新增或删除剧情，不要跨条目合并；
                 - 严格 JSON：{"chapters":[{"index":1,"title":"标题","summary":"概要"}]}
 

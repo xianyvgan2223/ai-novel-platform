@@ -135,7 +135,7 @@ class _NovelWritingPageState extends State<NovelWritingPage> {
                 icon: Icons.edit_note_rounded,
                 title: '大纲编辑',
                 subtitle: '选小说逐章精修，支持 AI 辅助改写',
-                page: const OutlineEditNovelListPage(),
+                page: const OutlineEditNovelListPage(allowDelete: true),
               ),
               _navRow(
                 icon: Icons.headphones_rounded,
@@ -255,6 +255,9 @@ class _NovelWritingPageState extends State<NovelWritingPage> {
       charCount: draft.charCount,
       eventCount: draft.eventCount,
       preview: _previewOf(draft.content),
+      // v2 结构化 txt 会带上书名 / 世界观 / 人物档案等设定；
+      // 旧版纯正文 txt 没有这一行提示
+      settingSummary: draft.settingsSummary,
     );
     if (title == null || !mounted) return;
 
@@ -274,6 +277,8 @@ class _NovelWritingPageState extends State<NovelWritingPage> {
     // 不把它拼在成功文案后面（否则看起来像「已完整导入」）。
     final message = result.structureError != null
         ? '已导入《$name》，但事件结构解析失败（可进「大纲编辑」重试）'
+        : draft.hasSettings
+        ? '已导入《$name》，共 ${result.eventCount} 个事件，含小说设定'
         : '已导入《$name》，共 ${result.eventCount} 个事件';
     // SnackBarAction 会在用户之后任意时刻点击：捕获 NavigatorState 而不是
     // 页面 context，避免本页已经退出时用到失效的 context。

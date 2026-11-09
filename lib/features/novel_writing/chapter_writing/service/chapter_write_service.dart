@@ -6,6 +6,7 @@ import '../../shared/domain/outline_record.dart';
 import '../../shared/domain/outline_chapter.dart';
 import '../../shared/domain/character_profile.dart';
 import '../../shared/data/outline_db_helper.dart';
+import '../../shared/outline_foreshadow_filter.dart';
 
 /// 章节写作工具：按需查询人物档案。
 /// 章节生成时不注入全部人物，主角直接注入；模型遇到其他人物时调用本工具获取其档案。
@@ -92,9 +93,11 @@ class ChapterWritePromptTemplate {
     final charactersSection = characters.trim().isEmpty
         ? ''
         : '\n\n【人物档案】\n${characters.trim()}';
-    final foreshadowsSection = foreshadows.trim().isEmpty
+    // 已回收 / 已实现的伏笔不再注入（旧记录里的清单可能是历史纯文本）
+    final activeForeshadows = filterResolvedForeshadowText(foreshadows);
+    final foreshadowsSection = activeForeshadows.isEmpty
         ? ''
-        : '\n\n【伏笔清单】\n${foreshadows.trim()}';
+        : '\n\n【伏笔清单】\n$activeForeshadows';
     final charactersRule = characters.trim().isEmpty
         ? ''
         : '\n- 人物行为、言谈必须符合【人物档案】中设定的性格与能力，禁止擅自改变角色性格';
@@ -423,6 +426,8 @@ class ChapterWriteService {
     required String foreshadows,
     required String chapterContent,
   }) {
+    // 已回收 / 已实现的伏笔不再注入审校提示词
+    final activeForeshadows = filterResolvedForeshadowText(foreshadows);
     return [
       {
         'role': 'system',
@@ -444,7 +449,7 @@ class ChapterWriteService {
             '【上一个小事件小结】\n${prevEnding.isEmpty ? '（无）' : prevEnding}\n\n'
             '【全局剧情状态】\n${storyState.trim().isEmpty ? '（无）' : storyState.trim()}\n\n'
             '【人物档案】\n${characters.trim().isEmpty ? '（无）' : characters.trim()}\n\n'
-            '【伏笔清单】\n${foreshadows.trim().isEmpty ? '（无）' : foreshadows.trim()}\n\n'
+            '【伏笔清单】\n${activeForeshadows.isEmpty ? '（无）' : activeForeshadows}\n\n'
             '【正文】\n$chapterContent',
       },
     ];

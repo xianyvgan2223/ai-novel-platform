@@ -44,12 +44,12 @@ void main() {
   }
 
   /// 系统提示词里【某栏目】的内容：栏目那一行（值可能就写在同一行，如
-  /// 「【当前事件】章节 · 丙」）加上随后到**下一个栏目**为止的正文行。
+  /// 「【当前事件】小事件 · 丙」）加上随后到**下一个栏目**为止的正文行。
   /// 只按栏目名切段、不把空行当分隔——正文里的换行与空行都要保留。
   /// 系统提示词里所有栏目的名字（按 buildSystemPrompt 里的顺序）。
   ///
   /// 不能拿「以【开头」当栏目判断：正文行本身也长这样
-  /// （`【大事件】大事件C：…` / `【章节】甲：…`），会被误当成新栏目把上一节截断。
+  /// （`【大事件】大事件C：…` / `【小事件】甲：…`），会被误当成新栏目把上一节截断。
   const sectionNames = <String>[
     '小说设定',
     '当前事件',
@@ -60,7 +60,7 @@ void main() {
     '前一事件',
     '后续事件',
     '下一个大事件',
-    '已写章节的剧情状态',
+    '已写小事件的剧情状态',
     '伏笔清单',
   ];
 
@@ -70,7 +70,7 @@ void main() {
   );
 
   /// 系统提示词里【某栏目】的内容：栏目那一行（值可能就写在同一行，如
-  /// 「【当前事件】章节 · 丙」）加上随后到**下一个栏目**为止的正文行。
+  /// 「【当前事件】小事件 · 丙」）加上随后到**下一个栏目**为止的正文行。
   String section(String prompt, String name) {
     final header = '【$name】';
     final out = <String>[];
@@ -143,12 +143,12 @@ void main() {
       // 所属大事件 B（也是「前一事件」会取到的那一条）不重复
       expect(countLine(selected, '【大事件】大事件B'), 0);
       // 【前一事件】只给最近两条非大事件：乙、丙；这两条已在里面，也不重复
-      expect(countLine(selected, '【章节】乙'), 0);
-      expect(countLine(selected, '【章节】丙'), 0);
+      expect(countLine(selected, '【小事件】乙'), 0);
+      expect(countLine(selected, '【小事件】丙'), 0);
       // 当前事件自己不该出现在「同批所选」里
-      expect(selected, isNot(contains('【章节】丙')));
+      expect(selected, isNot(contains('【小事件】丙')));
       // B 之下、丙之前的更早小事件照常注入
-      expect(countLine(selected, '【章节】甲'), 1);
+      expect(countLine(selected, '【小事件】甲'), 1);
       // 注：后面的大事件若也被用户勾选了，仍会由「同批所选事件」带上——
       // 那是用户自己勾的，与本节「只注入之前」的规则不是一回事。
     });
@@ -223,7 +223,7 @@ void main() {
         reason: '按时间先后排列',
       );
       // 当前事件、所属大事件、后续事件分列各自栏目，不受影响
-      expect(section(system, '当前事件'), contains('章节 · 丙'));
+      expect(section(system, '当前事件'), contains('小事件 · 丙'));
       expect(section(system, '所属大事件'), contains('大事件B'));
       expect(section(system, '后续事件'), contains('大事件C'));
       // 「之后的大事件」绝不能进【之前所有大事件】段
@@ -269,7 +269,7 @@ void main() {
       expect(ctrl.aiNextMajorText, isEmpty);
       expect(ctrl.aiHasNextMajorToInject, isFalse);
       // 关着时后续事件照旧：C 与 丁（都在紧邻两条内）
-      expect(ctrl.aiNextEventsText, '【大事件】大事件C：大事件C 的概要\n【章节】丁：丁 的概要');
+      expect(ctrl.aiNextEventsText, '【大事件】大事件C：大事件C 的概要\n【小事件】丁：丁 的概要');
     });
 
     test('关闭时下一个大事件只能靠【后续事件】的位置进来，没有别的来源', () {
@@ -286,12 +286,12 @@ void main() {
 
       // 「甲」：后面两条是 B、乙，下一个大事件 B 正好在窗口里（不是缺口）
       final jia = makeController(target: 1);
-      expect(jia.aiNextEventsText, '【大事件】大事件B：大事件B 的概要\n【章节】乙：乙 的概要');
+      expect(jia.aiNextEventsText, '【大事件】大事件B：大事件B 的概要\n【小事件】乙：乙 的概要');
 
       // 「乙」：下一个大事件是 C，而后面两条是 丙、C —— 中间隔了丙这一条，
       // 但 C 仍落在第二条里，所以看得到
       final yi = makeController(target: 3);
-      expect(yi.aiNextEventsText, '【章节】丙：丙 的概要\n【大事件】大事件C：大事件C 的概要');
+      expect(yi.aiNextEventsText, '【小事件】丙：丙 的概要\n【大事件】大事件C：大事件C 的概要');
 
       // 真正的缺口：只有"下一个大事件"落在【后续事件】两条之外时才注入不到。
       // 用 4 个小事件隔开它（见下面 farChapters 那组用例）
@@ -304,14 +304,14 @@ void main() {
       expect(ctrl.aiNextMajorText, '大事件C：大事件C 的概要');
       expect(ctrl.aiHasNextMajorToInject, isTrue);
       // 后续事件里不再重复它，并且补上再下一条，仍然只有两条
-      expect(ctrl.aiNextEventsText, '【章节】丁：丁 的概要\n【大事件】大事件D：大事件D 的概要');
+      expect(ctrl.aiNextEventsText, '【小事件】丁：丁 的概要\n【大事件】大事件D：大事件D 的概要');
       expect(countLine(ctrl.aiNextEventsText, '【大事件】大事件C'), 0);
     });
 
     test('下一个大事件离得远（中间隔了 3 个小事件）时也能注入', () {
       final ctrl = makeFar(); // 「丙」→ 下一个大事件是 C（第 9 个）
       // 先看关着开关时的缺口：后续两条里只有丁、戊，看不到 C
-      expect(ctrl.aiNextEventsText, '【章节】丁：丁 的概要\n【章节】戊：戊 的概要');
+      expect(ctrl.aiNextEventsText, '【小事件】丁：丁 的概要\n【小事件】戊：戊 的概要');
       expect(ctrl.aiNextMajorText, isEmpty);
       expect(
         joined([
@@ -328,7 +328,7 @@ void main() {
       expect(ctrl.aiNextMajorText, '大事件C：大事件C 的概要');
       expect(ctrl.aiHasNextMajorToInject, isTrue);
       // 后续事件保持"紧邻两条"的预览，不因为注入 C 而跳过中间的小事件
-      expect(ctrl.aiNextEventsText, '【章节】丁：丁 的概要\n【章节】戊：戊 的概要');
+      expect(ctrl.aiNextEventsText, '【小事件】丁：丁 的概要\n【小事件】戊：戊 的概要');
     });
 
     test('紧邻的大事件也单独开一节：开关一开表现恒定，不因远近变来变去', () {
@@ -388,7 +388,7 @@ void main() {
               as String;
 
       expect(section(system, '下一个大事件'), contains('大事件C：大事件C 的概要'));
-      expect(section(system, '后续事件'), contains('【章节】丁'));
+      expect(section(system, '后续事件'), contains('【小事件】丁'));
       expect(
         system.indexOf('【下一个大事件】'),
         greaterThan(system.indexOf('【后续事件】')),

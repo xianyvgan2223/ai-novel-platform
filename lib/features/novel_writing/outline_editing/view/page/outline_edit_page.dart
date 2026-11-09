@@ -9,15 +9,21 @@ import '../../model/outline_edit_draft.dart';
 import '../widget/event_type_tag.dart';
 import '../widget/outline_ai_chat_sheet.dart';
 
+/// 卡片右上角「⋯」菜单里的操作（添加事件 / 删除事件 / AI 生成）。
+enum _DraftMenuAction { add, delete, ai }
+
 /// 「大纲编辑」页面：只编辑大纲，不改动正文。
 ///
 /// 所选章节一次性内联铺开（不再逐章切换）：每张卡片直接编辑事件标题与事件概要，
-/// 卡片右上角「AI 生成」按章节唤起 AI 对话面板，生成结果可替换 / 追加概要或替换标题，
 /// 底部一次保存全部改动。
 ///
-/// 结构也能改：卡片右上角的「＋」是**唯一**的新增入口，点它先选加在这一条的
-/// 上方还是下方，再选大事件 / 小事件；「🗑」删除该事件。增删同时落在大纲正文
-/// 与章节行上，保存时一起生效（见 OutlineEditController.addEvent / deleteEvent）。
+/// 每张卡片**右上角是横排三个点「⋯」**：展开菜单里是「添加事件 / 删除事件 /
+/// AI 生成」三个操作——AI 按这一条唤起对话面板，生成结果可替换 / 追加概要或替换
+/// 标题；添加会先问加在它的上方还是下方、再问大事件 / 小事件；删除会先如实告知
+/// 影响面。增删同时落在大纲正文与章节行上，保存时一起生效
+/// （见 OutlineEditController.addEvent / deleteEvent）。
+///
+/// 右侧常显可拖动滚动条：事件多时按住滚动条可直接拖到目标位置（快速下滑）。
 class OutlineEditPage extends StatefulWidget {
   final OutlineRecord outline;
   final List<OutlineChapter> chapters;
@@ -72,9 +78,9 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
     final count = await _controller.saveAll();
     if (!mounted) return;
     if (_controller.saveError.isNotEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('保存失败：${_controller.saveError}')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('保存失败：${_controller.saveError}')));
       return;
     }
     ScaffoldMessenger.of(context).showSnackBar(
@@ -107,10 +113,7 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
         actions: [
           TextButton(
             onPressed: () => closeDialogSafely(ctx, result: 'discard'),
-            child: Text(
-              '不保存',
-              style: TextStyle(color: p.textTertiary),
-            ),
+            child: Text('不保存', style: TextStyle(color: p.textTertiary)),
           ),
           TextButton(
             onPressed: () => closeDialogSafely(ctx, result: 'cancel'),
@@ -185,16 +188,8 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            _positionOption(
-              ctx,
-              above: true,
-              title: '在$subject上方添加',
-            ),
-            _positionOption(
-              ctx,
-              above: false,
-              title: '在$subject下方添加',
-            ),
+            _positionOption(ctx, above: true, title: '在$subject上方添加'),
+            _positionOption(ctx, above: false, title: '在$subject下方添加'),
           ],
         ),
         actions: [
@@ -330,10 +325,7 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
               ),
             ),
             if (first)
-              Text(
-                '默认',
-                style: TextStyle(fontSize: 10, color: p.textTertiary),
-              ),
+              Text('默认', style: TextStyle(fontSize: 10, color: p.textTertiary)),
           ],
         ),
       ),
@@ -378,9 +370,7 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
     final where = draft == null ? '末尾' : (above ? '上方' : '下方');
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(
-          '已在$where添加${isMajor ? "大事件" : "小事件"}，可直接改标题；保存后生效',
-        ),
+        content: Text('已在$where添加${isMajor ? "大事件" : "小事件"}，可直接改标题；保存后生效'),
         duration: const Duration(seconds: 1),
       ),
     );
@@ -415,11 +405,7 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text('删除「$name」？'),
-        content: Text(
-          lines.isEmpty
-              ? '将从大纲里移除这一条，保存后生效。'
-              : lines.join('\n\n'),
-        ),
+        content: Text(lines.isEmpty ? '将从大纲里移除这一条，保存后生效。' : lines.join('\n\n')),
         actions: [
           TextButton(
             onPressed: () => closeDialogSafely(ctx, result: false),
@@ -466,39 +452,23 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
             bottomNavigationBar: _controller.drafts.isEmpty
                 ? null
                 : _buildBottomBar(),
-            body: _controller.drafts.isEmpty
-                ? _buildEmptyBody()
-                : _buildBody(),
+            body: _controller.drafts.isEmpty ? _buildEmptyBody() : _buildBody(),
           ),
         );
       },
     );
   }
 
-  /// 没有可编辑章节时的兜底：仍然允许「添加事件」，否则一卷大纲都没解析出来时
-  /// 连一条都建不了，只能回上一页。这时没有「上一条」可选，直接追加成第一条。
+  /// 没有可编辑章节时的兜底：只提示。
+  ///
+  /// 添加事件入口已收进每张卡片右上角的「⋯」菜单；一条卡片都没有时没有可挂的
+  /// 菜单，保持只读提示（用户可回上一页先解析结构）。
   Widget _buildEmptyBody() {
     final p = context.palette;
     return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            '没有可编辑的事件',
-            style: TextStyle(fontSize: 14, color: p.textTertiary),
-          ),
-          const SizedBox(height: 10),
-          OutlinedButton.icon(
-            onPressed: () => _addEvent(null),
-            icon: const Icon(Icons.add, size: 16),
-            label: const Text('添加一个大事件'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: p.accent,
-              side: BorderSide(color: p.borderStrong),
-              textStyle: const TextStyle(fontSize: 13),
-            ),
-          ),
-        ],
+      child: Text(
+        '没有可编辑的事件',
+        style: TextStyle(fontSize: 14, color: p.textTertiary),
       ),
     );
   }
@@ -548,10 +518,7 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
                   height: 14,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-              : Text(
-                  '保存',
-                  style: TextStyle(fontSize: 14, color: p.accent),
-                ),
+              : Text('保存', style: TextStyle(fontSize: 14, color: p.accent)),
         ),
       ],
     );
@@ -586,10 +553,7 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
               const SizedBox(width: 8),
               Text(
                 '${drafts.length} 个事件',
-                style: TextStyle(
-                  fontSize: 11,
-                  color: p.textTertiary,
-                ),
+                style: TextStyle(fontSize: 11, color: p.textTertiary),
               ),
               const SizedBox(width: 8),
               // 伏笔清单入口：页面条右侧是空的，顺手把「伏笔 N」排在事件数后面
@@ -599,24 +563,39 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
           ),
         ),
         Expanded(
-          child: ListView.builder(
+          // 常显 + 可拖动的滚动条：事件多时按住拇指上下拖，快速到达目标位置。
+          // - 贴屏幕右边缘显示（crossAxisMargin 0），视觉上就是系统滚动条的位置；
+          // - thumbVisibility 常显：随时能看到自己在大纲的哪个位置；
+          // - interactive：滚动条本身可以拖（Android 默认只允许滑动列表）；
+          //   拖动热区是拇指中心 48px 的圆，按住时落点稍微往内一点再拖，
+          //   避免从最边缘起手被系统的返回手势抢走。
+          child: RawScrollbar(
             controller: _scrollCtrl,
-            // 缓存区特意放大（默认只有 250px）。
-            //
-            // 为什么：输入法升起时视口变矮，屏幕下方的卡片会掉出缓存区被**卸载**；
-            // 收起时视口还原，它们又要**重新 build** 回来。卸载便宜、重建贵
-            // （一张卡片含标题 / 概要两个 TextField），所以症状表现为
-            // 「升起还行、收起下降时掉帧」。
-            //
-            // 取值依据：最坏情况是「原本贴着视口底边的那张卡片」，它不被卸载的条件是
-            // `缓存区 ≥ 键盘高度 − 卡片高度`，取最坏（卡片高度趋 0）即约等于键盘高度。
-            // 手机键盘 300~400px，平板竖屏 / 横屏可达 500~600px，故取 1000 留足余量。
-            // 代价是多保活几张卡片；若快速滑动列表时出现空白帧，可适当调小。
-            scrollCacheExtent: const ScrollCacheExtent.pixels(1000),
-            padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-            itemCount: drafts.length,
-            itemBuilder: (context, index) =>
-                _buildDraftCard(index, drafts[index]),
+            thumbVisibility: true,
+            interactive: true,
+            thickness: 5,
+            radius: const Radius.circular(2.5),
+            minThumbLength: 44,
+            thumbColor: p.textTertiary.withValues(alpha: 0.5),
+            child: ListView.builder(
+              controller: _scrollCtrl,
+              // 缓存区特意放大（默认只有 250px）。
+              //
+              // 为什么：输入法升起时视口变矮，屏幕下方的卡片会掉出缓存区被**卸载**；
+              // 收起时视口还原，它们又要**重新 build** 回来。卸载便宜、重建贵
+              // （一张卡片含标题 / 概要两个 TextField），所以症状表现为
+              // 「升起还行、收起下降时掉帧」。
+              //
+              // 取值依据：最坏情况是「原本贴着视口底边的那张卡片」，它不被卸载的条件是
+              // `缓存区 ≥ 键盘高度 − 卡片高度`，取最坏（卡片高度趋 0）即约等于键盘高度。
+              // 手机键盘 300~400px，平板竖屏 / 横屏可达 500~600px，故取 1000 留足余量。
+              // 代价是多保活几张卡片；若快速滑动列表时出现空白帧，可适当调小。
+              scrollCacheExtent: const ScrollCacheExtent.pixels(1000),
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+              itemCount: drafts.length,
+              itemBuilder: (context, index) =>
+                  _buildDraftCard(index, drafts[index]),
+            ),
           ),
         ),
       ],
@@ -645,11 +624,7 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              Icons.bookmark_border,
-              size: 13,
-              color: p.accent,
-            ),
+            Icon(Icons.bookmark_border, size: 13, color: p.accent),
             const SizedBox(width: 4),
             Text(
               // 上下文还没读回来时不显示条数：开页一瞬间的「0」会让人误以为清单是空的
@@ -679,17 +654,16 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
 
   /// 单章大纲卡片。
   ///
-  /// 版面顺序：**标题与「＋ / 🗑 / AI 生成」同一行** → 类型标签与状态 → 概要。
+  /// 版面顺序：**标题与右上角「⋯」菜单同一行** → 类型标签与状态 → 概要。
+  /// 「⋯」菜单里是「添加事件 / 删除事件 / AI 生成」三个操作：
+  /// - 添加：先选加在这一条的上方 / 下方，再选大事件 / 小事件；
+  /// - 删除：先按影响面确认；
+  /// - AI 生成：按这一条唤起 AI 对话面板。
   ///
   /// 类型标签里带序号：大事件按全篇第几个大事件（大事件57），小事件按它在该
   /// 大事件名下第几个（小事件2）——与大纲正文里的「══ 大事件N」/「○ 小事件N」
   /// 是同一套编号，和「听大纲改名」页卡片也一致。序号由控制器按**全篇**算
   /// （不能拿本页卡片下标：只勾选了几章时，下标与正文序号毫无关系）。
-  ///
-  /// 为什么改：原先操作按钮独占卡片最上面一行，标题在它下面。概要有长有短时，
-  /// 那张「按钮条」跟它管的那条标题会被拉开很远，连着几张卡片看下来就是一排
-  /// 悬空的 ＋🗑——分不清点的是哪一条，删除这种破坏性操作尤其危险。
-  /// 现在按钮贴在标题行右侧，指哪打哪。
   Widget _buildDraftCard(int index, OutlineEditDraft draft) {
     final p = context.palette;
     final key = _cardKeys.putIfAbsent(draft.localId, () => GlobalKey());
@@ -732,37 +706,44 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
                   ),
                 ),
               ),
-              const SizedBox(width: 6),
-              _cardAction(
-                icon: Icons.add,
-                tooltip: '在它上方 / 下方添加事件',
-                color: p.accent,
-                onPressed: _controller.saving
-                    ? null
-                    : () => _addEvent(draft),
-              ),
-              _cardAction(
-                icon: Icons.delete_outline,
-                tooltip: '删除该事件',
-                color: p.danger,
-                onPressed: _controller.saving
-                    ? null
-                    : () => _deleteEvent(draft),
-              ),
-              TextButton.icon(
-                onPressed: () => _openAiSheet(index),
-                icon: const Icon(Icons.auto_awesome, size: 14),
-                label: const Text(
-                  'AI 生成',
-                  style: TextStyle(fontSize: 12),
-                ),
-                style: TextButton.styleFrom(
-                  foregroundColor: p.accent,
-                  visualDensity: VisualDensity.compact,
-                  padding: const EdgeInsets.symmetric(horizontal: 6),
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
+              const SizedBox(width: 4),
+              // 右上角**横排三个点「⋯」**：添加 / 删除 / AI 生成都收进这个展开菜单，
+              // 平时只占一个小图标，不再让三个按钮把标题行挤窄。
+              PopupMenuButton<_DraftMenuAction>(
+                tooltip: '更多操作',
+                icon: Icon(Icons.more_horiz, size: 20, color: p.textTertiary),
+                padding: EdgeInsets.zero,
+                splashRadius: 16,
+                onSelected: (action) {
+                  switch (action) {
+                    case _DraftMenuAction.add:
+                      _addEvent(draft);
+                    case _DraftMenuAction.delete:
+                      _deleteEvent(draft);
+                    case _DraftMenuAction.ai:
+                      _openAiSheet(index);
+                  }
+                },
+                itemBuilder: (_) => [
+                  _draftMenuItem(
+                    _DraftMenuAction.add,
+                    Icons.add,
+                    '添加事件',
+                    p.accent,
+                  ),
+                  _draftMenuItem(
+                    _DraftMenuAction.delete,
+                    Icons.delete_outline,
+                    '删除事件',
+                    p.danger,
+                  ),
+                  _draftMenuItem(
+                    _DraftMenuAction.ai,
+                    Icons.auto_awesome,
+                    'AI 生成',
+                    p.accent,
+                  ),
+                ],
               ),
             ],
           ),
@@ -784,24 +765,16 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
                   draft.hasContent ? '已写正文' : '未写正文',
                   style: TextStyle(
                     fontSize: 10,
-                    color: draft.hasContent
-                        ? p.success
-                        : p.textTertiary,
+                    color: draft.hasContent ? p.success : p.textTertiary,
                   ),
                 ),
                 if (draft.isNew) ...[
                   const SizedBox(width: 6),
-                  Text(
-                    '新增',
-                    style: TextStyle(fontSize: 10, color: p.accent),
-                  ),
+                  Text('新增', style: TextStyle(fontSize: 10, color: p.accent)),
                 ],
                 if (draft.isDirty) ...[
                   const SizedBox(width: 6),
-                  Text(
-                    '已修改',
-                    style: TextStyle(fontSize: 10, color: p.warning),
-                  ),
+                  Text('已修改', style: TextStyle(fontSize: 10, color: p.warning)),
                 ],
               ],
             ),
@@ -837,25 +810,33 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
     );
   }
 
-  /// 卡片头部的小图标按钮（添加 / 删除）：图标比「AI 生成」更紧凑，
-  /// 一行里塞得下类型标签、状态、三个操作入口
-  Widget _cardAction({
-    required IconData icon,
-    required String tooltip,
-    required Color color,
-    required VoidCallback? onPressed,
-  }) {
+  /// 「⋯」菜单里的一行：图标 + 文案，删除用危险色，其余用主色。
+  /// 字号/行高都压小：三个操作只是辅助入口，菜单别喧宾夺主。
+  PopupMenuItem<_DraftMenuAction> _draftMenuItem(
+    _DraftMenuAction value,
+    IconData icon,
+    String label,
+    Color color,
+  ) {
     final p = context.palette;
-    return IconButton(
-      icon: Icon(icon, size: 16),
-      color: color,
-      disabledColor: p.textTertiary,
-      tooltip: tooltip,
-      onPressed: onPressed,
-      visualDensity: VisualDensity.compact,
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-      splashRadius: 16,
+    return PopupMenuItem<_DraftMenuAction>(
+      value: value,
+      height: 34,
+      child: Row(
+        children: [
+          Icon(icon, size: 13, color: color),
+          const SizedBox(width: 7),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11.5,
+              color: value == _DraftMenuAction.delete
+                  ? p.danger
+                  : p.textPrimary,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -882,10 +863,7 @@ class _OutlineEditPageState extends State<OutlineEditPage> {
             Expanded(
               child: Text(
                 _pendingText(dirty, structure),
-                style: TextStyle(
-                  fontSize: 12,
-                  color: p.textSecondary,
-                ),
+                style: TextStyle(fontSize: 12, color: p.textSecondary),
               ),
             ),
             const SizedBox(width: 4),
@@ -1017,10 +995,7 @@ class _ForeshadowsSheetState extends State<_ForeshadowsSheet> {
               if (!closeDialogSafely(ctx, result: true)) return;
               scheduleControllerDispose(editCtrl);
             },
-            child: Text(
-              '保存',
-              style: TextStyle(fontSize: 12, color: p.accent),
-            ),
+            child: Text('保存', style: TextStyle(fontSize: 12, color: p.accent)),
           ),
         ],
       ),
@@ -1063,11 +1038,7 @@ class _ForeshadowsSheetState extends State<_ForeshadowsSheet> {
             child: Row(
               children: [
                 const SizedBox(width: 2),
-                Icon(
-                  Icons.bookmark_border,
-                  size: 16,
-                  color: p.accent,
-                ),
+                Icon(Icons.bookmark_border, size: 16, color: p.accent),
                 const SizedBox(width: 6),
                 const Text(
                   '伏笔清单',
@@ -1077,10 +1048,7 @@ class _ForeshadowsSheetState extends State<_ForeshadowsSheet> {
                 if (lines.isNotEmpty)
                   Text(
                     '${lines.length} 条',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: p.textTertiary,
-                    ),
+                    style: TextStyle(fontSize: 11, color: p.textTertiary),
                   ),
                 const Spacer(),
                 TextButton.icon(
@@ -1136,11 +1104,7 @@ class _ForeshadowsSheetState extends State<_ForeshadowsSheet> {
                           // 与剧情账本的伏笔清单同一个样式（小圆点 + 正文）
                           Padding(
                             padding: const EdgeInsets.only(top: 5),
-                            child: Icon(
-                              Icons.circle,
-                              size: 6,
-                              color: p.accent,
-                            ),
+                            child: Icon(Icons.circle, size: 6, color: p.accent),
                           ),
                           const SizedBox(width: 8),
                           Expanded(

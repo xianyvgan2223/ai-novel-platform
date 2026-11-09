@@ -38,32 +38,169 @@ void main() {
     return Uint8List.fromList(bytes);
   }
 
-  group('导出编码', () {
-    test('UTF-8 + BOM，正文原样追加', () {
-      const content = '══ 大事件1：开端 ══\n  ○ 小事件1：初遇\n    概要一';
-      final bytes = encodeOutlineTxtBytes(content);
+  group('导出格式（v2 结构化：正文 + 小说设定 + 人物档案）', () {
+    const charactersJson =
+        '[{"name":"顾泽","description":"主角，江城异能署署长",'
+        '"abilities":"异能「界」，削峰拉平","personality":"冷静",'
+        '"is_protagonist":true}]';
+    const content = '══ 大事件1：初见 ══\n\n○ 小事件1：相遇\n    两人在地铁站相遇';
+
+    test('UTF-8 + BOM，带 v2 文件头、设定章节与正文', () {
+      final bytes = encodeOutlineTxtDocumentBytes(
+        title: '测试书',
+        genre: '玄幻',
+        theme: '成长',
+        protagonist: '顾泽',
+        worldview: '九域',
+        foreshadows: '旧铁条',
+        charactersJson: charactersJson,
+        content: content,
+      );
       expect(bytes.sublist(0, 3), kOutlineTxtUtf8Bom);
-      expect(utf8.decode(bytes.sublist(3)), content);
+      final text = utf8.decode(bytes.sublist(3));
+      expect(text.split('\n').first, kOutlineTxtMagic);
+      expect(text, contains('## 书名\n测试书'));
+      expect(text, contains('## 类型\n玄幻'));
+      expect(text, contains('## 主题\n成长'));
+      expect(text, contains('## 主角简介\n顾泽'));
+      expect(text, contains('## 世界观\n九域'));
+      expect(text, contains('## 伏笔清单\n旧铁条'));
+      expect(text, contains('## 人物档案\n- 姓名：顾泽'));
+      expect(text, contains('  描述：主角，江城异能署署长'));
+      expect(text, contains('  主角：是'));
+      // 正文原样放在「## 大纲正文」之后（只允许尾部多一个换行）
+      final body = text
+          .substring(text.indexOf('## 大纲正文') + '## 大纲正文'.length)
+          .trim();
+      expect(body, content);
     });
 
-    test('导出字节能被导入解码还原（往返一致）', () {
-      // 用 App 规范格式（生成/落库后的形态）：normalizeOutlineText 幂等，
-      // 导出 → 导入不会改动一个字节
-      const content =
-          '书名：《测试书》\n\n══ 大事件1：开端 ══\n○ 小事件1：初遇\n    概要一\n\n══ 大事件2：发展 ══';
-      final decoded = prepareOutlineTxtContent(
-        decodeOutlineTxtBytes(encodeOutlineTxtBytes(content)),
+    test('空字段整节省略，正文照常导出', () {
+      final text = renderOutlineTxtDocument(
+        title: '只有正文',
+        content: '══ 大事件1：开端 ══',
       );
-      // normalizeOutlineText 对已规范化的文本幂等，导出正文不会被改写
-      expect(decoded, content);
-      expect(countOutlineTxtEvents(decoded), 3);
+      expect(text, isNot(contains('## 类型')));
+      expect(text, isNot(contains('## 世界观')));
+      expect(text, isNot(contains('## 人物档案')));
+      expect(text, contains('## 大纲正文'));
+    });
+
+    test('导出文本与网页端逐字节一致（固定夹具，防止两端格式漂移）', () {
+      // 该期望值同时由网页端 `renderOutlineTxtDocument` 生成并校验（Node 直跑，
+      // 见 reports/outline-txt-transfer-verify.md 的 v2 格式交叉校验）
+      const expected =
+          '# DeepSeek 大纲导出 v2\n'
+          '\n'
+          '## 书名\n'
+          '格式夹具\n'
+          '\n'
+          '## 类型\n'
+          '玄幻\n'
+          '\n'
+          '## 大纲正文\n'
+          '\n'
+          '══ 大事件1：开端 ══\n';
       expect(
-        deriveOutlineTxtTitle(
-          fileName: outlineTxtFileName('测试书'),
-          content: decoded,
+        renderOutlineTxtDocument(
+          title: '格式夹具',
+          genre: '玄幻',
+          content: '══ 大事件1：开端 ══',
         ),
+        expected,
+      );
+    });
+
+    test('导入解析：v2 还原书名 / 设定 / 人物档案 / 正文', () {
+      final doc = decodeOutlineTxtDocumentBytes(
+        encodeOutlineTxtDocumentBytes(
+          title: '测试书',
+          genre: '玄幻',
+          theme: '成长',
+          protagonist: '顾泽',
+          worldview: '九域',
+          foreshadows: '旧铁条',
+          charactersJson: charactersJson,
+          content: content,
+        ),
+      );
+      expect(doc.structured, isTrue);
+      expect(doc.title, '测试书');
+      expect(doc.genre, '玄幻');
+      expect(doc.theme, '成长');
+      expect(doc.protagonist, '顾泽');
+      expect(doc.worldview, '九域');
+      expect(doc.foreshadows, '旧铁条');
+      expect(doc.characters, hasLength(1));
+      expect(doc.characters.single.name, '顾泽');
+      expect(doc.characters.single.abilities, '异能「界」，削峰拉平');
+      expect(doc.characters.single.isProtagonist, isTrue);
+      expect(doc.charactersJson, contains('"is_protagonist":true'));
+      expect(doc.content, content);
+      expect(doc.hasSettings, isTrue);
+      expect(doc.settingsSummary, '类型、主题、主角简介、世界观、伏笔清单 · 人物档案 1 人');
+      expect(
+        deriveOutlineTxtTitleForDocument(document: doc, fileName: '随便.txt'),
         '测试书',
       );
+    });
+
+    test('人物档案多行描述往返一致（含以 - 开头的行与缩进行）', () {
+      const multiLine =
+          '[{"name":"顾泽","description":"第一行\\n- 列表项\\n  缩进行",'
+          '"abilities":"","personality":"冷静","is_protagonist":false}]';
+      final doc = decodeOutlineTxtDocumentBytes(
+        encodeOutlineTxtDocumentBytes(
+          title: '多行人物',
+          charactersJson: multiLine,
+          content: '══ 大事件1：开端 ══',
+        ),
+      );
+      expect(doc.characters.single.description, '第一行\n- 列表项\n  缩进行');
+      expect(doc.characters.single.isProtagonist, isFalse);
+    });
+
+    test('旧版纯正文 txt（无 v2 文件头）仍按纯正文导入', () {
+      const raw = '大事件1：开端\n○ **小事件1：初遇**\n概要';
+      final doc = parseOutlineTxtDocument(raw);
+      expect(doc.structured, isFalse);
+      expect(doc.title, isEmpty);
+      expect(doc.hasSettings, isFalse);
+      expect(doc.content, contains('══ 大事件1：开端 ══'));
+      expect(doc.content, contains('○ 小事件1：初遇'));
+    });
+
+    test('v2 文件只有设定、正文为空也能导入（不会当空文件）', () {
+      const raw =
+          '$kOutlineTxtMagic\n\n## 书名\n设定书\n\n## 世界观\n九域\n\n## 大纲正文\n\n';
+      final doc = parseOutlineTxtDocument(raw);
+      expect(doc.structured, isTrue);
+      expect(doc.title, '设定书');
+      expect(doc.worldview, '九域');
+      expect(doc.content, isEmpty);
+      expect(doc.hasSettings, isTrue);
+    });
+
+    test('导出 → 导入 → 再导出：字节完全相同', () {
+      final first = encodeOutlineTxtDocumentBytes(
+        title: '测试书',
+        genre: '玄幻',
+        protagonist: '顾泽',
+        charactersJson: charactersJson,
+        content: content,
+      );
+      final doc = decodeOutlineTxtDocumentBytes(first);
+      final second = encodeOutlineTxtDocumentBytes(
+        title: doc.title,
+        genre: doc.genre,
+        theme: doc.theme,
+        protagonist: doc.protagonist,
+        worldview: doc.worldview,
+        foreshadows: doc.foreshadows,
+        charactersJson: doc.charactersJson,
+        content: doc.content,
+      );
+      expect(second, first);
     });
   });
 
@@ -154,9 +291,13 @@ void main() {
   });
 
   group('导入解码', () {
-    test('带 BOM 的 UTF-8', () {
-      final bytes = encodeOutlineTxtBytes('中文大纲');
-      expect(decodeOutlineTxtBytes(bytes), '中文大纲');
+    test('带 BOM 的 UTF-8（结构化导出字节）', () {
+      final bytes = encodeOutlineTxtDocumentBytes(
+        title: '中文大纲',
+        content: '中文大纲',
+      );
+      expect(decodeOutlineTxtBytes(bytes), contains(kOutlineTxtMagic));
+      expect(decodeOutlineTxtDocumentBytes(bytes).title, '中文大纲');
     });
 
     test('不带 BOM 的 UTF-8', () {
@@ -412,6 +553,40 @@ void main() {
 
       expect(find.byType(AlertDialog), findsNothing);
       expect(result, '改过的书名');
+    });
+
+    testWidgets('v2 文件显示已识别的小说设定摘要', (tester) async {
+      String? result;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => ElevatedButton(
+              onPressed: () async {
+                result = await showOutlineTxtImportDialog(
+                  context,
+                  fileName: '结构化大纲.txt',
+                  initialTitle: '结构化书',
+                  charCount: 200,
+                  eventCount: 6,
+                  preview: '══ 大事件1：开端 ══',
+                  settingSummary: '类型、世界观 · 人物档案 2 人',
+                );
+              },
+              child: const Text('打开'),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('打开'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('已识别小说设定：类型、世界观 · 人物档案 2 人'), findsOneWidget);
+      // 摘要与事件数提示同时可见
+      expect(find.text('共 200 字 · 识别到 6 个事件'), findsOneWidget);
+
+      await tester.tap(find.widgetWithText(TextButton, '取消'));
+      await tester.pumpAndSettle();
+      expect(result, isNull);
     });
 
     testWidgets('事件数为 0 时给提示，取消返回 null', (tester) async {

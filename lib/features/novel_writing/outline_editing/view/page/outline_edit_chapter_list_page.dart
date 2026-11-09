@@ -1,18 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:deepseekapp/core/theme/app_palette.dart';
 import '../../../shared/data/outline_chapter_db_helper.dart';
+import '../../../shared/data/outline_record_db_helper.dart';
 import '../../../shared/domain/outline_chapter.dart';
 import '../../../shared/domain/outline_record.dart';
 import '../../../shared/list_scroll_offset.dart';
 import '../../../shared/outline_chapter_sync.dart';
 import '../../../shared/outline_load_error_view.dart';
 import '../widget/event_type_tag.dart';
+import '../widget/outline_settings_edit_sheet.dart';
 import 'outline_edit_page.dart';
 
-/// 「大纲编辑」章节选择页。
+/// 「大纲编辑」事件选择页。
 ///
-/// 点章节卡片上的复选框可就地勾选，页面底部按勾选数量进入编辑页（单章 / 多章）；
-/// 也可以点章节右侧「编辑」直接编辑单章。
+/// 默认不显示复选框：**点卡片进入编辑，长按卡片进入多选**；进入多选后
+/// 卡片左侧才出现复选框，点卡片切换勾选，底部出现多选操作栏（编辑所选）。
+/// 顶栏右侧「小说设定」可编辑书名 / 类型 / 主题 / 主角简介 / 世界观。
 /// 该小说若还没在「大纲转章节」里解析过章节，会先按大纲正文解析并落库，
 /// 保证「大纲编辑」可以直接使用。
 class OutlineEditChapterListPage extends StatefulWidget {
@@ -25,11 +28,10 @@ class OutlineEditChapterListPage extends StatefulWidget {
       OutlineEditChapterListPageState();
 }
 
-/// State 类公开（原本是私有的 `_OutlineEditChapterListPageState`）：
-/// 多选的底部操作栏只在「勾了章节」时才有内容，而勾选要经过卡片点击、
+/// State 类公开：多选底部操作栏只在勾选后出现，而勾选要经过卡片点击、
 /// 卡片又要先读库——测试环境没有 sqflite，读库必失败，卡片压根渲染不出来。
 /// 因此这里公开两个测试钩子（`debugSetSelectedForTest` / `debugSelectedForTest`），
-/// 让 `test/outline_edit_multi_select_test.dart` 能直接摆出勾选状态验底部栏。
+/// 让 `test/outline_edit_multi_select_test.dart` 能直接摆出卡片与勾选状态。
 class OutlineEditChapterListPageState
     extends State<OutlineEditChapterListPage> {
   List<OutlineChapter> _chapters = [];
@@ -43,6 +45,9 @@ class OutlineEditChapterListPageState
   final ScrollController _scrollCtrl = ScrollController();
   bool _loading = true;
   Object? _error;
+
+  /// 是否处于多选模式（有勾选时才显示复选框与底部多选栏）
+  bool get _selecting => _selected.isNotEmpty;
 
   @override
   void initState() {
@@ -96,10 +101,7 @@ class OutlineEditChapterListPageState
       // 首次进入按大纲正文解析入库；之后进入则按最新正文校正结构。
       // 旧版只在章节表为空时才解析，导致解析规则修复后旧数据永远不自愈，
       // 页面一直显示错误的章节结构。
-      await reconcileOutlineChapters(
-        outlineId: id,
-        content: record.content,
-      );
+      await reconcileOutlineChapters(outlineId: id, content: record.content);
       final rows = await OutlineChapterDbHelper().getByOutlineId(id);
       _chapters = rows.map((m) => OutlineChapter.fromMap(m)).toList();
       _selected.removeWhere((sid) => !_chapters.any((c) => c.id == sid));
@@ -130,10 +132,6 @@ class OutlineEditChapterListPageState
   }
 
   /// 全选：一次勾上全部事件。**只做全选，不再兼任「取消全选」**。
-  ///
-  /// 原先这个按钮是双向开关（全选 ☑ 后变成「取消全选」），而它要取消的东西
-  /// 与「取消选择」完全重复——两个按钮做同一件事，还容易点错（想全选却点了取消）。
-  /// 现在清空只剩「取消选择」一个出口：按钮 label 恒为「全选」，已经全选时置灰。
   void _selectAll() {
     setState(() {
       _selected
@@ -144,7 +142,7 @@ class OutlineEditChapterListPageState
 
   /// 取消多选：清空已勾选的事件。
   ///
-  /// 「编辑所选（N）」是进编辑页，这个方法是**唯一的清空出口**：底部计数旁的
+  /// 进入编辑页是「编辑所选（N）」，这个方法是**唯一的清空出口**：底部计数旁的
   /// 「取消选择」，以及返回键 / 返回手势都走它。
   void _clearSelection() {
     if (_selected.isEmpty) return;
@@ -152,10 +150,15 @@ class OutlineEditChapterListPageState
   }
 
   /// 测试钩子：直接摆出章节列表与勾选状态（见类注释）。生产代码不调用。
+  ///
+  /// 顺带清掉读库错误：测试环境没有 sqflite，进页时 `_load` 必失败，
+  /// 不把 `_error` 清掉的话卡片永远渲染不出来，长按 / 复选框行为就没法验。
   @visibleForTesting
   void debugSetSelectedForTest(Set<int> ids, {List<OutlineChapter>? chapters}) {
     setState(() {
       if (chapters != null) _chapters = chapters;
+      _error = null;
+      _loading = false;
       _selected
         ..clear()
         ..addAll(ids);
@@ -194,14 +197,85 @@ class OutlineEditChapterListPageState
   int get _completedCount =>
       _chapters.where((c) => c.status == 'completed').length;
 
-  /// 返回键 / 返回手势：勾了章节时先取消多选，第二次才真正退出页面。
+  /// 返回键 / 返回手势：多选时先取消多选，第二次才真正退出页面。
   /// （勾选是页面内的临时状态，返回键顺手把它清掉，免得退出去再进来还留着）
   void _onBackPressed() {
-    if (_selected.isNotEmpty) {
+    if (_selecting) {
       _clearSelection();
       return;
     }
     Navigator.of(context).pop();
+  }
+
+  /// 打开「小说设定」编辑弹层并落库：书名 / 类型 / 主题 / 主角简介 / 世界观。
+  ///
+  /// 书名改动会同步替换大纲正文前几行里的 `书名：《…》` 行，避免列表标题
+  /// 与正文里写着的书名对不上。
+  Future<void> _openSettings() async {
+    final id = widget.outline.id;
+    if (id == null) return;
+    final draft = await showOutlineSettingsEditSheet(
+      context,
+      initial: OutlineSettingsDraft(
+        title: _outline.title,
+        genre: _outline.genre,
+        theme: _outline.theme,
+        protagonist: _outline.protagonist,
+        worldview: _outline.worldview,
+      ),
+    );
+    if (draft == null || !mounted) return;
+
+    final nextTitle = draft.title.trim();
+    var nextContent = _outline.content;
+    if (nextTitle.isNotEmpty && nextTitle != _outline.title.trim()) {
+      nextContent = _replaceBookTitleLine(nextContent, nextTitle);
+    }
+    try {
+      await OutlineRecordDbHelper().update(id, <String, dynamic>{
+        'title': nextTitle.isEmpty ? _outline.title : nextTitle,
+        'genre': draft.genre,
+        'theme': draft.theme,
+        'protagonist': draft.protagonist,
+        'worldview': draft.worldview,
+        if (nextContent != _outline.content) 'content': nextContent,
+      });
+    } catch (e, st) {
+      debugPrint('[outline_edit_chapters] 保存小说设定失败 outline=$id：$e\n$st');
+      if (mounted) _showMessage('保存失败：$e', error: true);
+      return;
+    }
+    if (!mounted) return;
+    await _load(showLoading: false);
+    if (!mounted) return;
+    _showMessage('小说设定已保存');
+  }
+
+  /// 把正文前几行里的 `书名：《…》` 行换成新书名（保留行首缩进与写法）。
+  /// 没有书名行时原样返回（只有 record.title 变，正文不受影响）。
+  String _replaceBookTitleLine(String content, String title) {
+    final lines = content.split('\n');
+    final limit = lines.length < 5 ? lines.length : 5;
+    final pattern = RegExp(r'^(\s*)书名\s*[:：].*$');
+    for (var i = 0; i < limit; i++) {
+      final match = pattern.firstMatch(lines[i]);
+      if (match == null) continue;
+      lines[i] = '${match.group(1)}书名：《$title》';
+      return lines.join('\n');
+    }
+    return content;
+  }
+
+  void _showMessage(String message, {bool error = false}) {
+    if (!mounted) return;
+    final p = context.palette;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message, style: const TextStyle(fontSize: 12.5)),
+        backgroundColor: error ? p.danger : null,
+        duration: const Duration(seconds: 2),
+      ),
+    );
   }
 
   @override
@@ -214,9 +288,8 @@ class OutlineEditChapterListPageState
     final majorNumbers = majorEventNumbers(_chapters);
     final minorNumbers = minorEventNumbers(_chapters);
     return PopScope(
-      // 系统返回手势与顶栏返回键保持同一套行为：先取消多选，再退出页面。
-      // 否则手势一划就把页面退掉，勾选白选了（顶栏按钮却是先清勾选）。
-      canPop: _selected.isEmpty,
+      // 系统返回手势与顶栏返回键保持同一套行为：多选时先取消多选，再退出页面。
+      canPop: !_selecting,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
         _clearSelection();
@@ -237,8 +310,16 @@ class OutlineEditChapterListPageState
             icon: Icon(Icons.arrow_back, color: p.textPrimary),
             onPressed: _onBackPressed,
           ),
+          actions: [
+            IconButton(
+              icon: Icon(Icons.tune_rounded, size: 20, color: p.textPrimary),
+              tooltip: '小说设定',
+              onPressed: _loading ? null : _openSettings,
+            ),
+          ],
         ),
-        bottomNavigationBar: _loading ? null : _buildBottomBar(),
+        // 多选栏只在实际勾选了事件时出现；平时列表更干净
+        bottomNavigationBar: _loading || !_selecting ? null : _buildBottomBar(),
         body: _loading
             ? const Center(child: CircularProgressIndicator())
             : _error != null
@@ -260,29 +341,47 @@ class OutlineEditChapterListPageState
                     ),
                     color: p.accentSoft,
                     child: Text(
-                      '共 ${_chapters.length} 个事件 · 已完成 $_completedCount',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: p.textSecondary,
-                      ),
+                      '共 ${_chapters.length} 个事件 · 已完成 $_completedCount'
+                      ' · 点击编辑 / 长按多选',
+                      style: TextStyle(fontSize: 12, color: p.textSecondary),
                     ),
                   ),
                   Expanded(
-                    child: ListView.builder(
+                    // 常显 + 可拖动的滚动条：事件多时按住拇指上下拖，快速到达目标位置。
+                    // 贴屏幕右边缘显示（crossAxisMargin 0），视觉上就是系统滚动条的位置；
+                    // 拖动热区是拇指中心 48px 的圆，按住时落点稍微往内一点再拖，
+                    // 避免从最边缘起手被系统的返回手势抢走。
+                    child: RawScrollbar(
                       controller: _scrollCtrl,
-                      padding: const EdgeInsets.all(10),
-                      itemCount: _chapters.length,
-                      itemBuilder: (context, index) {
-                        final ch = _chapters[index];
-                        return _ChapterSelectTile(
-                          chapter: ch,
-                          selected: ch.id != null && _selected.contains(ch.id),
-                          majorNumber: majorNumbers[index],
-                          minorNumber: minorNumbers[index],
-                          onTap: () => _toggleSelect(ch),
-                          onEdit: () => _openEdit([ch]),
-                        );
-                      },
+                      thumbVisibility: true,
+                      interactive: true,
+                      thickness: 5,
+                      radius: const Radius.circular(2.5),
+                      minThumbLength: 44,
+                      thumbColor: p.textTertiary.withValues(alpha: 0.5),
+                      child: ListView.builder(
+                        controller: _scrollCtrl,
+                        padding: const EdgeInsets.all(10),
+                        itemCount: _chapters.length,
+                        itemBuilder: (context, index) {
+                          final ch = _chapters[index];
+                          final selected =
+                              ch.id != null && _selected.contains(ch.id);
+                          return _ChapterSelectTile(
+                            chapter: ch,
+                            selected: selected,
+                            selecting: _selecting,
+                            majorNumber: majorNumbers[index],
+                            minorNumber: minorNumbers[index],
+                            // 平时点卡片直接编辑；多选模式下点卡片是切换勾选
+                            onTap: () => _selecting
+                                ? _toggleSelect(ch)
+                                : _openEdit([ch]),
+                            // 长按进入多选（第一个被长按的事件直接选中）
+                            onLongPress: () => _toggleSelect(ch),
+                          );
+                        },
+                      ),
                     ),
                   ),
                 ],
@@ -291,15 +390,12 @@ class OutlineEditChapterListPageState
     );
   }
 
-  /// 底部操作栏：已选数量 + 取消选择 + 全选 + 编辑所选。
+  /// 底部多选操作栏：已选数量 + 取消选择 + 全选 + 编辑所选。
   ///
-  /// 尺寸刻意压小：这一行在 360dp 宽的手机上本来只剩 336dp（减去左右各 12 的
-  /// 内边距），而「已选 N 个事件 + 取消选择 + 全选 + 带图标的大按钮」按原尺寸
-  /// （计数 13 / 按钮 13 + 左右各 10 / 主按钮 14 + 图标 18 + 左右各 16）实测
-  /// **溢出 17px**（真机上就是按钮右边那条黄黑警示条）。现在：字号 13 → 12、
-  /// 主按钮去掉图标（标签本身已经说清是编辑）、内边距 16 → 12，宽度降到 296dp。
-  ///
-  /// 另外给两处文字都加了省略兜底：极窄屏或系统大字体下宁可截断，也不再溢出。
+  /// 尺寸刻意压小：这一行在 360dp 宽的手机上本来只剩 336dp（减去左右各 12
+  /// 的内边距），而「已选 N 个事件 + 取消选择 + 全选 + 大按钮」按原尺寸
+  /// 实测会溢出 17px。现在：字号 12、主按钮去掉图标（标签本身已经说清是编辑）、
+  /// 内边距 16 → 12。另外给两处文字都加了省略兜底。
   Widget _buildBottomBar() {
     final p = context.palette;
     final count = _selected.length;
@@ -320,23 +416,24 @@ class OutlineEditChapterListPageState
                 style: TextStyle(fontSize: 12, color: p.textSecondary),
               ),
             ),
-            // 取消多选：勾了事件才出现，一键把勾选清零
-            if (count > 0)
-              TextButton(
-                onPressed: _clearSelection,
-                style: TextButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                  minimumSize: Size.zero,
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                ),
-                child: Text(
-                  '取消选择',
-                  style: TextStyle(fontSize: 12, color: p.textTertiary),
-                ),
-              ),
-            // 全选：只做全选。清空勾选交给「取消选择」，两个按钮不再重复
+            // 取消多选：清空勾选，退出多选模式
             TextButton(
-              onPressed: (_chapters.isEmpty || _allSelected) ? null : _selectAll,
+              onPressed: _clearSelection,
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                minimumSize: Size.zero,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+              ),
+              child: Text(
+                '取消选择',
+                style: TextStyle(fontSize: 12, color: p.textTertiary),
+              ),
+            ),
+            // 全选：只做全选。清空勾选交给「取消选择」
+            TextButton(
+              onPressed: (_chapters.isEmpty || _allSelected)
+                  ? null
+                  : _selectAll,
               style: TextButton.styleFrom(
                 visualDensity: VisualDensity.compact,
                 minimumSize: Size.zero,
@@ -381,11 +478,15 @@ class OutlineEditChapterListPageState
   }
 }
 
-/// 单个章节选择卡片：左侧复选框，点卡片切换选中；右侧「编辑」直接编辑单章。
-/// 类型标签上带序号（大事件57 / 小事件2），与大纲正文的写法一致。
+/// 单个事件选择卡片：**平时不显示复选框**（长按才进入多选），多选模式下
+/// 左侧出现复选框，点卡片切换勾选。类型标签上带序号（大事件57 / 小事件2），
+/// 与大纲正文的写法一致。
 class _ChapterSelectTile extends StatelessWidget {
   final OutlineChapter chapter;
   final bool selected;
+
+  /// 是否处于多选模式（决定是否显示左侧复选框）
+  final bool selecting;
 
   /// 大事件序号（全篇只数大事件，从 1 连续）；非大事件为 null
   final int? majorNumber;
@@ -393,15 +494,16 @@ class _ChapterSelectTile extends StatelessWidget {
   /// 小事件序号（在所属大事件内部从 1 重新计数）；非小事件为 null
   final int? minorNumber;
   final VoidCallback onTap;
-  final VoidCallback onEdit;
+  final VoidCallback onLongPress;
 
   const _ChapterSelectTile({
     required this.chapter,
     required this.selected,
+    required this.selecting,
     this.majorNumber,
     this.minorNumber,
     required this.onTap,
-    required this.onEdit,
+    required this.onLongPress,
   });
 
   @override
@@ -415,10 +517,11 @@ class _ChapterSelectTile extends StatelessWidget {
         : (isCompleted ? '已生成' : '待生成');
     return GestureDetector(
       onTap: onTap,
+      onLongPress: onLongPress,
       behavior: HitTestBehavior.opaque,
       child: Container(
         margin: const EdgeInsets.only(bottom: 6),
-        padding: const EdgeInsets.fromLTRB(6, 8, 6, 8),
+        padding: const EdgeInsets.fromLTRB(6, 8, 10, 8),
         decoration: BoxDecoration(
           color: isMajor ? p.accentSoft : p.surface,
           borderRadius: BorderRadius.circular(8),
@@ -431,19 +534,22 @@ class _ChapterSelectTile extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 复选框：默认 48dp 的点击区在长列表里太占地方，收成 32dp
-            SizedBox(
-              width: 32,
-              height: 32,
-              child: Checkbox(
-                value: selected,
-                onChanged: (_) => onTap(),
-                activeColor: p.accent,
-                visualDensity: VisualDensity.compact,
-                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            // 复选框只在多选模式出现：平时隐藏，长按进入多选后才有
+            if (selecting) ...[
+              SizedBox(
+                width: 32,
+                height: 32,
+                child: Checkbox(
+                  value: selected,
+                  onChanged: (_) => onTap(),
+                  activeColor: p.accent,
+                  visualDensity: VisualDensity.compact,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
               ),
-            ),
-            const SizedBox(width: 2),
+              const SizedBox(width: 2),
+            ] else
+              const SizedBox(width: 2),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -475,9 +581,7 @@ class _ChapterSelectTile extends StatelessWidget {
                         isMajor: isMajor,
                         majorNumber: majorNumber,
                         minorNumber: minorNumber,
-                        background: isMajor
-                            ? p.borderStrong
-                            : p.surfaceMuted,
+                        background: isMajor ? p.borderStrong : p.surfaceMuted,
                         foreground: p.textSecondary,
                         // 序号用主色加粗：长列表里一眼能扫到第几个大事件 / 小事件
                         numberColor: p.accent,
@@ -506,19 +610,6 @@ class _ChapterSelectTile extends StatelessWidget {
                     ),
                   ),
                 ],
-              ),
-            ),
-            TextButton(
-              onPressed: onEdit,
-              style: TextButton.styleFrom(
-                visualDensity: VisualDensity.compact,
-                minimumSize: Size.zero,
-                padding: const EdgeInsets.symmetric(horizontal: 6),
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              child: Text(
-                '编辑',
-                style: TextStyle(fontSize: 11, color: p.accent),
               ),
             ),
           ],

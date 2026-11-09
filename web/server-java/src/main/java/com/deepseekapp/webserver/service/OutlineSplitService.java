@@ -49,8 +49,8 @@ public class OutlineSplitService {
 
                 要求：
                 - 每个大事件下 1~5 个小事件，小事件标题简洁、有钩子；
-                - 每个小事件概要 60~120 字，写清本小事件冲突与结果；
-                - 大事件概述 150~300 字；
+                - 每个小事件概要写清本小事件冲突与结果；
+                - 大事件概述完整清晰；
                 - 保留原大纲的剧情顺序，不要新增或删改核心情节；
                 - 严格 JSON，不要 Markdown、不要解释。
 
@@ -207,7 +207,7 @@ public class OutlineSplitService {
         return label.isEmpty() ? "第" + seq + "幕" : label;
     }
 
-    /** 事件 / 章节标题清洗：去掉两端装饰与模型回显的「大事件N：」前缀 */
+    /** 事件 / 小事件标题清洗：去掉两端装饰与模型回显的「大事件N：」前缀 */
     private static String cleanTitle(String raw) {
         String text = raw == null ? "" : raw;
         for (int i = 0; i < 3; i++) {

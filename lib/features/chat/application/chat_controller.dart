@@ -1,6 +1,6 @@
-/// lib/controllers/chat_controller.dart
-/// 对话控制器 — 负责消息发送、流式接收、上下文裁剪、会话持久化、消息入库
-/// 基于 ChangeNotifier + Riverpod 暴露全局状态
+// lib/controllers/chat_controller.dart
+// 对话控制器 — 负责消息发送、流式接收、上下文裁剪、会话持久化、消息入库
+// 基于 ChangeNotifier + Riverpod 暴露全局状态
 
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
@@ -14,6 +14,7 @@ import '../data/chat_session_service.dart';
 import '../data/chat_message_service.dart';
 import '../../../core/network/baidu_search_service.dart';
 import '../../../core/network/deepseek_search_service.dart';
+import 'chat_prompt.dart';
 import 'package:dio/dio.dart';
 
 class ChatController extends ChangeNotifier {
@@ -39,10 +40,6 @@ class ChatController extends ChangeNotifier {
   /// 搜索结果注入模型的总字符预算；超出的结果不再注入（只在末尾报个数）。
   /// 20 条 × 3000 字的上限是 6 万字符，对上下文和钱包都太重了。
   static const int _searchContextBudget = 24000;
-
-  /// 禁止 Markdown 格式的系统指令
-  static const String _noMarkdownInstruction =
-      '重要：回复中全文禁止使用任何Markdown语法，不允许出现#、##、*、**、-、1.、`、```、>、---、[]()等标记，请使用纯文本表达。';
 
   // ── 内存状态 ──
   List<ChatMessage> _messages = []; // 当前会话完整历史消息
@@ -96,7 +93,9 @@ class ChatController extends ChangeNotifier {
       UserSetting.searchEngineOff,
     ];
     if (valid.contains(s.searchEngine)) return s.searchEngine;
-    return s.webSearch ? UserSetting.searchEngineBaidu : UserSetting.searchEngineOff;
+    return s.webSearch
+        ? UserSetting.searchEngineBaidu
+        : UserSetting.searchEngineOff;
   }
 
   /// 实际使用的搜索来源（对外可见，便于 UI / 测试断言）。
@@ -176,8 +175,7 @@ class ChatController extends ChangeNotifier {
             },
             'top_k': {
               'type': 'integer',
-              'description':
-                  '返回搜索结果数量，不传则使用默认值。请根据用户需求合理调整，范围1-$maxTopK。',
+              'description': '返回搜索结果数量，不传则使用默认值。请根据用户需求合理调整，范围1-$maxTopK。',
             },
           },
           'required': ['query'],
@@ -264,19 +262,25 @@ class ChatController extends ChangeNotifier {
     // ⑤ 组装 API 参数
     final apiParams = setting.toApiParams();
 
-    // ⑤b 注入系统提示词（始终附加禁止 Markdown 指令）
+    // ⑤b 注入系统提示词：会话自定义提示 + 联网搜索开启时的当前时间。
+    // 模型输出的 Markdown 不再用提示词禁止，交给展示层清洗
+    // （presentation/markdown_cleaner.dart）。
     final sessionPrompt = _currentSession?.systemPrompt ?? '';
-    final systemContent = sessionPrompt.trim().isNotEmpty
-        ? '$sessionPrompt\n\n$_noMarkdownInstruction'
-        : _noMarkdownInstruction;
-    apiMessages.insert(0, {'role': 'system', 'content': systemContent});
+    final searchEngine = effectiveSearchEngine(setting);
+    final searchEnabled = searchEngine != UserSetting.searchEngineOff;
+    final systemContent = buildChatSystemPrompt(
+      sessionPrompt: sessionPrompt,
+      searchEnabled: searchEnabled,
+    );
+    if (systemContent.isNotEmpty) {
+      apiMessages.insert(0, {'role': 'system', 'content': systemContent});
+    }
 
     // ⑤c 工具注入（AI 可决策的工具列表）
     final tools = <Map<String, dynamic>>[];
 
     // 联网搜索工具
-    final searchEngine = effectiveSearchEngine(setting);
-    if (searchEngine != UserSetting.searchEngineOff) {
+    if (searchEnabled) {
       final warning = searchKeyWarning(setting);
       if (warning != null) {
         final errMsg = ChatMessage(
@@ -573,15 +577,21 @@ class ChatController extends ChangeNotifier {
     }
 
     // ③ 组装搜索结果上下文，发起第二阶段流式请求
-    final searchContext = _buildSearchContext(_streamingSearchResults ?? const []);
+    final searchContext = _buildSearchContext(
+      _streamingSearchResults ?? const [],
+    );
 
     // 从原始上下文中排除旧 system 工具结果，重建消息列表
     final apiMessages = _buildApiMessages(setting.contextRounds);
     final sessionPrompt = _currentSession?.systemPrompt ?? '';
-    final systemContent = sessionPrompt.trim().isNotEmpty
-        ? '$sessionPrompt\n\n$_noMarkdownInstruction'
-        : _noMarkdownInstruction;
-    apiMessages.insert(0, {'role': 'system', 'content': systemContent});
+    // 第二阶段一定处于联网搜索流程中：注入当前时间，Markdown 交给展示层清洗
+    final systemContent = buildChatSystemPrompt(
+      sessionPrompt: sessionPrompt,
+      searchEnabled: true,
+    );
+    if (systemContent.isNotEmpty) {
+      apiMessages.insert(0, {'role': 'system', 'content': systemContent});
+    }
     apiMessages.add({'role': 'user', 'content': searchContext});
 
     // 重置流式状态，保持 _isLoading

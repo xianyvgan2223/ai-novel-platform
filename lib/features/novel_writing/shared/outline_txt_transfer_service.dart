@@ -23,21 +23,65 @@ class OutlineTxtExportResult {
   const OutlineTxtExportResult(this.status, {this.savedPath});
 }
 
-/// 用户选中并解码完成的导入草稿（还没落库）。
+/// 用户选中并解析完成的导入草稿（还没落库）。
 class OutlineTxtImportDraft {
   /// 用户选的原文件名（确认弹窗里显示「文件：xxx.txt」）
   final String fileName;
 
-  /// 按正文 / 文件名推导出来的默认书名（弹窗里可改）
+  /// 按 v2 书名章节 / 正文书名行 / 文件名推导出来的默认书名（弹窗里可改）
   final String title;
 
   /// 已去 BOM、统一换行、按事件行规范写法整理过的正文
   final String content;
 
+  /// v2 文件里识别到的小说设定（旧版纯正文 txt 全为空）
+  final String genre;
+  final String theme;
+  final String protagonist;
+  final String worldview;
+  final String foreshadows;
+
+  /// 人物档案（可直接写库的 JSON；没识别到人物时为空串）
+  final String charactersJson;
+
+  final int characterCount;
+
+  /// 是否识别到任何小说设定（弹窗提示用）
+  bool get hasSettings =>
+      genre.trim().isNotEmpty ||
+      theme.trim().isNotEmpty ||
+      protagonist.trim().isNotEmpty ||
+      worldview.trim().isNotEmpty ||
+      foreshadows.trim().isNotEmpty ||
+      charactersJson.trim().isNotEmpty;
+
+  /// 弹窗里的设定摘要，如「类型、主题 · 人物档案 2 人」；没有设定时为空串。
+  String get settingsSummary {
+    final labels = <String>[
+      if (genre.trim().isNotEmpty) '类型',
+      if (theme.trim().isNotEmpty) '主题',
+      if (protagonist.trim().isNotEmpty) '主角简介',
+      if (worldview.trim().isNotEmpty) '世界观',
+      if (foreshadows.trim().isNotEmpty) '伏笔清单',
+    ];
+    final parts = <String>[
+      if (labels.isNotEmpty) labels.join('、'),
+      if (characterCount > 0) '人物档案 $characterCount 人',
+    ];
+    return parts.join(' · ');
+  }
+
   const OutlineTxtImportDraft({
     required this.fileName,
     required this.title,
     required this.content,
+    this.genre = '',
+    this.theme = '',
+    this.protagonist = '',
+    this.worldview = '',
+    this.foreshadows = '',
+    this.charactersJson = '',
+    this.characterCount = 0,
   });
 
   /// 字数（按 Unicode 码点算，中文一字算一字）
@@ -88,7 +132,7 @@ class OutlineTxtTransferService {
     return rows.map(OutlineRecord.fromMap).toList();
   }
 
-  /// 把一部作品的大纲正文导出成 txt（系统保存框）。
+  /// 把一部作品导出成结构化 txt（正文 + 小说设定 + 人物档案）。
   ///
   /// 正文为空时返回 [OutlineTxtExportStatus.emptyContent]；
   /// 用户在系统保存框取消时返回 [OutlineTxtExportStatus.cancelled]。
@@ -98,16 +142,30 @@ class OutlineTxtTransferService {
       return const OutlineTxtExportResult(OutlineTxtExportStatus.emptyContent);
     }
     final row = await _records.getById(id);
-    final content = (row?['content'] as String?) ?? '';
-    if (content.trim().isEmpty) {
+    final rawContent = (row?['content'] as String?) ?? '';
+    if (rawContent.trim().isEmpty) {
       return const OutlineTxtExportResult(OutlineTxtExportStatus.emptyContent);
     }
+    // 导出前自动规范事件 / 幕标题的写法与编号（只改标题行，概要原样保留；
+    // 数据库里的大纲正文不动）——txt 里不会带着重号 / 跳号出去。
+    final content = prepareOutlineTxtExportContent(rawContent);
+    final title = ((row?['title'] as String?) ?? summary.title).trim();
+    final bytes = encodeOutlineTxtDocumentBytes(
+      title: title,
+      genre: (row?['genre'] as String?) ?? '',
+      theme: (row?['theme'] as String?) ?? '',
+      protagonist: (row?['protagonist'] as String?) ?? '',
+      worldview: (row?['worldview'] as String?) ?? '',
+      foreshadows: (row?['foreshadows'] as String?) ?? '',
+      charactersJson: (row?['characters'] as String?) ?? '',
+      content: content,
+    );
     final savedPath = await FilePicker.saveFile(
       dialogTitle: '导出大纲 txt',
-      fileName: outlineTxtFileName(summary.title),
+      fileName: outlineTxtFileName(title),
       type: FileType.custom,
       allowedExtensions: const <String>['txt'],
-      bytes: encodeOutlineTxtBytes(content),
+      bytes: bytes,
     );
     if (savedPath == null) {
       return const OutlineTxtExportResult(OutlineTxtExportStatus.cancelled);
@@ -144,15 +202,26 @@ class OutlineTxtTransferService {
     if (bytes == null) {
       throw const OutlineTxtImportException('无法读取所选文件，请重新选择');
     }
-    final content = prepareOutlineTxtContent(decodeOutlineTxtBytes(bytes));
+    final document = decodeOutlineTxtDocumentBytes(bytes);
     return OutlineTxtImportDraft(
       fileName: file.name,
-      title: deriveOutlineTxtTitle(fileName: file.name, content: content),
-      content: content,
+      title: deriveOutlineTxtTitleForDocument(
+        document: document,
+        fileName: file.name,
+      ),
+      content: document.content,
+      genre: document.genre,
+      theme: document.theme,
+      protagonist: document.protagonist,
+      worldview: document.worldview,
+      foreshadows: document.foreshadows,
+      charactersJson: document.charactersJson,
+      characterCount: document.characterCount,
     );
   }
 
-  /// 按草稿新建一条大纲记录，并按正文解析事件结构写 `outline_chapters`。
+  /// 按草稿新建一条大纲记录（含小说设定），并按正文解析事件结构写
+  /// `outline_chapters`。
   ///
   /// **只新增，不覆盖任何已有数据**；[title] 为空时用草稿里的默认书名。
   /// 结构解析失败不回滚记录（正文比结构重要），错误放在
@@ -162,13 +231,28 @@ class OutlineTxtTransferService {
     required String title,
   }) async {
     final cleanTitle = title.trim().isEmpty ? draft.title : title.trim();
-    final id = await _records.insert(
-      OutlineRecord(title: cleanTitle, content: draft.content).toMap(),
+    final record = OutlineRecord(
+      title: cleanTitle,
+      genre: draft.genre,
+      theme: draft.theme,
+      protagonist: draft.protagonist,
+      worldview: draft.worldview,
+      content: draft.content,
+      foreshadows: draft.foreshadows,
+      characters: draft.charactersJson,
     );
+    final id = await _records.insert(record.toMap());
     final created = OutlineRecord(
       id: id,
-      title: cleanTitle,
-      content: draft.content,
+      title: record.title,
+      genre: record.genre,
+      theme: record.theme,
+      protagonist: record.protagonist,
+      worldview: record.worldview,
+      content: record.content,
+      foreshadows: record.foreshadows,
+      characters: record.characters,
+      createdAt: record.createdAt,
     );
     String? structureError;
     try {

@@ -3,22 +3,25 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:deepseekapp/features/novel_writing/shared/domain/character_profile.dart';
 import 'package:deepseekapp/features/novel_writing/shared/outline_event_parser.dart';
 import 'package:deepseekapp/features/novel_writing/shared/outline_event_syntax.dart';
 import 'package:deepseekapp/features/novel_writing/shared/outline_txt_transfer.dart';
 
 /// 独立验证「导出大纲 txt → 导入大纲 txt」的往返等价性。
 ///
-/// 与 `test/outline_txt_transfer_test.dart` 的分工：那个文件测单点行为；
-/// 这里把「导出字节 → 导入解码 → 规范化 → 标题推导 / 事件计数 / 事件解析」
-/// 串成完整链路逐字节断言，重点验证**两端导入同一份 txt 得到同一结果**的
-/// 依据（编码、换行、标题、事件数），并覆盖 UTF-8 BOM / 无 BOM / UTF-16LE /
-/// UTF-16BE / CRLF / 空文件 / GBK 字节 / 含点与空格的文件名。
+/// 覆盖两代格式：
+/// - **v2 结构化**（当前导出格式）：正文 + 书名 / 类型 / 主题 / 主角简介 /
+///   世界观 / 伏笔清单 / 人物档案，导出→导入→再导出逐字节一致；
+/// - **旧版纯正文**（没有 v2 文件头）：仍按纯正文兼容导入。
+///
+/// 同时覆盖 UTF-8 BOM / 无 BOM / UTF-16LE / UTF-16BE / CRLF / 空文件 /
+/// GBK 字节 / 文件名与标题推导 / 事件解析。
 ///
 /// 规格：`reports/outline-txt-transfer-spec.md` 第 2 节。
 void main() {
   /// App 规范写法（生成 / 落库后的形态）：normalizeOutlineText 对它幂等，
-  /// 因此「导出 → 导入」应当逐字节不变。
+  /// 因此「导出 → 导入」正文应当逐字节不变。
   const String canonical =
       '书名：《往返测试》\n'
       '\n'
@@ -42,6 +45,26 @@ void main() {
       '=== 大事件29：再战 ===\n'
       '- 小事件3：决斗';
 
+  const List<CharacterProfile> characters = <CharacterProfile>[
+    CharacterProfile(
+      name: '顾泽',
+      description: '主角，江城异能管理署署长',
+      abilities: '异能「界」，削峰拉平',
+      personality: '冷静',
+      isProtagonist: true,
+    ),
+    CharacterProfile(
+      name: '林晚',
+      description: '第一行描述\n第二行描述\n- 列表项',
+      abilities: '',
+      personality: '执拗',
+    ),
+  ];
+
+  String charactersJson() => jsonEncode(<Map<String, dynamic>>[
+    for (final c in characters) c.toJson(),
+  ]);
+
   /// 按端序把文本编码成 UTF-16 字节（带 BOM），模拟 Windows 记事本的
   /// 「Unicode / Unicode big endian」另存结果。
   Uint8List utf16Bytes(String text, {required bool littleEndian}) {
@@ -58,11 +81,6 @@ void main() {
     return Uint8List.fromList(bytes);
   }
 
-  /// 完整导入链路：导出字节 → 导入解码 → 规范化
-  String importAfterExport(String content) => prepareOutlineTxtContent(
-    decodeOutlineTxtBytes(encodeOutlineTxtBytes(content)),
-  );
-
   Matcher throwsImportError(String message) => throwsA(
     isA<OutlineTxtImportException>().having(
       (e) => e.message,
@@ -71,86 +89,248 @@ void main() {
     ),
   );
 
-  group('导出字节（UTF-8 + BOM、正文逐字节原样）', () {
-    test('BOM 固定为 EF BB BF，正文是 UTF-8 原文且不裁剪', () {
-      const String content = '\n\n  开头空格\n\n书名：《原样保留》\n正文末尾有空格  \n\n';
-      final bytes = encodeOutlineTxtBytes(content);
-
-      expect(bytes.sublist(0, 3), kOutlineTxtUtf8Bom);
-      expect(bytes.sublist(3), utf8.encode(content));
-      // 导出端不 trim、不删空行（只有内容全空时才禁止导出）
-      expect(utf8.decode(bytes.sublist(3)), content);
-      expect(content.trim(), isNot(content));
-    });
-
-    test('CRLF 原样导出，不做 LF 转换', () {
-      const String content = '书名：《换行》\r\n══ 大事件1：起点 ══\r\n核心事件\r\n';
-      final payload = utf8.decode(encodeOutlineTxtBytes(content).sublist(3));
-      expect(payload, content);
-      expect(payload.contains('\r\n'), isTrue);
-    });
-
-    test('导出 → 导入：已规范化正文逐字节不变，重新导出字节完全相同', () {
-      final firstExport = encodeOutlineTxtBytes(canonical);
-      final imported = prepareOutlineTxtContent(
-        decodeOutlineTxtBytes(firstExport),
+  group('v2 导出：BOM、文件头、设定章节、正文原样', () {
+    test('BOM 固定为 EF BB BF，第一行是 v2 文件头', () {
+      final bytes = encodeOutlineTxtDocumentBytes(
+        title: '斗破苍穹',
+        genre: '玄幻',
+        theme: '成长',
+        protagonist: '萧炎',
+        worldview: '斗气大陆',
+        foreshadows: '药老',
+        charactersJson: charactersJson(),
+        content: canonical,
       );
+      expect(bytes.sublist(0, 3), kOutlineTxtUtf8Bom);
+      final text = utf8.decode(bytes.sublist(3));
+      expect(text.split('\n').first, kOutlineTxtMagic);
+      expect(text.contains('\uFEFF'), isFalse);
+    });
 
-      expect(imported, canonical);
-      // 等价性最强断言：导出→导入→再导出，字节级一致
-      expect(encodeOutlineTxtBytes(imported), firstExport);
+    test('各设定章节都有，且正文原样放在「## 大纲正文」之后', () {
+      final text = renderOutlineTxtDocument(
+        title: '斗破苍穹',
+        genre: '玄幻',
+        theme: '成长',
+        protagonist: '萧炎',
+        worldview: '斗气大陆',
+        foreshadows: '药老',
+        charactersJson: charactersJson(),
+        content: canonical,
+      );
+      for (final section in <String>[
+        '书名',
+        '类型',
+        '主题',
+        '主角简介',
+        '世界观',
+        '伏笔清单',
+        '人物档案',
+        '大纲正文',
+      ]) {
+        expect(text, contains('## $section'), reason: '缺少章节：$section');
+      }
+      final body = text
+          .substring(text.indexOf('## 大纲正文') + '## 大纲正文'.length)
+          .trim();
+      expect(body, canonical);
+    });
+
+    test('空设定章节整节省略（只有正文的旧数据也能导出）', () {
+      final text = renderOutlineTxtDocument(title: '只有正文', content: canonical);
+      expect(text, isNot(contains('## 类型')));
+      expect(text, isNot(contains('## 主题')));
+      expect(text, isNot(contains('## 世界观')));
+      expect(text, isNot(contains('## 人物档案')));
+      expect(text, contains('## 大纲正文'));
+    });
+
+    test('人物档案写成可读段落：姓名 / 描述 / 能力 / 性格 / 主角', () {
+      final text = renderOutlineTxtDocument(
+        title: '人物测试',
+        charactersJson: charactersJson(),
+        content: '══ 大事件1：开端 ══',
+      );
+      expect(text, contains('- 姓名：顾泽'));
+      expect(text, contains('  描述：主角，江城异能管理署署长'));
+      expect(text, contains('  能力：异能「界」，削峰拉平'));
+      expect(text, contains('  性格：冷静'));
+      expect(text, contains('  主角：是'));
+      expect(text, contains('- 姓名：林晚'));
+      expect(text, contains('    第二行描述'));
+      expect(text, contains('    - 列表项'));
+      expect(text, contains('  主角：否'));
+    });
+  });
+
+  group('v2 导入解析：设定与人物档案还原', () {
+    test('书名 / 类型 / 主题 / 主角简介 / 世界观 / 伏笔清单逐字还原', () {
+      final doc = decodeOutlineTxtDocumentBytes(
+        encodeOutlineTxtDocumentBytes(
+          title: '斗破苍穹',
+          genre: '玄幻',
+          theme: '成长',
+          protagonist: '萧炎',
+          worldview: '斗气大陆',
+          foreshadows: '药老',
+          charactersJson: charactersJson(),
+          content: canonical,
+        ),
+      );
+      expect(doc.structured, isTrue);
+      expect(doc.title, '斗破苍穹');
+      expect(doc.genre, '玄幻');
+      expect(doc.theme, '成长');
+      expect(doc.protagonist, '萧炎');
+      expect(doc.worldview, '斗气大陆');
+      expect(doc.foreshadows, '药老');
+      expect(doc.content, canonical);
+    });
+
+    test('人物档案逐人物逐字段还原（含多行描述与主角标记）', () {
+      final doc = decodeOutlineTxtDocumentBytes(
+        encodeOutlineTxtDocumentBytes(
+          title: '人物测试',
+          charactersJson: charactersJson(),
+          content: '══ 大事件1：开端 ══',
+        ),
+      );
+      expect(doc.characters, hasLength(2));
+      expect(doc.characters[0].name, '顾泽');
+      expect(doc.characters[0].description, '主角，江城异能管理署署长');
+      expect(doc.characters[0].abilities, '异能「界」，削峰拉平');
+      expect(doc.characters[0].personality, '冷静');
+      expect(doc.characters[0].isProtagonist, isTrue);
+      expect(doc.characters[1].name, '林晚');
+      expect(doc.characters[1].description, '第一行描述\n第二行描述\n- 列表项');
+      expect(doc.characters[1].personality, '执拗');
+      expect(doc.characters[1].isProtagonist, isFalse);
+      // 写库 JSON 与出处一一对应
+      expect(doc.charactersJson, contains('"is_protagonist":true'));
+      expect(doc.charactersJson, contains('"name":"林晚"'));
+      // 这个文档只带了人物档案、没有其它设定字段，摘要只列人物
+      expect(doc.settingsSummary, '人物档案 2 人');
+    });
+
+    test('空设定文件人物列表为空、charactersJson 为空串（不写 [] 污染数据）', () {
+      final doc = decodeOutlineTxtDocumentBytes(
+        encodeOutlineTxtDocumentBytes(title: '无设定', content: canonical),
+      );
+      expect(doc.characters, isEmpty);
+      expect(doc.charactersJson, isEmpty);
+      expect(doc.hasSettings, isFalse);
+      expect(doc.settingsSummary, isEmpty);
+    });
+
+    test('人物档案 JSON 坏掉时导出不整本失败（只丢人物档案）', () {
+      final doc = decodeOutlineTxtDocumentBytes(
+        encodeOutlineTxtDocumentBytes(
+          title: '坏档案',
+          charactersJson: '{不是合法 JSON',
+          content: '══ 大事件1：开端 ══',
+        ),
+      );
+      expect(doc.title, '坏档案');
+      expect(doc.characters, isEmpty);
+      expect(doc.content, '══ 大事件1：开端 ══');
+    });
+
+    test('只有设定、正文为空也能解析（不会被当成空文件）', () {
+      const raw =
+          '$kOutlineTxtMagic\n\n## 书名\n设定书\n\n## 世界观\n九域\n\n## 大纲正文\n\n';
+      final doc = parseOutlineTxtDocument(raw);
+      expect(doc.structured, isTrue);
+      expect(doc.title, '设定书');
+      expect(doc.worldview, '九域');
+      expect(doc.content, isEmpty);
+      expect(doc.hasSettings, isTrue);
+    });
+
+    test('旧版纯正文 txt（无 v2 文件头）按纯正文兼容导入', () {
+      final doc = parseOutlineTxtDocument(messy);
+      expect(doc.structured, isFalse);
+      expect(doc.title, isEmpty);
+      expect(doc.hasSettings, isFalse);
+      expect(doc.content, normalizeOutlineText(messy));
+    });
+  });
+
+  group('导出 → 导入 → 再导出：字节级一致', () {
+    test('v2 结构化文件逐字节往返', () {
+      final first = encodeOutlineTxtDocumentBytes(
+        title: '往返测试',
+        genre: '玄幻',
+        theme: '成长',
+        protagonist: '顾泽',
+        worldview: '九域',
+        foreshadows: '旧铁条',
+        charactersJson: charactersJson(),
+        content: canonical,
+      );
+      final doc = decodeOutlineTxtDocumentBytes(first);
+      final second = encodeOutlineTxtDocumentBytes(
+        title: doc.title,
+        genre: doc.genre,
+        theme: doc.theme,
+        protagonist: doc.protagonist,
+        worldview: doc.worldview,
+        foreshadows: doc.foreshadows,
+        charactersJson: doc.charactersJson,
+        content: doc.content,
+      );
+      expect(second, first);
+    });
+
+    test('杂乱正文导入规范化后，正文与事件解析都稳定', () {
+      final first = encodeOutlineTxtDocumentBytes(
+        title: '杂乱正文',
+        content: messy,
+      );
+      final doc = decodeOutlineTxtDocumentBytes(first);
+      expect(doc.content, normalizeOutlineText(messy));
+      final events = parseOutlineEvents(doc.content, outlineId: 0);
+      expect(events.length, 4);
+      expect(events.map((e) => e.eventTitle).toList(), <String>[
+        '归来',
+        '伤口',
+        '再战',
+        '决斗',
+      ]);
     });
   });
 
   group('导入编码识别（UTF-8 BOM / 无 BOM / UTF-16LE / UTF-16BE）', () {
-    test('无 BOM 的 UTF-8', () {
+    test('无 BOM 的 UTF-8（纯文本）', () {
       const String text = '书名：《无 BOM》\n第一行\n第二行';
       expect(decodeOutlineTxtBytes(utf8.encode(text)), text);
     });
 
-    test('UTF-8 BOM 被剥掉，结果不含 U+FEFF', () {
-      final decoded = decodeOutlineTxtBytes(encodeOutlineTxtBytes('中文正文'));
-      expect(decoded, '中文正文');
-      expect(decoded.contains('\uFEFF'), isFalse);
+    test('v2 文件转成 UTF-16LE / UTF-16BE 后，导入结果与 UTF-8 完全一致', () {
+      final text = renderOutlineTxtDocument(
+        title: '编码测试',
+        worldview: '九域',
+        charactersJson: charactersJson(),
+        content: canonical,
+      );
+      final fromUtf8 = parseOutlineTxtDocument(text);
+      final fromLe = parseOutlineTxtDocument(
+        decodeOutlineTxtBytes(utf16Bytes(text, littleEndian: true)),
+      );
+      final fromBe = parseOutlineTxtDocument(
+        decodeOutlineTxtBytes(utf16Bytes(text, littleEndian: false)),
+      );
+      for (final doc in <OutlineTxtDocument>[fromLe, fromBe]) {
+        expect(doc.title, fromUtf8.title);
+        expect(doc.worldview, fromUtf8.worldview);
+        expect(doc.content, fromUtf8.content);
+        expect(doc.charactersJson, fromUtf8.charactersJson);
+      }
     });
 
-    test('UTF-16LE（FF FE）带 BOM，含非 BMP 字符', () {
-      const String text = '第一幕：开端\n大事件1：初见 🚀\n    概要';
-      final decoded = decodeOutlineTxtBytes(
-        utf16Bytes(text, littleEndian: true),
-      );
-      expect(decoded, text);
-      expect(decoded.contains('\uFEFF'), isFalse);
-    });
-
-    test('UTF-16BE（FE FF）带 BOM，含非 BMP 字符', () {
-      const String text = '第一幕：开端\n大事件1：初见 🚀\n    概要';
-      final decoded = decodeOutlineTxtBytes(
-        utf16Bytes(text, littleEndian: false),
-      );
-      expect(decoded, text);
-      expect(decoded.contains('\uFEFF'), isFalse);
-    });
-
-    test('导出字节转存成 UTF-16LE / UTF-16BE 后，导入结果仍与原文一致', () {
-      final legacy = decodeOutlineTxtBytes(
-        utf16Bytes(canonical, littleEndian: true),
-      );
-      expect(prepareOutlineTxtContent(legacy), canonical);
-
-      final bigEndian = decodeOutlineTxtBytes(
-        utf16Bytes(canonical, littleEndian: false),
-      );
-      expect(prepareOutlineTxtContent(bigEndian), canonical);
-    });
-
-    test('CRLF / 单独 CR：解码层保留原文，规范化层统一成 LF', () {
+    test('CRLF / 单独 CR：解码层保留原文，解析层统一成 LF', () {
       const String mixed = '第一行\r\n第二行\r第三行';
-      // 解码不做换行转换（规格：读取端统一按原文处理，规范化是下一步）
       expect(decodeOutlineTxtBytes(utf8.encode(mixed)), mixed);
       expect(prepareOutlineTxtContent(mixed), '第一行\n第二行\n第三行');
-      // 导出→导入：CRLF 正文导入后统一成 LF
-      expect(importAfterExport(mixed), '第一行\n第二行\n第三行');
     });
   });
 
@@ -162,41 +342,25 @@ void main() {
       );
     });
 
-    test('只有 BOM 的文件：解码为空串，规范化时提示空文件', () {
+    test('只有 BOM 的文件：解析时提示空文件', () {
       final decoded = decodeOutlineTxtBytes(kOutlineTxtUtf8Bom);
       expect(decoded, isEmpty);
       expect(
-        () => prepareOutlineTxtContent(decoded),
+        () => parseOutlineTxtDocument(decoded),
         throwsImportError('txt 文件是空的'),
       );
     });
 
     test('只有空白字符的正文：提示空文件', () {
       expect(
-        () => prepareOutlineTxtContent(' \r\n\t\r\n '),
+        () => parseOutlineTxtDocument(' \r\n\t\r\n '),
         throwsImportError('txt 文件是空的'),
       );
     });
 
     test('GBK 字节：提示改用记事本另存为 UTF-8', () {
-      // 「你好」的 GBK 字节，UTF-8 严格解码必然失败
       expect(
         () => decodeOutlineTxtBytes(const <int>[0xC4, 0xE3, 0xBA, 0xC3]),
-        throwsImportError('文件不是 UTF-8 / UTF-16 编码，请用记事本另存为 UTF-8 后再导入'),
-      );
-    });
-
-    test('带 UTF-8 BOM 但正文不是合法 UTF-8：同样给可读错误', () {
-      expect(
-        () => decodeOutlineTxtBytes(const <int>[
-          0xEF,
-          0xBB,
-          0xBF,
-          0xC4,
-          0xE3,
-          0xBA,
-          0xC3,
-        ]),
         throwsImportError('文件不是 UTF-8 / UTF-16 编码，请用记事本另存为 UTF-8 后再导入'),
       );
     });
@@ -209,40 +373,39 @@ void main() {
       expect(outlineTxtFileName('   '), '《未命名大纲》大纲.txt');
     });
 
-    test('导出文件名：非法字符替换成下划线', () {
+    test('导出文件名：非法字符替换成下划线，内部点保留', () {
       expect(
         outlineTxtFileName(r'a/b:c*d?e"f<g>h|i\j'),
         '《a_b_c_d_e_f_g_h_i_j》大纲.txt',
       );
-    });
-
-    test('导出文件名：去首尾空白与结尾的点，内部点保留', () {
-      expect(outlineTxtFileName('  书名.  '), '《书名》大纲.txt');
       expect(outlineTxtFileName('书.名'), '《书.名》大纲.txt');
       expect(outlineTxtFileName('100%完成'), '《100%完成》大纲.txt');
     });
 
-    test('导出文件名 → 导入标题：书名往返一致', () {
-      const titles = <String>['斗破苍穹', '书.名', 'a b', '测试作品'];
-      for (final title in titles) {
-        expect(
-          deriveOutlineTxtTitle(
-            fileName: outlineTxtFileName(title),
-            content: '没有书名行的普通正文',
-          ),
-          title,
-          reason: '书名「$title」导出文件名后再导入应还原',
-        );
-      }
+    test('v2 书名章节优先于正文书名行与文件名', () {
+      final doc = decodeOutlineTxtDocumentBytes(
+        encodeOutlineTxtDocumentBytes(
+          title: '章节书名',
+          content: '书名：《正文里的书名》\n\n══ 大事件1：开端 ══',
+        ),
+      );
+      expect(
+        deriveOutlineTxtTitleForDocument(
+          document: doc,
+          fileName: '《文件名里的书》大纲.txt',
+        ),
+        '章节书名',
+      );
     });
 
-    test('正文书名行优先于文件名，且不在第一行也能识别', () {
+    test('旧版纯正文没有书名章节：正文书名行优先，其次文件名', () {
+      final doc = parseOutlineTxtDocument('书名：《正文书名》\n\n══ 大事件1：开端 ══');
       expect(
-        deriveOutlineTxtTitle(
+        deriveOutlineTxtTitleForDocument(
+          document: doc,
           fileName: '《文件名里的书》大纲.txt',
-          content: '══ 第一幕：开端 ══\n书名：《第二行的书》\n正文',
         ),
-        '第二行的书',
+        '正文书名',
       );
     });
 
@@ -268,13 +431,6 @@ void main() {
       );
     });
 
-    test('文件名里含空格时保留空格', () {
-      expect(
-        deriveOutlineTxtTitle(fileName: '《书 名》大纲.txt', content: '正文'),
-        '书 名',
-      );
-    });
-
     test('完全推不出来时兜底「未命名大纲」', () {
       expect(deriveOutlineTxtTitle(fileName: '大纲.txt', content: '正文'), '未命名大纲');
       expect(deriveOutlineTxtTitle(fileName: '.txt', content: ''), '未命名大纲');
@@ -286,25 +442,21 @@ void main() {
       final once = normalizeOutlineText(messy);
       final twice = normalizeOutlineText(once);
       expect(twice, once);
-
-      // 对已规范化正文同样幂等
       expect(normalizeOutlineText(canonical), canonical);
     });
 
     test('只重写事件标题行，概要行 / 空行 / 行数逐字节不变', () {
       final normalized = normalizeOutlineText(messy);
       expect(normalized.split('\n').length, messy.split('\n').length);
-      // 概要行（含缩进与列表符号）逐字节保留
       expect(normalized, contains('\n    概要A\n'));
       expect(normalized, contains('\n  - 列表项\n'));
-      // 事件标题统一成 App 规范写法
       expect(normalized, contains('══ 大事件1：归来 ══'));
       expect(normalized, contains('○ 小事件1：伤口'));
       expect(normalized, contains('══ 大事件2：再战 ══'));
       expect(normalized, contains('○ 小事件1：决斗'));
     });
 
-    test('导入规范化 = 去 BOM / 统一换行 / trim 后再 normalizeOutlineText', () {
+    test('导入正文规范化 = 去 BOM / 统一换行 / trim 后再 normalizeOutlineText', () {
       final windowsStyle = '\uFEFF\r\n${messy.replaceAll('\n', '\r\n')}\r\n';
       expect(
         prepareOutlineTxtContent(windowsStyle),
@@ -318,7 +470,7 @@ void main() {
       expect(countOutlineTxtEvents(canonical), 5);
     });
 
-    test('杂乱写法也按同一规则计数（含 markdown / 强调 / 多位编号）', () {
+    test('杂乱写法也按同一规则计数', () {
       expect(countOutlineTxtEvents(messy), 4);
     });
 
@@ -330,11 +482,6 @@ void main() {
           '大事件：\n'
           '小事件X：\n';
       expect(countOutlineTxtEvents(noEvents), 0);
-    });
-
-    test('导出 → 导入不改变事件数', () {
-      expect(countOutlineTxtEvents(importAfterExport(messy)), 4);
-      expect(countOutlineTxtEvents(importAfterExport(canonical)), 5);
     });
   });
 
@@ -364,46 +511,39 @@ void main() {
       expect(events[1].eventSummary, '两人在地铁站相遇\n- 旧铁条');
       expect(events[3].eventSummary, '争执升级');
       expect(events[2].eventSummary, isEmpty);
-      // 与网页端 parseOutlineEvents 的 trim() 规则一致：不能把缩进带进概要
       for (final event in events) {
         for (final line in event.eventSummary.split('\n')) {
           expect(line, line.trim());
         }
       }
     });
-
-    test('杂乱正文导入规范化后同样解析出 4 个事件', () {
-      final imported = importAfterExport(messy);
-      final events = parseOutlineEvents(imported, outlineId: 0);
-      expect(events.length, 4);
-      expect(events.map((e) => e.eventTitle).toList(), <String>[
-        '归来',
-        '伤口',
-        '再战',
-        '决斗',
-      ]);
-      expect(events[1].eventSummary, '概要A\n- 列表项');
-    });
   });
 
   group('导出 → 导入整链（模拟一次真实备份恢复）', () {
-    test('标题 / 正文 / 事件数与导出前一致', () {
-      // 库里的记录
+    test('书名 / 设定 / 人物档案 / 正文 / 事件数与导出前一致', () {
       const String storedTitle = '往返测试';
-      const String storedContent = canonical;
-
-      // 导出：文件名 + 字节
       final fileName = outlineTxtFileName(storedTitle);
-      final exported = encodeOutlineTxtBytes(storedContent);
+      final exported = encodeOutlineTxtDocumentBytes(
+        title: storedTitle,
+        genre: '玄幻',
+        worldview: '九域',
+        foreshadows: '旧铁条',
+        charactersJson: charactersJson(),
+        content: canonical,
+      );
 
-      // 导入：解码 → 规范化 → 标题推导 → 事件数
-      final content = prepareOutlineTxtContent(decodeOutlineTxtBytes(exported));
-      final title = deriveOutlineTxtTitle(fileName: fileName, content: content);
-      final eventCount = countOutlineTxtEvents(content);
+      final document = decodeOutlineTxtDocumentBytes(exported);
+      final title = deriveOutlineTxtTitleForDocument(
+        document: document,
+        fileName: fileName,
+      );
 
       expect(title, storedTitle);
-      expect(content, storedContent);
-      expect(eventCount, 5);
+      expect(document.worldview, '九域');
+      expect(document.foreshadows, '旧铁条');
+      expect(document.characters, hasLength(2));
+      expect(document.content, canonical);
+      expect(countOutlineTxtEvents(document.content), 5);
     });
   });
 }

@@ -6,8 +6,8 @@ import java.io.IOException;
 import java.util.Map;
 
 /**
- * 网页端「章节生成」：根据作品设定、当前章节概要、上一章结尾和人物档案，
- * 流式写出本章正文。结果只推给前端，保存由前端决定。
+ * 网页端「小事件生成」：根据作品设定、当前小事件概要、上一事件结尾和人物档案，
+ * 流式写出本小事件正文。结果只推给前端，保存由前端决定。
  */
 @Service
 public class ChapterGenerationService {
@@ -48,19 +48,19 @@ public class ChapterGenerationService {
             user.append("\n【大纲（节选）】\n").append(outline).append('\n');
         }
 
-        user.append("\n【当前章节】").append(str(body.get("chapterTitle"), "")).append('\n');
-        user.append("【章节概要】").append(str(body.get("chapterSummary"), "（无）")).append('\n');
+        user.append("\n【当前小事件】").append(str(body.get("chapterTitle"), "")).append('\n');
+        user.append("【事件概要】").append(str(body.get("chapterSummary"), "（无）")).append('\n');
 
         String prevTitle = str(body.get("prevChapterTitle"), "");
         String prevContent = truncate(str(body.get("prevChapterContent"), ""), PREV_CONTENT_LIMIT);
         if (!prevTitle.isEmpty() || !prevContent.isEmpty()) {
-            user.append("\n【上一章】").append(prevTitle).append('\n');
-            user.append("【上一章结尾】\n").append(prevContent).append('\n');
+            user.append("\n【上一个事件】").append(prevTitle).append('\n');
+            user.append("【前文内容】\n").append(prevContent).append('\n');
         }
 
         String nextTitle = str(body.get("nextChapterTitle"), "");
         if (!nextTitle.isEmpty()) {
-            user.append("\n【下一章】").append(nextTitle).append('\n');
+            user.append("\n【后续事件】").append(nextTitle).append('\n');
         }
 
         String characters = truncate(str(body.get("characters"), ""), 3000);
@@ -68,7 +68,9 @@ public class ChapterGenerationService {
             user.append("\n【人物档案】\n").append(characters).append('\n');
         }
 
-        String foreshadows = truncate(str(body.get("foreshadows"), ""), 2000);
+        // 已回收 / 已实现的伏笔不再注入（与手机端 filterResolvedForeshadowText 同口径）
+        String foreshadows = filterResolvedForeshadows(
+                truncate(str(body.get("foreshadows"), ""), 2000));
         if (!foreshadows.isEmpty()) {
             user.append("\n【伏笔清单】\n").append(foreshadows).append('\n');
         }
@@ -81,23 +83,46 @@ public class ChapterGenerationService {
         user.append("""
 
                 要求：
-                - 本章内容必须严格围绕【当前章节】与【章节概要】展开，禁止偏离大纲、编造大纲中不存在的情节；
-                - 开头要承接【上一章结尾】的场景、时间与人物状态，需要换场时先用一小段过渡；
-                - 结尾为【下一章】留出自然的钩子；
-                - 人物行为、言谈必须符合【人物档案】，不要擅自改变性格与能力；
-                - 若涉及【伏笔清单】里的伏笔，按计划埋设或回收，清单外的不要强行引入；
-                - 目标字数：%d~%d 字；
-                - 只输出本章正文，不要章节号、标题、注释或解释。
+                - 本小事件开头必须承接【前文内容】结尾的场景、时间与人物状态，禁止突兀跳转；如需切换时间/地点，先用一小段过渡衔接
+                - 本小事件内容必须严格围绕【当前小事件】与【事件概要】展开，禁止偏离大纲或编造大纲中不存在的情节
+                - 以自然流畅的叙述方式展开，包含场景描写、对话、心理活动
+                - 语言平实克制，贴近通俗小说文风；全篇比喻、排比等修辞手法不超过 1-2 处，禁止堆砌辞藻、空泛抒情
+                - 用具体的动作、环境细节和人物对话推进情节，不要用比喻或抽象修辞来渲染气氛
+                - 目标字数：%d~%d 字
+                - 结尾自然衔接【后续事件】中的下一个事件（若存在）
+                - 若当前事件涉及【伏笔清单】中的伏笔，按其计划埋设或回收；清单未涉及的不要强行引入
+                - 角色状态、位置与悬念需与【全局剧情状态】保持连续一致
+                - 人物行为、言谈必须符合【人物档案】中设定的性格与能力，禁止擅自改变角色性格
+                - 只写当前事件的内容，不要超出范围
+                - 直接输出正文，不要添加注释说明
                 """.formatted(minWords, maxWords));
 
         if (!extra.isBlank()) {
             user.append("额外要求：").append(extra).append('\n');
         }
 
-        String system = "你是一位小说作家，擅长写有画面感、有节奏的中文小说正文。";
+        String system = "你是一位小说作家。请根据以下大纲设定，完整写出指定事件的详细正文。";
         for (String delta : ai.stream(system, user.toString(), AiSettings.from(body)).toIterable()) {
             sink.delta(delta);
         }
+    }
+
+    /** 过滤已回收 / 已实现的伏笔行（与手机端「小事件详写」同一口径）。 */
+    private static String filterResolvedForeshadows(String text) {
+        StringBuilder out = new StringBuilder();
+        for (String line : text.split("\n", -1)) {
+            if (line.contains("已回收")
+                    || line.contains("已实现")
+                    || line.contains("已兑现")
+                    || line.contains("回收完成")) {
+                continue;
+            }
+            if (out.length() > 0) {
+                out.append('\n');
+            }
+            out.append(line);
+        }
+        return out.toString().trim().replaceAll("\n{3,}", "\n\n");
     }
 
     private static String str(Object value, String fallback) {

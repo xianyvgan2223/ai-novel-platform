@@ -4,6 +4,7 @@
 import 'package:flutter/material.dart';
 import 'package:deepseekapp/core/theme/app_palette.dart';
 import '../../domain/chat_message.dart';
+import '../markdown_cleaner.dart';
 import 'search_sources_card.dart';
 
 /// 消息气泡组件（带 RepaintBoundary 独立渲染层）
@@ -130,6 +131,10 @@ class _MessageBubbleState extends State<MessageBubble> {
 
   Widget _buildBubble(AppPalette p) {
     final isUser = widget.message.isUser;
+    // 助手回复的 Markdown 在展示层清洗成纯文本（用户自己输入的原样显示）
+    final text = isUser
+        ? widget.message.content
+        : stripMarkdownForChat(widget.message.content);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
@@ -142,7 +147,7 @@ class _MessageBubbleState extends State<MessageBubble> {
         ),
       ),
       child: SelectableText(
-        widget.message.content,
+        text,
         style: TextStyle(
           fontSize: 13,
           color: isUser ? p.bubbleUserText : p.bubbleAssistantText,
@@ -170,7 +175,8 @@ class _MessageBubbleState extends State<MessageBubble> {
               children: [
                 Icon(Icons.psychology, size: 14, color: p.textTertiary),
                 const SizedBox(width: 4),
-                Text('思考过程',
+                Text(
+                  '思考过程',
                   style: TextStyle(fontSize: 11, color: p.textTertiary),
                 ),
                 const SizedBox(width: 4),
@@ -178,14 +184,15 @@ class _MessageBubbleState extends State<MessageBubble> {
                   _showThinking
                       ? Icons.keyboard_arrow_up
                       : Icons.keyboard_arrow_down,
-                  size: 14, color: p.textTertiary,
+                  size: 14,
+                  color: p.textTertiary,
                 ),
               ],
             ),
             if (_showThinking) ...[
               const SizedBox(height: 6),
               SelectableText(
-                widget.message.thinkingText!,
+                stripMarkdownForChat(widget.message.thinkingText!),
                 style: TextStyle(fontSize: 11, color: p.textSecondary),
               ),
             ],
@@ -210,7 +217,8 @@ class _MessageBubbleState extends State<MessageBubble> {
         right: widget.message.isUser ? 0 : 8,
       ),
       child: SizedBox(
-        width: 24, height: 24,
+        width: 24,
+        height: 24,
         child: Checkbox(
           value: widget.isSelected,
           onChanged: (_) => widget.onToggleSelection?.call(),

@@ -12,6 +12,7 @@ import '../domain/chat_message.dart';
 import 'history_page.dart';
 import 'settings_page.dart';
 import 'session_setting_page.dart';
+import 'markdown_cleaner.dart';
 import '../../novel_writing/novel_writing_page.dart';
 import 'widgets/message_bubble.dart';
 import 'widgets/search_sources_card.dart';
@@ -197,7 +198,11 @@ class _ChatPageState extends ConsumerState<ChatPage> {
       if (index >= 0 && index < chat.messages.length) {
         final msg = chat.messages[index];
         final prefix = msg.isUser ? '用户：' : '助手：';
-        buffer.writeln('$prefix${msg.content}');
+        // 与气泡显示保持一致：复制出去的助手内容同样去掉 Markdown 标记
+        final content = msg.isUser
+            ? msg.content
+            : stripMarkdownForChat(msg.content);
+        buffer.writeln('$prefix$content');
       }
     }
     Clipboard.setData(ClipboardData(text: buffer.toString().trim()));
@@ -397,32 +402,20 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-            Icon(
-              Icons.arrow_drop_down,
-              size: 18,
-              color: p.textTertiary,
-            ),
+            Icon(Icons.arrow_drop_down, size: 18, color: p.textTertiary),
           ],
         ),
       ),
       centerTitle: true,
       actions: [
         IconButton(
-          icon: Icon(
-            Icons.auto_stories,
-            color: p.textPrimary,
-            size: 20,
-          ),
+          icon: Icon(Icons.auto_stories, color: p.textPrimary, size: 20),
           constraints: BoxConstraints(minWidth: 36, minHeight: 36),
           tooltip: '写小说',
           onPressed: () => _pushPage(const NovelWritingPage()),
         ),
         PopupMenuButton<String>(
-          icon: Icon(
-            Icons.more_horiz,
-            color: p.textPrimary,
-            size: 20,
-          ),
+          icon: Icon(Icons.more_horiz, color: p.textPrimary, size: 20),
           constraints: BoxConstraints(minWidth: 36, minHeight: 36),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           elevation: 2,
@@ -450,11 +443,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
               value: 'game',
               child: Row(
                 children: [
-                  Icon(
-                    Icons.videogame_asset,
-                    size: 18,
-                    color: p.textSecondary,
-                  ),
+                  Icon(Icons.videogame_asset, size: 18, color: p.textSecondary),
                   SizedBox(width: 8),
                   Text('游戏', style: TextStyle(fontSize: 13)),
                 ],
@@ -482,10 +471,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
         onTap: _exitEditMode,
         child: Container(
           alignment: Alignment.center,
-          child: Text(
-            '取消',
-            style: TextStyle(fontSize: 13, color: p.accent),
-          ),
+          child: Text('取消', style: TextStyle(fontSize: 13, color: p.accent)),
         ),
       ),
       title: Text(
@@ -651,11 +637,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
               ),
               GestureDetector(
                 onTap: () => Navigator.of(ctx).pop(),
-                child: Icon(
-                  Icons.close,
-                  size: 16,
-                  color: p.textTertiary,
-                ),
+                child: Icon(Icons.close, size: 16, color: p.textTertiary),
               ),
             ],
           ),
@@ -676,10 +658,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                 style: TextStyle(fontSize: 12, color: p.textPrimary),
                 decoration: InputDecoration(
                   hintText: '输入问题或指令...',
-                  hintStyle: TextStyle(
-                    color: p.textTertiary,
-                    fontSize: 12,
-                  ),
+                  hintStyle: TextStyle(color: p.textTertiary, fontSize: 12),
                   filled: true,
                   fillColor: p.surfaceMuted,
                   contentPadding: const EdgeInsets.all(8),
@@ -750,10 +729,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                 style: TextStyle(fontSize: 12, color: p.textPrimary),
                 decoration: InputDecoration(
                   hintText: '输入问题或指令...',
-                  hintStyle: TextStyle(
-                    color: p.textTertiary,
-                    fontSize: 12,
-                  ),
+                  hintStyle: TextStyle(color: p.textTertiary, fontSize: 12),
                   filled: true,
                   fillColor: p.surfaceMuted,
                   contentPadding: const EdgeInsets.symmetric(
@@ -846,7 +822,7 @@ class _StreamingBubble extends ConsumerWidget {
                     ),
                   ),
                   child: SelectableText(
-                    chat.phase1Text,
+                    stripMarkdownForChat(chat.phase1Text),
                     style: TextStyle(
                       fontSize: 13,
                       color: p.bubbleAssistantText,
@@ -872,9 +848,11 @@ class _StreamingBubble extends ConsumerWidget {
                     ),
                   ),
                   child: SelectableText(
-                    hasPhase1
-                        ? '${chat.phase1Text}\n\n${chat.streamingText}'
-                        : chat.streamingText,
+                    stripMarkdownForChat(
+                      hasPhase1
+                          ? '${chat.phase1Text}\n\n${chat.streamingText}'
+                          : chat.streamingText,
+                    ),
                     style: TextStyle(
                       fontSize: 13,
                       color: p.bubbleAssistantText,
@@ -952,7 +930,7 @@ class _StreamingBubble extends ConsumerWidget {
           ),
           const SizedBox(height: 6),
           SelectableText(
-            thinking,
+            stripMarkdownForChat(thinking),
             style: TextStyle(fontSize: 11, color: p.textSecondary),
           ),
         ],

@@ -1,5 +1,8 @@
 <script setup lang="ts">
-/** 「导入大纲 txt」弹窗：选 .txt 文件 → 解码 / 统一换行 → 预览标题、字数、事件数 → 新建作品并写入事件 */
+/**
+ * 「导入大纲 txt」弹窗：选 .txt 文件 → 解码 / 解析 v2 结构化格式（正文 + 小说设定 +
+ * 人物档案，兼容旧版纯正文）→ 预览 → 新建作品并写入事件。
+ */
 import { computed, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
@@ -7,12 +10,13 @@ import { Upload } from '@element-plus/icons-vue';
 import { api } from '@/api';
 import {
   DECODE_ERROR_MESSAGE,
+  charactersToDbJson,
   decodeOutlineBytes,
-  deriveOutlineTitle,
-  normalizeImportedOutline,
+  deriveOutlineTitleFromDocument,
   parseOutlineEvents,
+  parseOutlineTxtDocument,
 } from './outlineTxtTransfer';
-import type { ParsedOutlineEvent } from './outlineTxtTransfer';
+import type { ParsedOutlineDocument, ParsedOutlineEvent } from './outlineTxtTransfer';
 
 const props = defineProps<{ modelValue: boolean }>();
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>();
@@ -25,6 +29,7 @@ const visible = computed({
 });
 
 const fileInput = ref<HTMLInputElement | null>(null);
+const document = ref<ParsedOutlineDocument | null>(null);
 const fileName = ref('');
 const content = ref('');
 const title = ref('');
@@ -32,13 +37,15 @@ const events = ref<ParsedOutlineEvent[]>([]);
 const reading = ref(false);
 const importing = ref(false);
 
-const hasFile = computed(() => content.value.length > 0);
+const hasFile = computed(() => document.value !== null);
+const settingsSummary = computed(() => document.value?.settingsSummary ?? '');
 const eventCount = computed(() => events.value.length);
 const charCount = computed(() => content.value.length);
 const previewLines = computed(() => content.value.split('\n').slice(0, 8));
 const hasMorePreview = computed(() => content.value.split('\n').length > previewLines.value.length);
 
 function resetState() {
+  document.value = null;
   fileName.value = '';
   content.value = '';
   title.value = '';
@@ -61,7 +68,7 @@ function pickFile() {
   fileInput.value?.click();
 }
 
-/** 解码并预览文件内容；用户取消选择文件时不会触发 change，静默返回 */
+/** 解码并解析文件内容；用户取消选择文件时不会触发 change，静默返回 */
 async function handleFileChange(event: Event) {
   const input = event.target as HTMLInputElement;
   const file = input.files?.[0];
@@ -77,15 +84,21 @@ async function handleFileChange(event: Event) {
       ElMessage.error(err instanceof Error ? err.message : DECODE_ERROR_MESSAGE);
       return;
     }
-    const normalized = normalizeImportedOutline(decoded);
-    if (!normalized) {
-      ElMessage.warning('txt 文件是空的');
+    let parsed: ParsedOutlineDocument;
+    try {
+      parsed = parseOutlineTxtDocument(decoded);
+    } catch (err) {
+      ElMessage.error(err instanceof Error ? err.message : String(err));
       return;
     }
+    document.value = parsed;
     fileName.value = file.name;
-    content.value = normalized;
-    title.value = deriveOutlineTitle(normalized, file.name);
-    events.value = parseOutlineEvents(normalized);
+    content.value = parsed.content;
+    title.value = deriveOutlineTitleFromDocument(parsed, file.name);
+    events.value = parseOutlineEvents(parsed.content);
+    if (parsed.hasSettings) {
+      ElMessage.success(`已识别小说设定：${parsed.settingsSummary}`);
+    }
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : String(err));
   } finally {
@@ -110,16 +123,24 @@ async function insertChapters(outlineId: number, list: ParsedOutlineEvent[], now
 }
 
 async function confirmImport() {
-  if (!hasFile.value || importing.value) return;
-  const finalTitle = title.value.trim() || '未命名大纲';
+  const parsed = document.value;
+  if (!parsed || importing.value) return;
+  const meta = parsed.meta;
+  const finalTitle = title.value.trim() || meta.title.trim() || '未命名大纲';
   importing.value = true;
   const now = new Date().toISOString();
 
-  // 1) 先新建作品记录；失败则整体中止（不产生半条数据）
+  // 1) 先新建作品记录（正文 + 小说设定 + 人物档案）；失败则整体中止
   let outlineId: number;
   try {
     const created = await api.createRow('deepseek', 'outline_records', {
       title: finalTitle,
+      genre: meta.genre,
+      theme: meta.theme,
+      protagonist: meta.protagonist,
+      worldview: meta.worldview,
+      foreshadows: meta.foreshadows,
+      characters: charactersToDbJson(meta.characters),
       content: content.value,
       created_at: now,
     });
@@ -136,7 +157,8 @@ async function confirmImport() {
   // 2) 写入事件结构；失败不回滚已创建的作品记录（规格 2.2 第 7 条）
   try {
     await insertChapters(outlineId, events.value, now);
-    ElMessage.success(`已导入《${finalTitle}》，共 ${events.value.length} 个事件`);
+    const extra = parsed.hasSettings ? '，含小说设定' : '';
+    ElMessage.success(`已导入《${finalTitle}》，共 ${events.value.length} 个事件${extra}`);
   } catch {
     ElMessage.warning('已导入，但事件结构解析失败（可进大纲编辑后重试）');
   } finally {
@@ -153,6 +175,7 @@ async function confirmImport() {
     <div class="import-body">
       <p class="dialog-desc">
         选一个 .txt 文件，导入后<b>新建</b>一部作品大纲（不经过 AI，不会覆盖已有数据）。
+        支持导出生成的 v2 结构化格式（正文 + 世界观 / 人物档案等设定），也兼容纯正文 txt。
       </p>
 
       <div class="pick-row">
@@ -174,11 +197,16 @@ async function confirmImport() {
           <span>识别到 {{ eventCount }} 个事件</span>
         </div>
 
+        <div v-if="settingsSummary" class="settings-hint">
+          已识别小说设定：{{ settingsSummary }}
+        </div>
+
         <div v-if="eventCount === 0" class="warn-hint">
           没有识别到大纲事件，仍可导入后手动整理。
         </div>
 
-        <pre class="preview">{{ previewLines.join('\n') }}<template v-if="hasMorePreview">…</template></pre>
+        <pre v-if="content" class="preview">{{ previewLines.join('\n') }}<template v-if="hasMorePreview">…</template></pre>
+        <div v-else class="empty-hint">该文件没有大纲正文，将只导入小说设定。</div>
       </template>
 
       <div v-else-if="!reading" class="empty-hint">
@@ -227,6 +255,17 @@ async function confirmImport() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.settings-hint {
+  margin-top: 10px;
+  padding: 9px 12px;
+  border-radius: 9px;
+  border: 1px solid #c9d2ff;
+  background: #f2f4ff;
+  color: var(--ink-2);
+  font-size: 12.5px;
+  line-height: 1.6;
 }
 
 .warn-hint {
