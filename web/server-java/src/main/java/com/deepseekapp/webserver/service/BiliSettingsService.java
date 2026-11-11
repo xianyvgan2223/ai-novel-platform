@@ -30,10 +30,12 @@ public class BiliSettingsService {
 
     private final AppProperties props;
     private final BiliApiService biliApi;
+    private final WhisperAsrService whisper;
 
-    public BiliSettingsService(AppProperties props, BiliApiService biliApi) {
+    public BiliSettingsService(AppProperties props, BiliApiService biliApi, WhisperAsrService whisper) {
         this.props = props;
         this.biliApi = biliApi;
+        this.whisper = whisper;
     }
 
     public boolean configured() {
@@ -71,6 +73,7 @@ public class BiliSettingsService {
         }
         data.put("pythonPath", props.getBiliPython());
         data.put("pythonOk", pythonOk());
+        data.put("whisperOk", whisper.whisperReady());
         return data;
     }
 

@@ -19,7 +19,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.function.LongConsumer;
+import java.util.function.BiConsumer;
 
 /**
  * B站 Web API 客户端（Java 21 HttpClient）。
@@ -129,8 +129,8 @@ public class BiliApiService {
         return baseUrl;
     }
 
-    /** 流式下载音频到 target；onProgress 收到的是累计字节数（失败自动重试一次） */
-    public void downloadAudio(String url, Path target, LongConsumer onProgress) throws IOException {
+    /** 流式下载音频到 target；onProgress 收到 (已下载字节, 总字节[未知为0])（失败自动重试一次） */
+    public void downloadAudio(String url, Path target, BiConsumer<Long, Long> onProgress) throws IOException {
         IOException lastError = null;
         for (int attempt = 0; attempt < 2; attempt++) {
             try {
@@ -143,7 +143,7 @@ public class BiliApiService {
         throw new ApiException(502, "下载音频失败：" + lastError.getMessage());
     }
 
-    private void downloadOnce(String url, Path target, LongConsumer onProgress) throws IOException {
+    private void downloadOnce(String url, Path target, BiConsumer<Long, Long> onProgress) throws IOException {
         HttpRequest request = baseBuilder(url).GET().build();
         HttpResponse<InputStream> response = send(request, HttpResponse.BodyHandlers.ofInputStream());
         if (response.statusCode() != 200) {
@@ -158,7 +158,7 @@ public class BiliApiService {
                 out.write(buffer, 0, read);
                 downloaded += read;
                 if (onProgress != null) {
-                    onProgress.accept(downloaded);
+                    onProgress.accept(downloaded, total);
                 }
             }
             if (total > 0 && downloaded != total) {
