@@ -375,6 +375,72 @@ export interface BattleGeneratePayload {
   settings?: AiRequestSettings;
 }
 
+/** ── B站视频转文字 ── */
+
+/** 视频分P */
+export interface BiliPage {
+  cid: number;
+  page: number;
+  part: string;
+  duration: number;
+}
+
+/** 字幕源（用户上传或B站 AI 字幕） */
+export interface BiliSubtitle {
+  lan: string;
+  lanDoc: string;
+  ai: boolean;
+  url: string;
+}
+
+/** resolve 返回的视频信息 */
+export interface BiliVideoInfo {
+  bvid: string;
+  aid: number;
+  title: string;
+  owner: string;
+  duration: number;
+  sessdataConfigured: boolean;
+  pages: BiliPage[];
+  subtitles: BiliSubtitle[];
+}
+
+/** SESSDATA / 转写环境配置概况（脱敏） */
+export interface BiliSettingsInfo {
+  configured: boolean;
+  source: string;
+  preview?: string;
+  savedAt?: string;
+  pythonPath: string;
+  pythonOk: boolean;
+  whisperOk: boolean;
+}
+
+/** 保存 SESSDATA 的结果 */
+export interface BiliSettingsSaveResult {
+  configured: boolean;
+  cleared?: boolean;
+  valid?: boolean;
+  uname?: string;
+}
+
+/** 提取请求：mode=auto 服务端决策（有字幕用字幕，无字幕本地转写） */
+export interface BiliExtractPayload {
+  bvid?: string;
+  aid: number;
+  cid: number;
+  mode: 'auto' | 'subtitle' | 'asr';
+  duration?: number;
+  subtitleUrl?: string;
+}
+
+/** 提取完成信息（done 事件） */
+export interface BiliExtractDoneInfo {
+  source?: 'subtitle' | 'asr';
+  chars?: number;
+  elapsedMs?: number;
+}
+
 /** 模块标识 → 中文名（与 schema.js 的 module 字段对应） */
 export const MODULE_LABELS: Record<string, string> = {
   settings: '设置',

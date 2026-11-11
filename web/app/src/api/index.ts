@@ -4,6 +4,7 @@ import type {
   Catalog, ChapterGeneratePayload, ChapterRewritePayload, ChapterRewriteResult, ConflictInfo, DbKey, DeleteResult,
   DeviceList, DrawPayload, DrawResult, HealthInfo, ImportReport, OptimizePayload, OutlineEditPayload,
   OutlineFormatPayload, BattleGeneratePayload,
+  BiliExtractPayload, BiliSettingsInfo, BiliSettingsSaveResult, BiliSubtitle, BiliVideoInfo,
   OutlineChatPayload,
   OutlineGeneratePayload, OutlineSplitPayload, OutlineSplitResult, PagedMeta, Row, Stats, SyncOverview,
   SyncRequestInfo, WriteResult,
@@ -81,6 +82,23 @@ export const api = {
       generateBattle: (payload: BattleGeneratePayload, handlers: StreamHandlers, signal?: AbortSignal) =>
         postStream('/api/writing/novel/battle/generate', payload, handlers, signal),
     },
+  },
+
+  // ── B站视频转文字（优先官方字幕，无字幕时本地 faster-whisper 转写）──
+  bili: {
+    /** 解析链接/BV号 → 视频信息 + 分P + 第一P字幕列表 */
+    resolve: (input: string) => post<BiliVideoInfo>('/api/bili/resolve', { input }),
+    /** 查询指定分P的字幕列表（切换分P时用） */
+    subtitles: (aid: number, cid: number) =>
+      post<{ subtitles: BiliSubtitle[] }>('/api/bili/subtitles', { aid, cid }),
+    /** SSE 流式提取：字幕路径逐条输出；转写路径带 stage/progress 进度 */
+    extract: (payload: BiliExtractPayload, handlers: StreamHandlers, signal?: AbortSignal) =>
+      postStream('/api/bili/extract', payload, handlers, signal),
+    /** SESSDATA / 转写环境配置概况（脱敏） */
+    settings: () => get<BiliSettingsInfo>('/api/bili/settings'),
+    /** 保存 SESSDATA（服务端会先校验有效性） */
+    saveSettings: (sessdata: string) =>
+      put<BiliSettingsSaveResult>('/api/bili/settings', { sessdata }),
   },
 };
 

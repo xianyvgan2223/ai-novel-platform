@@ -2,7 +2,7 @@
 import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 import {
-  Aim, DocumentCopy, Download, EditPen, Headset, MagicStick, Promotion, Reading, Upload,
+  Aim, DocumentCopy, Download, EditPen, Headset, MagicStick, Promotion, Reading, Upload, VideoPlay,
 } from '@element-plus/icons-vue';
 import PageHeader from '@/components/PageHeader.vue';
 import OutlineTxtExportDialog from './writing/OutlineTxtExportDialog.vue';
@@ -61,6 +61,12 @@ const features = [
     title: '写作工具',
     subtitle: '自由优化、短篇抽卡、大纲骨架抽卡',
     icon: Promotion,
+  },
+  {
+    path: '/writing/bili',
+    title: 'B站视频转文字',
+    subtitle: '粘贴B站链接，提取官方字幕或本地转写成文字稿',
+    icon: VideoPlay,
   },
 ];
 

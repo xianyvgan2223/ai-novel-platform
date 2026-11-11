@@ -90,6 +90,12 @@ export const router = createRouter({
       meta: { title: '写作工具' },
     },
     {
+      path: '/writing/bili',
+      name: 'writing-bili',
+      component: () => import('@/views/writing/BiliTranscriptView.vue'),
+      meta: { title: 'B站视频转文字' },
+    },
+    {
       path: '/sessions/:id',
       name: 'chat',
       component: () => import('@/views/ChatView.vue'),

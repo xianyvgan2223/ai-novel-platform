@@ -137,6 +137,8 @@ export async function download(path: string, fallbackName: string): Promise<void
 export interface StreamHandlers {
   onDelta?: (text: string) => void;
   onStage?: (stage: { index: number; total: number; label: string }) => void;
+  /** 下载/转写等进度；percent 可能缺省（总大小未知），只有文本 */
+  onProgress?: (progress: { percent?: number; text: string }) => void;
   onResult?: (data: Record<string, unknown>) => void;
   onDone?: (info: Record<string, unknown>) => void;
 }
@@ -192,6 +194,7 @@ export async function postStream(
       index?: number;
       total?: number;
       label?: string;
+      percent?: number;
       data?: Record<string, unknown>;
       [key: string]: unknown;
     };
@@ -208,6 +211,12 @@ export async function postStream(
         index: Number(event.index ?? 0),
         total: Number(event.total ?? 0),
         label: String(event.label ?? ''),
+      });
+    } else if (event.type === 'progress') {
+      const percent = event.percent;
+      handlers.onProgress?.({
+        percent: percent === undefined || percent === null ? undefined : Number(percent),
+        text: String(event.text ?? ''),
       });
     } else if (event.type === 'result') {
       handlers.onResult?.(event.data ?? {});
