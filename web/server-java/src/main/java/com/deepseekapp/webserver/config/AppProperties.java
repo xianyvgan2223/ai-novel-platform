@@ -26,6 +26,13 @@ public class AppProperties {
     private String deepseekModel = "deepseek-chat";
     private long aiTimeoutMs = 180000;
 
+    /** B站视频转写：faster-whisper 用的 Python 解释器路径 */
+    private String biliPython = "D:\\tools\\python3.10.10\\python.exe";
+    /** faster-whisper 模型（tiny/base/small/medium/large-v3） */
+    private String biliWhisperModel = "small";
+    /** 超过该分钟数的视频拒绝本地转写（保护 CPU 与磁盘） */
+    private int biliMaxVideoMinutes = 180;
+
     public String getDataDir() {
         return dataDir;
     }
@@ -144,6 +151,30 @@ public class AppProperties {
 
     public void setAiTimeoutMs(long aiTimeoutMs) {
         this.aiTimeoutMs = aiTimeoutMs;
+    }
+
+    public String getBiliPython() {
+        return biliPython;
+    }
+
+    public void setBiliPython(String biliPython) {
+        this.biliPython = biliPython;
+    }
+
+    public String getBiliWhisperModel() {
+        return biliWhisperModel;
+    }
+
+    public void setBiliWhisperModel(String biliWhisperModel) {
+        this.biliWhisperModel = biliWhisperModel;
+    }
+
+    public int getBiliMaxVideoMinutes() {
+        return biliMaxVideoMinutes;
+    }
+
+    public void setBiliMaxVideoMinutes(int biliMaxVideoMinutes) {
+        this.biliMaxVideoMinutes = biliMaxVideoMinutes;
     }
 
     public Path dataDirPath() {
