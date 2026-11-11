@@ -6,7 +6,7 @@ import 'package:path/path.dart' as p;
 
 class DatabaseHelper {
   static const _dbName = 'deepseek.db';
-  static const _dbVersion = 38;
+  static const _dbVersion = 42;
   static Database? _database;
 
   /// 单例入口，全局复用同一个数据库连接
@@ -393,6 +393,93 @@ class DatabaseHelper {
 
     // ── 同步簿记表（本机专用，不参与同步） ──
     await _createSyncTables(db);
+    // ── 小说灵感：会话 / 对话 / 推演分支 / 人物卡 / 设置 ──
+    await _createInspirationTables(db);
+  }
+
+  /// 小说灵感功能的本地表：全部只在本功能内使用，不参与其它模块。
+  static Future<void> _createInspirationTables(DatabaseExecutor db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS inspiration_sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL DEFAULT '',
+        world_view TEXT NOT NULL DEFAULT '',
+        theme TEXT NOT NULL DEFAULT '',
+        outline_record_id INTEGER,
+        outline_title TEXT NOT NULL DEFAULT '',
+        selected_events TEXT NOT NULL DEFAULT '[]',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS inspiration_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id INTEGER NOT NULL,
+        content TEXT NOT NULL,
+        revisions TEXT NOT NULL DEFAULT '[]',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (session_id) REFERENCES inspiration_sessions(id) ON DELETE CASCADE
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS inspiration_branches (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id INTEGER NOT NULL,
+        message_id INTEGER NOT NULL,
+        content TEXT NOT NULL,
+        kind TEXT NOT NULL DEFAULT 'single',
+        chosen INTEGER NOT NULL DEFAULT 0,
+        generation_no INTEGER NOT NULL DEFAULT 1,
+        source_ids TEXT NOT NULL DEFAULT '[]',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (session_id) REFERENCES inspiration_sessions(id) ON DELETE CASCADE,
+        FOREIGN KEY (message_id) REFERENCES inspiration_messages(id) ON DELETE CASCADE
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS inspiration_chat_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id INTEGER NOT NULL,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (session_id) REFERENCES inspiration_sessions(id) ON DELETE CASCADE
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS inspiration_cards (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id INTEGER NOT NULL,
+        name TEXT NOT NULL DEFAULT '',
+        description TEXT NOT NULL DEFAULT '',
+        personality TEXT NOT NULL DEFAULT '',
+        experiences TEXT NOT NULL DEFAULT '',
+        skills TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT '',
+        inject INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (session_id) REFERENCES inspiration_sessions(id) ON DELETE CASCADE
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS inspiration_settings (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        model TEXT NOT NULL DEFAULT 'deepseek-flash',
+        temperature REAL NOT NULL DEFAULT 0.8,
+        max_tokens INTEGER NOT NULL DEFAULT 4096,
+        system_prompt TEXT NOT NULL DEFAULT '',
+        enable_thinking INTEGER NOT NULL DEFAULT 1,
+        concurrency INTEGER NOT NULL DEFAULT 3
+      )
+    ''');
+    await db.insert('inspiration_settings', {
+      'id': 1,
+    }, conflictAlgorithm: ConflictAlgorithm.ignore);
   }
 
   /// 同步簿记表：sync_state 记录每行同步到哪个版本，sync_kv 存设备号与游标等
@@ -417,7 +504,7 @@ class DatabaseHelper {
 
   /// 导入数据库前暂存同步簿记（被导入的库文件里没有这两张表）
   static Future<Map<String, List<Map<String, Object?>>>>
-      exportSyncBookkeeping() async {
+  exportSyncBookkeeping() async {
     final db = await database;
     final out = <String, List<Map<String, Object?>>>{};
     for (final table in const <String>['sync_kv', 'sync_state']) {
@@ -440,12 +527,18 @@ class DatabaseHelper {
       await txn.delete('sync_kv');
       await txn.delete('sync_state');
       for (final row in data['sync_kv'] ?? const <Map<String, Object?>>[]) {
-        await txn.insert('sync_kv', row,
-            conflictAlgorithm: ConflictAlgorithm.replace);
+        await txn.insert(
+          'sync_kv',
+          row,
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
       }
       for (final row in data['sync_state'] ?? const <Map<String, Object?>>[]) {
-        await txn.insert('sync_state', row,
-            conflictAlgorithm: ConflictAlgorithm.replace);
+        await txn.insert(
+          'sync_state',
+          row,
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
       }
     });
   }
@@ -1110,6 +1203,54 @@ class DatabaseHelper {
         "UPDATE user_settings SET search_engine = 'off' "
         "WHERE search_engine = 'baidu' AND web_search = 0",
       );
+    }
+
+    // V38→V39：新增「小说灵感」功能表（会话/消息/推演/人物卡/设置）
+    if (oldVersion < 39) {
+      await _createInspirationTables(db);
+    }
+
+    // V39→V40：人物卡新增「人物描述」列
+    if (oldVersion < 40) {
+      try {
+        final cols = await db.rawQuery('PRAGMA table_info(inspiration_cards)');
+        if (cols.isNotEmpty && !cols.any((c) => c['name'] == 'description')) {
+          await db.execute(
+            "ALTER TABLE inspiration_cards ADD COLUMN description TEXT NOT NULL DEFAULT ''",
+          );
+        }
+      } catch (_) {}
+    }
+
+    // V40→V41：灵感对话新增「编辑前版本」记录列
+    if (oldVersion < 41) {
+      try {
+        final cols = await db.rawQuery(
+          'PRAGMA table_info(inspiration_messages)',
+        );
+        if (cols.isNotEmpty && !cols.any((c) => c['name'] == 'revisions')) {
+          await db.execute(
+            "ALTER TABLE inspiration_messages ADD COLUMN revisions TEXT NOT NULL DEFAULT '[]'",
+          );
+        }
+      } catch (_) {}
+    }
+
+    // V41→V42：新增「对话模式」聊天消息表
+    if (oldVersion < 42) {
+      try {
+        await db.execute('''
+          CREATE TABLE IF NOT EXISTS inspiration_chat_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id INTEGER NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (session_id) REFERENCES inspiration_sessions(id) ON DELETE CASCADE
+          )
+        ''');
+      } catch (_) {}
     }
   }
 

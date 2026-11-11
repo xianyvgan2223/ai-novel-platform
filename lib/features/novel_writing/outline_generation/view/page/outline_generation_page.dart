@@ -89,6 +89,7 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
   final _checkpointCtrl = TextEditingController();
   String? _lastCheckpointSync; // 已同步到检查点编辑器的文本（避免覆盖用户输入）
   bool _hasDraft = false;
+  int? _selectedBlockIndex; // null = 跟随最新一块
   late final bool _isReedit; // 是否处于历史大纲「局部重新生成」模式
   late final bool _isContinue; // 是否处于未完成大纲「继续生成」模式
 
@@ -315,44 +316,205 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
     );
   }
 
-  // 气泡 Widget 实例缓存：内容未变化的气泡复用同一实例，
-  // Flutter 对 identical 的旧实例会跳过 rebuild/layout，避免流式更新时
-  // 每 300ms 全量重建几十个大段 SelectableText 导致卡顿。
-  String? _bubbleCacheKey;
-  List<Widget> _bubbleCacheWidgets = const [];
-
-  List<Widget> _bubbleWidgetsFor(List<OutlineStepBubble> bubbles) {
-    final key = StringBuffer();
-    for (final b in bubbles) {
-      key
-        ..write(b.label)
-        ..write('\u0001')
-        ..write(b.isError ? '1' : '0')
-        ..write('\u0001')
-        ..write(b.content)
-        ..write('\u0002');
+  // 生成内容按块展示：已完成步骤 + 当前流式内容各算一块，可左右切换查看，
+  // 不再把所有步骤一次性堆在长页面里。
+  List<({String label, String content, bool isError, bool live})>
+  _contentBlocks(OutlineController c) {
+    final blocks =
+        <({String label, String content, bool isError, bool live})>[];
+    for (final b in c.bubbles) {
+      blocks.add((
+        label: b.label,
+        content: b.content,
+        isError: b.isError,
+        live: false,
+      ));
     }
-    final k = key.toString();
-    if (k == _bubbleCacheKey) return _bubbleCacheWidgets;
-    _bubbleCacheKey = k;
-    _bubbleCacheWidgets = List.unmodifiable([
-      for (var i = 0; i < bubbles.length; i++) ...[
-        // 步骤之间用发丝分割线而不是间距：长结果更像连续文档，不是一摞气泡
-        if (i > 0)
-          Divider(height: 28, thickness: 1, color: _p.border),
-        RepaintBoundary(
-          child: _buildBubble(
-            label: bubbles[i].label,
-            content: bubbles[i].content,
-            isError: bubbles[i].isError,
+    if (c.liveText.isNotEmpty) {
+      blocks.add((
+        label: '生成中',
+        content: c.liveText,
+        isError: false,
+        live: true,
+      ));
+    } else if (c.loading && blocks.isEmpty) {
+      blocks.add((
+        label: '生成中',
+        content: '正在生成...',
+        isError: false,
+        live: true,
+      ));
+    } else if (blocks.isEmpty && c.displayText.isNotEmpty) {
+      blocks.add((
+        label: '已生成内容',
+        content: c.displayText,
+        isError: false,
+        live: false,
+      ));
+    }
+    return blocks;
+  }
+
+  void _goBlock(int delta, int total) {
+    if (total <= 0) return;
+    final current = (_selectedBlockIndex ?? total - 1).clamp(0, total - 1);
+    final next = (current + delta).clamp(0, total - 1);
+    setState(() => _selectedBlockIndex = next >= total - 1 ? null : next);
+  }
+
+  Future<void> _showBlockList(OutlineController c) async {
+    final blocks = _contentBlocks(c);
+    if (blocks.isEmpty) return;
+    final current = (_selectedBlockIndex ?? blocks.length - 1).clamp(
+      0,
+      blocks.length - 1,
+    );
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        height: MediaQuery.sizeOf(ctx).height * 0.62,
+        decoration: BoxDecoration(
+          color: _p.surface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
+        ),
+        child: SafeArea(
+          top: false,
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(18, 14, 8, 8),
+                child: Row(
+                  children: [
+                    Text(
+                      '生成内容块',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: _p.textPrimary,
+                      ),
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      visualDensity: VisualDensity.compact,
+                      icon: Icon(
+                        Icons.close_rounded,
+                        size: 19,
+                        color: _p.textTertiary,
+                      ),
+                      onPressed: () => Navigator.of(ctx).pop(),
+                    ),
+                  ],
+                ),
+              ),
+              Divider(height: 1, thickness: 1, color: _p.border),
+              Expanded(
+                child: ListView.separated(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  itemCount: blocks.length,
+                  separatorBuilder: (_, _) => Divider(
+                    height: 1,
+                    thickness: 1,
+                    color: _p.border,
+                    indent: 18,
+                    endIndent: 18,
+                  ),
+                  itemBuilder: (_, i) {
+                    final block = blocks[i];
+                    final active = i == current;
+                    return InkWell(
+                      onTap: () {
+                        Navigator.of(ctx).pop();
+                        setState(
+                          () => _selectedBlockIndex = i >= blocks.length - 1
+                              ? null
+                              : i,
+                        );
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(18, 11, 18, 11),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              width: 24,
+                              height: 24,
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                color: active
+                                    ? _p.textPrimary
+                                    : _p.surfaceMuted,
+                                shape: BoxShape.circle,
+                              ),
+                              child: Text(
+                                '${i + 1}',
+                                style: TextStyle(
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: active ? _p.surface : _p.textTertiary,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 11),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          block.label,
+                                          style: TextStyle(
+                                            fontSize: 12.5,
+                                            fontWeight: active
+                                                ? FontWeight.w600
+                                                : FontWeight.w500,
+                                            color: _p.textPrimary,
+                                          ),
+                                        ),
+                                      ),
+                                      if (i == blocks.length - 1)
+                                        Text(
+                                          block.live ? '最新' : '完成',
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            color: _p.textTertiary,
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 3),
+                                  Text(
+                                    block.content.replaceAll('\n', ' '),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: 11.5,
+                                      height: 1.45,
+                                      color: _p.textTertiary,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
           ),
         ),
-      ],
-    ]);
-    return _bubbleCacheWidgets;
+      ),
+    );
   }
 
   Future<void> _onResume() async {
+    setState(() => _selectedBlockIndex = null);
     await _controller.resume();
     await _refreshDraft();
   }
@@ -442,11 +604,7 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
               ),
             ),
             IconButton(
-              icon: Icon(
-                Icons.tune_rounded,
-                size: 21,
-                color: _p.textSecondary,
-              ),
+              icon: Icon(Icons.tune_rounded, size: 21, color: _p.textSecondary),
               tooltip: '大纲生成设置',
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute(
@@ -462,11 +620,7 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
           ],
           bottom: PreferredSize(
             preferredSize: const Size.fromHeight(1),
-            child: Divider(
-              height: 1,
-              thickness: 1,
-              color: _p.borderStrong,
-            ),
+            child: Divider(height: 1, thickness: 1, color: _p.borderStrong),
           ),
         ),
         body: LayoutBuilder(
@@ -486,9 +640,9 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
                   child: SingleChildScrollView(
                     controller: c.scrollController,
                     padding: EdgeInsets.fromLTRB(
-                      20,
+                      14,
                       4,
-                      20,
+                      14,
                       40 + MediaQuery.paddingOf(context).bottom,
                     ),
                     child: Column(
@@ -773,10 +927,7 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
                 '要求提示词',
               ),
               const SizedBox(height: 8),
-              Text(
-                '要求提示词会注入到定调、粗骨架、精写大事件、展开小事件的每一步',
-                style: _helperStyle,
-              ),
+              Text('要求提示词会注入到定调、粗骨架、精写大事件、展开小事件的每一步', style: _helperStyle),
               const SizedBox(height: 18),
               Text(
                 '事件规模',
@@ -895,6 +1046,7 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
           onPressed: (c.loading || c.paused)
               ? null
               : () async {
+                  setState(() => _selectedBlockIndex = null);
                   await c.generate();
                   await _refreshDraft();
                 },
@@ -927,16 +1079,20 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
     );
   }
 
-  /// 生成结果区：一张白卡承载书名 + 各步骤文本 + 进度。
-  /// 步骤之间不画盒子，用 1px 发丝分割线 + 字距区分层级，长结果读起来像
-  /// 一篇排版过的文档而不是一摞卡片。
+  /// 生成结果区：一次只展示一个内容块，通过页码左右切换 / 底部列表回看，
+  /// 不再把所有步骤一次性堆在长页面里。
   Widget _buildOutputCard(OutlineController c) {
+    final blocks = _contentBlocks(c);
+    if (blocks.isEmpty) return const SizedBox.shrink();
+    final last = blocks.length - 1;
+    final selected = (_selectedBlockIndex ?? last).clamp(0, last);
+    final block = blocks[selected];
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 18),
+      padding: const EdgeInsets.fromLTRB(12, 14, 12, 12),
       decoration: BoxDecoration(
         color: _p.surface,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: _cardBorder),
       ),
       child: Column(
@@ -946,36 +1102,74 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
             Text(
               c.title,
               style: TextStyle(
-                fontSize: 18,
+                fontSize: 14,
                 fontWeight: FontWeight.w700,
-                height: 1.4,
+                height: 1.35,
                 letterSpacing: 0.1,
                 color: _p.textPrimary,
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 10),
           ],
-          // 已提交的多气泡（步骤结果 / 失败尝试的思考与输出）
-          // 缓存复用实例：流式更新时未变化的气泡直接跳过重建
-          ..._bubbleWidgetsFor(c.bubbles),
-          // 回退：无气泡但有历史/预览内容（如断点续跑恢复）
-          if (c.bubbles.isEmpty &&
-              c.displayText.isNotEmpty &&
-              c.liveText.isEmpty)
-            _buildBubble(label: null, content: c.displayText, isError: false),
-          // 实时流式气泡：每 300ms 更新，用 RepaintBoundary 隔离重绘，
-          // 用普通 Text 而非 SelectableText（后者布局成本高，流式期间不可选也无妨）
-          if (c.liveText.isNotEmpty)
-            RepaintBoundary(
-              child: _buildBubble(
-                label: '生成中',
-                content: c.liveText,
-                isError: false,
-                selectable: false,
+          Row(
+            children: [
+              Text(
+                '生成内容',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.4,
+                  color: _p.textTertiary,
+                ),
               ),
-            )
-          else if (c.loading)
-            _buildBubble(label: '生成中', content: '正在生成...', isError: false),
+              const Spacer(),
+              if (blocks.length > 1) ...[
+                _blockPagerButton(
+                  icon: Icons.chevron_left_rounded,
+                  onTap: selected > 0
+                      ? () => _goBlock(-1, blocks.length)
+                      : null,
+                ),
+                InkWell(
+                  onTap: () => _showBlockList(c),
+                  borderRadius: BorderRadius.circular(12),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 9,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: _p.surfaceMuted,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      '${selected + 1} / ${blocks.length}',
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w600,
+                        color: _p.textSecondary,
+                      ),
+                    ),
+                  ),
+                ),
+                _blockPagerButton(
+                  icon: Icons.chevron_right_rounded,
+                  onTap: selected < last
+                      ? () => _goBlock(1, blocks.length)
+                      : null,
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 8),
+          RepaintBoundary(
+            child: _buildBubble(
+              label: block.label,
+              content: block.content,
+              isError: block.isError,
+              selectable: !block.live,
+            ),
+          ),
           if (c.loading) ...[
             const SizedBox(height: 14),
             ClipRRect(
@@ -990,7 +1184,7 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
             const SizedBox(height: 10),
             Text(
               c.progressText,
-              style: TextStyle(fontSize: 12, color: _p.textTertiary),
+              style: TextStyle(fontSize: 11.5, color: _p.textTertiary),
             ),
             if (c.lastStepSummary != null)
               Padding(
@@ -999,6 +1193,27 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
               ),
           ],
         ],
+      ),
+    );
+  }
+
+  Widget _blockPagerButton({
+    required IconData icon,
+    required VoidCallback? onTap,
+  }) {
+    return SizedBox(
+      width: 30,
+      height: 28,
+      child: IconButton(
+        padding: EdgeInsets.zero,
+        visualDensity: VisualDensity.compact,
+        constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+        icon: Icon(
+          icon,
+          size: 19,
+          color: onTap == null ? _p.borderStrong : _p.textSecondary,
+        ),
+        onPressed: onTap,
       ),
     );
   }
@@ -1043,10 +1258,7 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
     );
   }
 
-  ButtonStyle _secondaryButtonStyle({
-    double fontSize = 13,
-    Color? foreground,
-  }) {
+  ButtonStyle _secondaryButtonStyle({double fontSize = 13, Color? foreground}) {
     return OutlinedButton.styleFrom(
       foregroundColor: foreground ?? _p.textPrimary,
       backgroundColor: _p.surface,
@@ -1104,11 +1316,7 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
                   color: _amberSoft,
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: Icon(
-                  Icons.pause_rounded,
-                  size: 15,
-                  color: _amberInk,
-                ),
+                child: Icon(Icons.pause_rounded, size: 15, color: _amberInk),
               ),
               const SizedBox(width: 8),
               Expanded(
@@ -1333,15 +1541,15 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
     bool selectable = true,
   }) {
     final bodyStyle = TextStyle(
-      fontSize: 13.5,
-      height: 1.65,
+      fontSize: 10,
+      height: 1.6,
       color: isError ? _errorInk : _p.textPrimary,
     );
     final text = content.isEmpty ? '（无内容）' : content;
     final highlighted = isError || !selectable;
     return Container(
       width: double.infinity,
-      padding: highlighted ? const EdgeInsets.all(14) : EdgeInsets.zero,
+      padding: highlighted ? const EdgeInsets.all(12) : EdgeInsets.zero,
       decoration: highlighted
           ? BoxDecoration(
               color: isError ? _p.dangerSoft : _p.surfaceMuted,
@@ -1366,7 +1574,7 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
                   child: Text(
                     label,
                     style: TextStyle(
-                      fontSize: 11.5,
+                      fontSize: 9.5,
                       fontWeight: FontWeight.w600,
                       letterSpacing: 0.4,
                       color: isError ? _p.danger : _p.textTertiary,
@@ -1375,7 +1583,7 @@ class _OutlineGenerationPageState extends State<OutlineGenerationPage>
                 ),
               ],
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 5),
           ],
           if (selectable)
             SelectableText(text, style: bodyStyle)
@@ -1429,9 +1637,7 @@ class _JumpToBottomButton extends StatelessWidget {
       child: Material(
         color: p.surface,
         elevation: 0,
-        shape: CircleBorder(
-          side: BorderSide(color: p.border),
-        ),
+        shape: CircleBorder(side: BorderSide(color: p.border)),
         child: InkWell(
           customBorder: const CircleBorder(),
           onTap: onTap,
@@ -1617,10 +1823,7 @@ class _LargeEditorDialogState extends State<_LargeEditorDialog> {
                 ),
                 const Spacer(),
                 IconButton(
-                  icon: Icon(
-                    Icons.close_rounded,
-                    color: _p.textTertiary,
-                  ),
+                  icon: Icon(Icons.close_rounded, color: _p.textTertiary),
                   onPressed: () => Navigator.of(context).pop(),
                 ),
               ],
@@ -1640,10 +1843,7 @@ class _LargeEditorDialogState extends State<_LargeEditorDialog> {
                 ),
                 decoration: InputDecoration(
                   hintText: _hintFor(widget.title),
-                  hintStyle: TextStyle(
-                    fontSize: 13,
-                    color: _p.textTertiary,
-                  ),
+                  hintStyle: TextStyle(fontSize: 13, color: _p.textTertiary),
                   border: InputBorder.none,
                   contentPadding: EdgeInsets.zero,
                 ),
@@ -1736,10 +1936,7 @@ class _CustomGenreDialogState extends State<_CustomGenreDialog> {
                 ),
                 decoration: InputDecoration(
                   hintText: '输入自定义类型（如：赛博朋克、末日废土...）',
-                  hintStyle: TextStyle(
-                    fontSize: 14,
-                    color: _p.textTertiary,
-                  ),
+                  hintStyle: TextStyle(fontSize: 14, color: _p.textTertiary),
                   contentPadding: const EdgeInsets.symmetric(
                     horizontal: 12,
                     vertical: 13,
@@ -1756,10 +1953,7 @@ class _CustomGenreDialogState extends State<_CustomGenreDialog> {
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(10),
-                    borderSide: BorderSide(
-                      color: _p.textPrimary,
-                      width: 1.5,
-                    ),
+                    borderSide: BorderSide(color: _p.textPrimary, width: 1.5),
                   ),
                 ),
               ),

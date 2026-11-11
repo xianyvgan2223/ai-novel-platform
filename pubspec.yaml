@@ -18,7 +18,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # of the product and file versions while build-number is used as the build suffix.
 # ⚠️ 发版规则：只有用户明确要求「发布 / 出新版 / 更新版本号」时才修改 version 和 build number。
 # 功能开发、调样式、调试期间保持版本不变；日常验证只构建 debug。
-version: 5.3.3+15
+version: 5.4.2+18
 
 environment:
   sdk: ^3.12.2

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:deepseekapp/core/theme/app_palette.dart';
+import '../../../shared/monochrome_palette.dart';
 import '../../../shared/data/outline_chapter_db_helper.dart';
 import '../../../shared/data/outline_record_db_helper.dart';
 import '../../../shared/domain/outline_chapter.dart';
@@ -21,7 +22,15 @@ import 'outline_edit_page.dart';
 class OutlineEditChapterListPage extends StatefulWidget {
   final OutlineRecord outline;
 
-  const OutlineEditChapterListPage({super.key, required this.outline});
+  /// 选择器模式（「小说灵感 → 导入大纲」用）：点击卡片直接勾选 / 取消，
+  /// 底部「确定」返回所选事件，不进入编辑页、不显示「小说设定」。
+  final bool pickerMode;
+
+  const OutlineEditChapterListPage({
+    super.key,
+    required this.outline,
+    this.pickerMode = false,
+  });
 
   @override
   State<OutlineEditChapterListPage> createState() =>
@@ -200,11 +209,31 @@ class OutlineEditChapterListPageState
   /// 返回键 / 返回手势：多选时先取消多选，第二次才真正退出页面。
   /// （勾选是页面内的临时状态，返回键顺手把它清掉，免得退出去再进来还留着）
   void _onBackPressed() {
-    if (_selecting) {
+    if (!widget.pickerMode && _selecting) {
       _clearSelection();
       return;
     }
     Navigator.of(context).pop();
+  }
+
+  /// 选择器模式：确认把当前勾选的事件带回上一页。
+  void _confirmPick() {
+    if (_selected.isEmpty) return;
+    final majorNumbers = majorEventNumbers(_chapters);
+    final minorNumbers = minorEventNumbers(_chapters);
+    final picked =
+        <({OutlineChapter chapter, int? majorNumber, int? minorNumber})>[];
+    for (var i = 0; i < _chapters.length; i++) {
+      final ch = _chapters[i];
+      if (ch.id != null && _selected.contains(ch.id)) {
+        picked.add((
+          chapter: ch,
+          majorNumber: majorNumbers[i],
+          minorNumber: minorNumbers[i],
+        ));
+      }
+    }
+    Navigator.of(context).pop(picked);
   }
 
   /// 打开「小说设定」编辑弹层并落库：书名 / 类型 / 主题 / 主角简介 / 世界观。
@@ -268,7 +297,7 @@ class OutlineEditChapterListPageState
 
   void _showMessage(String message, {bool error = false}) {
     if (!mounted) return;
-    final p = context.palette;
+    final p = _palette(context);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message, style: const TextStyle(fontSize: 12.5)),
@@ -278,18 +307,24 @@ class OutlineEditChapterListPageState
     );
   }
 
+  AppPalette _palette(BuildContext context) =>
+      widget.pickerMode ? monochromePalette(context.palette) : context.palette;
+
   @override
   Widget build(BuildContext context) {
-    final p = context.palette;
+    final monoPalette = widget.pickerMode
+        ? monochromePalette(context.palette)
+        : null;
+    final p = monoPalette ?? context.palette;
     final outline = _outline;
     // 大 / 小事件序号：与大纲正文里的「大事件N」/「○ 小事件N」同一套编号
     // （大事件只数大事件；小事件在每个大事件内部从 1 重新开始），
     // 显示在卡片的类型标签上（大事件57 / 小事件2），方便对上正文与生成记录
     final majorNumbers = majorEventNumbers(_chapters);
     final minorNumbers = minorEventNumbers(_chapters);
-    return PopScope(
+    final content = PopScope(
       // 系统返回手势与顶栏返回键保持同一套行为：多选时先取消多选，再退出页面。
-      canPop: !_selecting,
+      canPop: widget.pickerMode || !_selecting,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
         _clearSelection();
@@ -298,7 +333,9 @@ class OutlineEditChapterListPageState
         backgroundColor: p.background,
         appBar: AppBar(
           title: Text(
-            outline.title.isNotEmpty ? outline.title : '选择事件',
+            widget.pickerMode
+                ? '选择注入事件'
+                : (outline.title.isNotEmpty ? outline.title : '选择事件'),
             style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
@@ -310,16 +347,24 @@ class OutlineEditChapterListPageState
             icon: Icon(Icons.arrow_back, color: p.textPrimary),
             onPressed: _onBackPressed,
           ),
-          actions: [
-            IconButton(
-              icon: Icon(Icons.tune_rounded, size: 20, color: p.textPrimary),
-              tooltip: '小说设定',
-              onPressed: _loading ? null : _openSettings,
-            ),
-          ],
+          actions: widget.pickerMode
+              ? null
+              : [
+                  IconButton(
+                    icon: Icon(
+                      Icons.tune_rounded,
+                      size: 20,
+                      color: p.textPrimary,
+                    ),
+                    tooltip: '小说设定',
+                    onPressed: _loading ? null : _openSettings,
+                  ),
+                ],
         ),
         // 多选栏只在实际勾选了事件时出现；平时列表更干净
-        bottomNavigationBar: _loading || !_selecting ? null : _buildBottomBar(),
+        bottomNavigationBar: _loading || !_selecting
+            ? null
+            : (widget.pickerMode ? _buildPickerBottomBar() : _buildBottomBar()),
         body: _loading
             ? const Center(child: CircularProgressIndicator())
             : _error != null
@@ -341,8 +386,10 @@ class OutlineEditChapterListPageState
                     ),
                     color: p.accentSoft,
                     child: Text(
-                      '共 ${_chapters.length} 个事件 · 已完成 $_completedCount'
-                      ' · 点击编辑 / 长按多选',
+                      widget.pickerMode
+                          ? '共 ${_chapters.length} 个事件 · 点击选择要注入的事件（可多选）'
+                          : '共 ${_chapters.length} 个事件 · 已完成 $_completedCount'
+                                ' · 点击编辑 / 长按多选',
                       style: TextStyle(fontSize: 12, color: p.textSecondary),
                     ),
                   ),
@@ -373,10 +420,12 @@ class OutlineEditChapterListPageState
                             selecting: _selecting,
                             majorNumber: majorNumbers[index],
                             minorNumber: minorNumbers[index],
-                            // 平时点卡片直接编辑；多选模式下点卡片是切换勾选
-                            onTap: () => _selecting
+                            // 选择器模式：点卡片直接切换勾选；平时点卡片进入编辑
+                            onTap: () => widget.pickerMode
                                 ? _toggleSelect(ch)
-                                : _openEdit([ch]),
+                                : (_selecting
+                                      ? _toggleSelect(ch)
+                                      : _openEdit([ch])),
                             // 长按进入多选（第一个被长按的事件直接选中）
                             onLongPress: () => _toggleSelect(ch),
                           );
@@ -386,6 +435,92 @@ class OutlineEditChapterListPageState
                   ),
                 ],
               ),
+      ),
+    );
+    if (monoPalette == null) return content;
+    return Theme(
+      data: Theme.of(context).copyWith(
+        extensions: <ThemeExtension<dynamic>>[monoPalette],
+        scaffoldBackgroundColor: monoPalette.background,
+      ),
+      child: content,
+    );
+  }
+
+  /// 选择器模式的底部栏：已选数量 + 取消选择 + 全选 + 确定。
+  Widget _buildPickerBottomBar() {
+    final p = _palette(context);
+    final count = _selected.length;
+    return SafeArea(
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+        decoration: BoxDecoration(
+          color: p.surface,
+          border: Border(top: BorderSide(color: p.border)),
+        ),
+        child: Row(
+          children: [
+            Flexible(
+              child: Text(
+                '已选 $count 个事件',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 12, color: p.textSecondary),
+              ),
+            ),
+            TextButton(
+              onPressed: _clearSelection,
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                minimumSize: Size.zero,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+              ),
+              child: Text(
+                '取消选择',
+                style: TextStyle(fontSize: 12, color: p.textTertiary),
+              ),
+            ),
+            TextButton(
+              onPressed: (_chapters.isEmpty || _allSelected)
+                  ? null
+                  : _selectAll,
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                minimumSize: Size.zero,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+              ),
+              child: const Text('全选', style: TextStyle(fontSize: 12)),
+            ),
+            const SizedBox(width: 4),
+            Flexible(
+              child: ElevatedButton(
+                onPressed: count == 0 ? null : _confirmPick,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: p.accent,
+                  foregroundColor: p.onAccent,
+                  disabledBackgroundColor: p.surfaceMuted,
+                  disabledForegroundColor: p.textTertiary,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  textStyle: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                child: Text(
+                  '确定选择（$count）',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:deepseekapp/core/theme/app_palette.dart';
 import '../../../core/widgets/settings_kit.dart';
 import 'ai_battle/view/page/ai_battle_page.dart';
+import 'novel_inspiration/view/page/novel_inspiration_page.dart';
 import 'outline_generation/view/page/outline_generation_page.dart';
 import 'outline_editing/view/page/outline_edit_chapter_list_page.dart';
 import 'outline_editing/view/page/outline_edit_novel_list_page.dart';
@@ -130,6 +131,12 @@ class _NovelWritingPageState extends State<NovelWritingPage> {
                 title: '一键生成大纲',
                 subtitle: '填写设定，AI 流式生成完整大纲',
                 page: const OutlineGenerationPage(),
+              ),
+              _navRow(
+                icon: Icons.auto_stories_rounded,
+                title: '小说灵感',
+                subtitle: '对话推进剧情，并行推演多段正文',
+                page: const NovelInspirationPage(),
               ),
               _navRow(
                 icon: Icons.edit_note_rounded,

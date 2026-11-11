@@ -38,6 +38,22 @@ void main() {
     expect(prompt, contains('不要写长线伏笔'));
   });
 
+  test('粗骨架提示词：每 5 个大事件形成一个递进弧', () {
+    final prompt = OutlinePromptTemplate.buildCoarseSkeletonPrompt(
+      genre: '玄幻',
+      theme: '主题',
+      protagonist: '主角',
+      worldview: '世界观',
+      majorEventCount: 10,
+      minorEventCount: 3,
+      titleAndConcept: '书名+概念',
+    );
+    expect(
+      prompt,
+      contains('每5个大事件之间要有递进关系：铺垫→冲突升级→危机加剧→高潮→收束或者危机→冲突→怎么解决→反转→剧情展开'),
+    );
+  });
+
   test('精写大事件提示词：新伏笔 5 个大事件内回收，已回收不再写', () {
     final prompt = OutlinePromptTemplate.buildRefineBatchPrompt(
       genre: '玄幻',
