@@ -25,12 +25,14 @@ public class BiliTranscriptService {
     private static final Pattern BV_PATTERN = Pattern.compile("[Bb][Vv][0-9A-Za-z]{10}");
 
     private final BiliApiService biliApi;
+    private final BiliSettingsService settings;
 
-    public BiliTranscriptService(BiliApiService biliApi) {
+    public BiliTranscriptService(BiliApiService biliApi, BiliSettingsService settings) {
         this.biliApi = biliApi;
+        this.settings = settings;
     }
 
-    /** 解析输入 → 视频信息 + 分P 列表 */
+    /** 解析输入 → 视频信息 + 分P 列表 + 登录态标志 */
     public Map<String, Object> resolve(String input) throws IOException {
         String bvid = extractBvid(input);
         if (bvid.isEmpty()) {
@@ -44,6 +46,7 @@ public class BiliTranscriptService {
         data.put("title", view.path("title").asText(""));
         data.put("owner", view.path("owner").path("name").asText(""));
         data.put("duration", view.path("duration").asLong(0));
+        data.put("sessdataConfigured", settings.configured());
 
         List<Map<String, Object>> pages = new ArrayList<>();
         for (JsonNode page : view.path("pages")) {
@@ -55,7 +58,17 @@ public class BiliTranscriptService {
             pages.add(item);
         }
         data.put("pages", pages);
+
+        // 附带第一P的字幕列表（需要 SESSDATA，未配置/已过期时为空列表）
+        long aid = view.path("aid").asLong();
+        long firstCid = pages.isEmpty() ? view.path("cid").asLong() : (Long) pages.get(0).get("cid");
+        data.put("subtitles", biliApi.listSubtitles(aid, firstCid, settings.sessdata()));
         return data;
+    }
+
+    /** 指定分P 的字幕列表 */
+    public List<Map<String, Object>> subtitles(long aid, long cid) throws IOException {
+        return biliApi.listSubtitles(aid, cid, settings.sessdata());
     }
 
     /** 从任意输入里提 BV 号；找不到返回空串 */

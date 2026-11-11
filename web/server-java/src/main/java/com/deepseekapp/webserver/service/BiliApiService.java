@@ -167,15 +167,30 @@ public class BiliApiService {
         }
     }
 
-    /** 带 SESSDATA 调 nav → {valid, uname}，用于保存配置时校验 */
+    /** 带 SESSDATA 调 nav → {valid, uname}，用于保存配置时校验。
+     *  无效 Cookie 时 nav 返回 code -101（账号未登录），这里视为校验不通过而非接口错误。 */
     public Map<String, Object> checkSessdata(String sessdata) throws IOException {
         HttpRequest request = baseBuilder(API_BASE + "/x/web-interface/nav")
                 .header("Cookie", "SESSDATA=" + sessdata)
                 .GET().build();
-        JsonNode data = getJson(request);
+        HttpResponse<String> response = send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        if (response.statusCode() == 412 || response.statusCode() == 429) {
+            throw new ApiException(429, "B站接口暂时拒绝访问（HTTP " + response.statusCode() + " 风控），请稍后重试");
+        }
+        if (response.statusCode() != 200) {
+            throw new ApiException(502, "校验 SESSDATA 失败：HTTP " + response.statusCode());
+        }
+        JsonNode root;
+        try {
+            root = Json.MAPPER.readTree(response.body());
+        } catch (Exception e) {
+            throw new ApiException(502, "B站接口返回了无法解析的内容");
+        }
+        int code = root.path("code").asInt(-1);
+        JsonNode data = root.path("data");
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("valid", data.path("isLogin").asBoolean(false));
-        result.put("uname", data.path("uname").asText(""));
+        result.put("valid", code == 0 && data.path("isLogin").asBoolean(false));
+        result.put("uname", code == 0 ? data.path("uname").asText("") : "");
         return result;
     }
 
