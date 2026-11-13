@@ -381,7 +381,7 @@ onUnmounted(() => {
 
 .rate-label { margin-left: 8px; font-size: 11.5px; color: var(--ink-3); }
 .rate-slider { width: 120px; }
-.warn { font-size: 11.5px; color: #b45309; }
+.warn { font-size: 11.5px; color: var(--warn); }
 
 .text-body {
   max-height: calc(100vh - 320px);
@@ -418,7 +418,7 @@ onUnmounted(() => {
   cursor: pointer;
 }
 
-.chip.on { border-color: #c9d2ff; background: var(--brand-soft); color: var(--brand); font-weight: 600; }
+.chip.on { border-color: #d4cec2; background: var(--brand-soft); color: var(--brand); font-weight: 600; }
 .chip-count { margin-left: 2px; font-size: 10.5px; color: var(--ink-4); }
 
 .hit-line { margin-top: 12px; font-size: 12.5px; color: var(--ink-3); }

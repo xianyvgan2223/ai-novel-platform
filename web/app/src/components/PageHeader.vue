@@ -42,7 +42,7 @@ function goBack() {
 .head-left {
   display: flex;
   align-items: flex-start;
-  gap: 12px;
+  gap: 14px;
   min-width: 0;
 }
 
@@ -52,21 +52,21 @@ function goBack() {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  margin-top: 3px;
-  padding: 6px 10px 6px 8px;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  background: #fff;
+  gap: 5px;
+  margin-top: 5px;
+  padding: 6px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: transparent;
   color: var(--ink-2);
-  font-size: 12.5px;
+  font-size: 11.5px;
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
 .back-btn:hover {
-  background: var(--bg-soft);
-  border-color: var(--line-strong);
+  background: var(--bg-card);
+  border-color: var(--ink-4);
   color: var(--ink-1);
 }
 </style>

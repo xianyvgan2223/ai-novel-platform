@@ -992,7 +992,7 @@ onMounted(() => {
 }
 
 .structure-line:hover { background: var(--bg-soft); }
-.structure-line.on { background: var(--brand-soft); border-color: #c9d2ff; }
+.structure-line.on { background: var(--brand-soft); border-color: #d4cec2; }
 
 .pick { margin: 0 0 0 6px; accent-color: var(--brand); cursor: pointer; }
 
@@ -1012,7 +1012,7 @@ onMounted(() => {
 }
 
 .structure-row:hover { background: var(--bg-soft); }
-.structure-row.on { background: var(--brand-soft); border-color: #c9d2ff; }
+.structure-row.on { background: var(--brand-soft); border-color: #d4cec2; }
 
 .sr-index {
   width: 22px;
@@ -1050,7 +1050,7 @@ onMounted(() => {
   outline: none;
 }
 
-.outline-textarea-native:focus { border-color: #c9d2ff; background: #fff; }
+.outline-textarea-native:focus { border-color: #d4cec2; background: #fff; }
 
 .ai-hint { margin-top: 8px; font-size: 11.5px; color: var(--ink-4); }
 .ai-continue { display: flex; gap: 8px; margin-top: 10px; }
@@ -1116,7 +1116,7 @@ onMounted(() => {
   font-size: 10.5px;
 }
 
-.type-tag.major { color: var(--brand); border-color: #c9d2ff; background: var(--brand-soft); }
+.type-tag.major { color: var(--brand); border-color: #d4cec2; background: var(--brand-soft); }
 
 .dh-label { font-size: 12px; font-weight: 600; color: var(--ink-1); }
 .dh-meta { font-size: 11px; color: var(--ink-4); }
@@ -1126,7 +1126,7 @@ onMounted(() => {
   margin-top: 12px;
   padding: 10px 12px;
   border-radius: 10px;
-  border: 1px dashed #c9d2ff;
+  border: 1px dashed #d4cec2;
   background: var(--brand-soft);
 }
 
@@ -1159,7 +1159,7 @@ onMounted(() => {
   padding: 2px 7px;
   border-radius: 5px;
   background: var(--warn-soft);
-  color: #b45309;
+  color: var(--warn);
   font-size: 10.5px;
   font-weight: 600;
 }
@@ -1224,7 +1224,7 @@ onMounted(() => {
   cursor: pointer;
 }
 
-.chip:hover { border-color: #c9d2ff; color: var(--brand); }
+.chip:hover { border-color: #d4cec2; color: var(--brand); }
 .chip:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .inject-check { margin: 2px 0 8px; }
@@ -1234,7 +1234,7 @@ onMounted(() => {
   padding: 6px 10px;
   border-radius: 8px;
   background: var(--warn-soft);
-  color: #b45309;
+  color: var(--warn);
   font-size: 11.5px;
 }
 

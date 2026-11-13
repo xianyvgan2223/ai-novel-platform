@@ -141,47 +141,82 @@ function openFileFeature(key: string) {
 </template>
 
 <style scoped>
-.feature-card { padding: 6px; }
+.feature-card {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+@media (max-width: 880px) {
+  .feature-card { grid-template-columns: minmax(0, 1fr); }
+}
 
 .feature-row {
+  position: relative;
   display: flex;
-  align-items: center;
-  gap: 14px;
-  width: 100%;
-  padding: 16px 14px;
-  border: none;
-  border-bottom: 1px solid var(--line);
-  border-radius: 10px;
-  background: transparent;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 9px;
+  min-height: 118px;
+  padding: 19px 20px 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--bg-card);
   text-align: left;
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
 }
 
-.feature-row:last-child { border-bottom: none; }
-.feature-row:hover { background: var(--bg-soft); }
+.feature-row:hover {
+  border-color: var(--ink-4);
+  background: #fbf9f4;
+  transform: translateY(-1px);
+}
 
 .feature-icon {
-  width: 36px;
-  height: 36px;
-  flex: 0 0 36px;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
   display: grid;
   place-items: center;
-  border-radius: 10px;
-  background: var(--bg-soft);
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: transparent;
   color: var(--ink-2);
-  font-size: 17px;
+  font-size: 15px;
 }
 
-.feature-main { flex: 1; display: flex; flex-direction: column; gap: 3px; }
+.feature-main { display: flex; flex-direction: column; gap: 4px; padding-right: 28px; }
 
-.feature-title { font-size: 14px; font-weight: 600; color: var(--ink-1); }
+.feature-title {
+  font-size: 13.5px;
+  font-weight: 550;
+  letter-spacing: 0.1px;
+  color: var(--ink-1);
+}
 
 .feature-sub {
-  font-size: 12.5px;
+  font-size: 11.5px;
   color: var(--ink-3);
-  line-height: 1.5;
+  line-height: 1.6;
 }
 
-.feature-arrow { color: var(--ink-4); font-size: 20px; line-height: 1; }
+.feature-arrow {
+  position: absolute;
+  right: 19px;
+  bottom: 18px;
+  color: var(--ink-4);
+  font-size: 15px;
+  line-height: 1;
+  transition: transform 0.18s ease, color 0.18s ease;
+}
+
+.feature-row:hover .feature-arrow {
+  color: var(--ink-1);
+  transform: translateX(2px);
+}
 </style>

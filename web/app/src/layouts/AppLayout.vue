@@ -162,7 +162,7 @@ onMounted(() => {
         <div class="brand-logo">DS</div>
         <div class="brand-text">
           <div class="brand-name">deepseekapp</div>
-          <div class="brand-sub">Web 数据台</div>
+          <div class="brand-sub">WEB CONSOLE</div>
         </div>
       </div>
 
@@ -327,71 +327,70 @@ onMounted(() => {
   background: var(--bg-page);
 }
 
-/* ── 侧边栏 ── */
+/* ── 侧边栏：深炭黑，与暖白正文形成纸张/墨色的对比 ── */
 .sidebar {
-  width: 236px;
-  flex: 0 0 236px;
+  width: 232px;
+  flex: 0 0 232px;
   display: flex;
   flex-direction: column;
-  background: #ffffff;
-  border-right: 1px solid var(--line);
+  background: #141412;
+  color: #f3efe6;
 }
 
 .brand {
   display: flex;
   align-items: center;
   gap: 11px;
-  padding: 22px 20px 20px;
+  padding: 24px 20px 22px;
 }
 
 .brand-logo {
   width: 34px;
   height: 34px;
-  border-radius: 10px;
+  border-radius: 9px;
   display: grid;
   place-items: center;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
-  letter-spacing: 0.3px;
-  color: #fff;
-  background: linear-gradient(135deg, #5b78ff, #3b57e8);
-  box-shadow: 0 6px 16px -6px rgba(77, 107, 254, 0.8);
+  letter-spacing: 0.5px;
+  color: #141412;
+  background: #f3efe6;
 }
 
 .brand-name {
-  font-size: 14.5px;
-  font-weight: 640;
-  color: var(--ink-1);
-  letter-spacing: -0.2px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #f3efe6;
+  letter-spacing: 0.1px;
 }
 
 .brand-sub {
-  font-size: 11.5px;
-  color: var(--ink-3);
-  margin-top: 1px;
+  margin-top: 2px;
+  font-size: 10.5px;
+  color: #7f7b72;
+  letter-spacing: 0.6px;
 }
 
 .nav-label {
-  padding: 6px 22px;
-  font-size: 10.5px;
+  padding: 8px 22px 6px;
+  font-size: 9.5px;
   font-weight: 600;
-  letter-spacing: 0.9px;
+  letter-spacing: 1.4px;
   text-transform: uppercase;
-  color: var(--ink-4);
+  color: #615e56;
 }
 
 .nav {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 4px 12px;
+  padding: 2px 10px;
   flex: 1;
 }
 
-/* 创作分组只占自身高度，剩余空间留给数据分组 */
 .nav-static {
   flex: 0 0 auto;
-  padding-bottom: 12px;
+  padding-bottom: 14px;
 }
 
 .nav-item {
@@ -400,73 +399,74 @@ onMounted(() => {
   align-items: center;
   gap: 10px;
   padding: 9px 12px;
-  border-radius: 9px;
-  font-size: 13.5px;
-  font-weight: 500;
-  color: var(--ink-2);
+  border-radius: 7px;
+  font-size: 12.5px;
+  font-weight: 450;
+  letter-spacing: 0.1px;
+  color: #a7a39a;
   text-decoration: none;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background 0.16s ease, color 0.16s ease;
 }
 
 .nav-item:hover {
-  background: var(--bg-soft);
-  color: var(--ink-1);
+  background: rgba(255, 255, 255, 0.045);
+  color: #f3efe6;
 }
 
 .nav-item.active {
-  color: var(--brand);
-  font-weight: 600;
-  background: var(--brand-soft);
+  color: #f7f4ed;
+  background: rgba(255, 255, 255, 0.075);
 }
 
-/* 选中项左侧的强调条，贴在侧边栏最左边 */
+/* 选中项左侧的暖金细线，仅在深色侧栏上出现 */
 .nav-item.active::before {
   content: '';
   position: absolute;
-  left: -12px;
+  left: -10px;
   top: 50%;
   transform: translateY(-50%);
-  width: 3px;
-  height: 18px;
-  border-radius: 0 3px 3px 0;
-  background: var(--brand);
+  width: 2px;
+  height: 14px;
+  border-radius: 0 2px 2px 0;
+  background: #c8ad82;
 }
 
-.nav-icon { font-size: 15px; }
+.nav-icon { font-size: 14px; opacity: 0.85; }
 
-.sidebar-foot { padding: 14px; }
+.sidebar-foot { padding: 14px 12px 16px; }
 
 .foot-card {
-  background: var(--bg-soft);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 8px;
+  padding: 11px 12px;
+  background: transparent;
 }
 
 .foot-row {
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 12px;
-  color: var(--ink-2);
+  font-size: 11.5px;
+  color: #a7a39a;
 }
 
 .foot-meta {
-  margin-top: 5px;
-  font-size: 10.5px;
-  color: var(--ink-4);
-  line-height: 1.5;
+  margin-top: 6px;
+  font-size: 9.5px;
+  color: #5f5b53;
+  line-height: 1.6;
+  letter-spacing: 0.2px;
 }
 
 .foot-dot, .dot {
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
-  flex: 0 0 7px;
+  flex: 0 0 6px;
 }
 
-.foot-dot.on, .status-pill.on .dot { background: #22c55e; box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.18); }
-.foot-dot.off, .status-pill.off .dot { background: #f43f5e; box-shadow: 0 0 0 3px rgba(244, 63, 94, 0.18); }
+.foot-dot.on, .status-pill.on .dot { background: #7fa98a; }
+.foot-dot.off, .status-pill.off .dot { background: #b46860; }
 
 /* ── 主区域 ── */
 .main {
@@ -477,120 +477,121 @@ onMounted(() => {
 }
 
 .topbar {
-  height: 62px;
-  flex: 0 0 62px;
+  height: 60px;
+  flex: 0 0 60px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 0 28px;
-  background: rgba(255, 255, 255, 0.88);
-  backdrop-filter: saturate(180%) blur(12px);
+  padding: 0 32px;
+  background: rgba(245, 243, 238, 0.86);
+  backdrop-filter: saturate(140%) blur(14px);
   border-bottom: 1px solid var(--line);
   position: sticky;
   top: 0;
   z-index: 10;
 }
 
-.topbar-left { display: flex; align-items: center; gap: 10px; }
+.topbar-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
 
 .topbar-title {
-  font-size: 15px;
-  font-weight: 620;
-  letter-spacing: -0.2px;
+  font-size: 13px;
+  font-weight: 550;
+  letter-spacing: 0.2px;
+  color: var(--ink-1);
 }
 
 .topbar-badge {
-  padding: 2px 8px;
-  border-radius: 6px;
-  background: var(--bg-soft);
-  border: 1px solid var(--line);
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: transparent;
+  border: 1px solid var(--line-strong);
   color: var(--ink-3);
-  font-size: 11px;
+  font-size: 10px;
+  letter-spacing: 0.2px;
 }
 
-.topbar-right { display: flex; align-items: center; gap: 12px; }
+.topbar-right { display: flex; align-items: center; gap: 10px; }
 
 .status-pill {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 5px 12px 5px 10px;
-  border-radius: 999px;
-  font-size: 12.5px;
-  font-weight: 500;
-  border: 1px solid transparent;
+  gap: 7px;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  font-size: 11.5px;
+  font-weight: 450;
+  color: var(--ink-3);
+  background: transparent !important;
 }
 
 .sync-hint {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  font-size: 12.5px;
-  color: var(--brand);
-  background: var(--brand-soft);
-  padding: 4px 11px;
-  border-radius: 999px;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--ink-2);
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
   white-space: nowrap;
-  max-width: 380px;
+  max-width: 360px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .sync-pct {
-  font-weight: 650;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
-  padding-left: 7px;
-  border-left: 1px solid #c9d2ff;
+  padding-left: 6px;
+  border-left: 1px solid var(--line-strong);
 }
-
-.status-pill.on { color: #047857; background: var(--ok-soft); border-color: #d1fae5; }
-.status-pill.off { color: #be123c; background: var(--danger-soft); border-color: #ffe4e9; }
 
 /* ── 设备切换器 ── */
 .device-picker {
   display: flex;
   align-items: center;
   gap: 9px;
-  padding: 5px 11px;
-  border-radius: 10px;
+  padding: 6px 10px;
+  border-radius: 7px;
   border: 1px solid var(--line);
-  background: #fff;
+  background: var(--bg-card);
   cursor: pointer;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color 0.15s ease;
   max-width: 300px;
 }
 
-.device-picker:hover { border-color: #c7d0f5; box-shadow: 0 2px 10px -6px rgba(77, 107, 254, 0.7); }
-.device-picker.busy { opacity: 0.7; }
-.dp-icon { color: var(--brand); font-size: 15px; }
+.device-picker:hover { border-color: var(--ink-4); }
+.device-picker.busy { opacity: 0.65; }
+.dp-icon { color: var(--ink-3); font-size: 14px; }
 
 .dp-text { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; }
-.dp-label { font-size: 10px; color: var(--ink-4); line-height: 1.2; }
+.dp-label { font-size: 9px; color: var(--ink-4); line-height: 1.25; letter-spacing: 0.3px; }
 
 .dp-name {
-  font-size: 12px;
+  font-size: 11.5px;
   color: var(--ink-1);
-  font-weight: 600;
+  font-weight: 550;
   max-width: 230px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.dp-caret { font-size: 10px; color: var(--ink-4); }
+.dp-caret { font-size: 9px; color: var(--ink-4); }
 
 .dp-panel-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
-  padding-bottom: 9px;
+  padding-bottom: 10px;
   border-bottom: 1px solid var(--line);
 }
 
-.dp-panel-title { font-size: 13px; font-weight: 620; color: var(--ink-1); }
-.dp-panel-sub { margin-top: 2px; font-size: 11.5px; color: var(--ink-3); line-height: 1.5; }
+.dp-panel-title { font-size: 12.5px; font-weight: 600; color: var(--ink-1); }
+.dp-panel-sub { margin-top: 2px; font-size: 11px; color: var(--ink-3); line-height: 1.6; }
 
 .dp-list { max-height: 320px; overflow: auto; margin: 8px 0; }
 
@@ -601,49 +602,51 @@ onMounted(() => {
   gap: 8px;
   width: 100%;
   text-align: left;
-  padding: 8px 10px;
-  border-radius: 9px;
+  padding: 9px 10px;
+  border-radius: 7px;
   border: 1px solid transparent;
   background: transparent;
   cursor: pointer;
+  transition: background 0.15s ease;
 }
 
 .dp-item:hover { background: var(--bg-soft); }
-.dp-item.on { background: var(--brand-soft); border-color: #c9d2ff; }
+.dp-item.on { background: var(--bg-soft); border-color: var(--line-strong); }
 .dp-item-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 
-.dp-item-name { font-size: 12.5px; font-weight: 600; color: var(--ink-1); }
+.dp-item-name { font-size: 12px; font-weight: 600; color: var(--ink-1); }
 
 .dp-tag {
   margin-left: 6px;
   padding: 1px 5px;
-  border-radius: 5px;
-  background: #fff;
-  border: 1px solid #c9d2ff;
-  color: var(--brand);
-  font-size: 10px;
-  font-weight: 600;
+  border-radius: 4px;
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  color: var(--ink-3);
+  font-size: 9.5px;
+  font-weight: 500;
 }
 
-.dp-item-id { font-size: 11px; color: var(--ink-3); }
-.dp-item-meta { font-size: 10.5px; color: var(--ink-4); line-height: 1.5; }
+.dp-item-id { font-size: 10.5px; color: var(--ink-3); }
+.dp-item-meta { font-size: 10px; color: var(--ink-4); line-height: 1.55; }
 
-.dp-item-del { color: var(--ink-4); font-size: 14px; flex: 0 0 auto; }
-.dp-item-del:hover { color: var(--danger, #f43f5e); }
+.dp-item-del { color: var(--ink-4); font-size: 13px; flex: 0 0 auto; }
+.dp-item-del:hover { color: var(--danger); }
 
-.dp-empty { padding: 14px 10px; font-size: 12px; color: var(--ink-3); text-align: center; }
+.dp-empty { padding: 18px 10px; font-size: 11.5px; color: var(--ink-3); text-align: center; }
 
 .dp-panel-foot {
-  padding-top: 9px;
+  padding-top: 10px;
   border-top: 1px solid var(--line);
-  font-size: 11px;
+  font-size: 10.5px;
   color: var(--ink-4);
-  line-height: 1.6;
+  line-height: 1.65;
 }
 
 .content {
   flex: 1;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   min-height: 0;
 }
 
@@ -651,4 +654,40 @@ onMounted(() => {
 .fade-slide-enter-active, .fade-slide-leave-active { transition: opacity 0.18s ease, transform 0.18s ease; }
 .fade-slide-enter-from { opacity: 0; transform: translateY(6px); }
 .fade-slide-leave-to { opacity: 0; transform: translateY(-4px); }
+
+@media (max-width: 960px) {
+  .sidebar { width: 66px; flex-basis: 66px; }
+  .brand { padding: 20px 0 18px; justify-content: center; }
+  .brand-text, .nav-label, .nav-item span, .sidebar-foot { display: none; }
+  .nav { padding: 2px 8px; }
+  .nav-static { padding-bottom: 6px; }
+  .nav-item { justify-content: center; padding: 11px 0; }
+  .nav-item.active::before { left: -8px; }
+  .nav-icon { font-size: 16px; }
+  .topbar { padding: 0 18px; gap: 10px; }
+  .topbar-badge, .sync-hint { display: none; }
+  .status-pill { display: none; }
+  .topbar-right { gap: 7px; }
+  .device-picker { max-width: 180px; padding: 5px 8px; }
+  .dp-name { max-width: 110px; }
+  .dp-label { display: none; }
+}
+
+@media (max-width: 700px) {
+  .topbar { padding: 0 12px; gap: 6px; }
+  .topbar-left { min-width: 0; flex: 1; }
+  .topbar-title {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+  }
+  .topbar-right { gap: 4px; flex: 0 0 auto; }
+  .device-picker { display: flex; max-width: none; padding: 6px 8px; gap: 4px; }
+  .dp-text { display: none; }
+  .topbar-right :deep(.el-button span) { display: none; }
+  .topbar-right :deep(.el-button) { padding: 8px; }
+}
 </style>

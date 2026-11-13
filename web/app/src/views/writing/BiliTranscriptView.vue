@@ -522,10 +522,10 @@ onMounted(loadSettings);
   transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
 }
 
-.chip:hover:not(:disabled) { border-color: #c9d2ff; }
+.chip:hover:not(:disabled) { border-color: #d4cec2; }
 
 .chip.on {
-  border-color: #c9d2ff;
+  border-color: #d4cec2;
   background: var(--brand-soft);
   color: var(--brand);
   font-weight: 600;

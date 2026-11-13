@@ -195,22 +195,22 @@ const blocks = computed(() => parseBlocks(props.text));
 .rt-code {
   margin: 10px 0;
   padding: 12px 14px;
-  background: #0f172a;
-  color: #e2e8f0;
-  border-radius: 10px;
+  background: #1a1a18;
+  color: #f3efe6;
+  border-radius: 8px;
   overflow: auto;
   font-family: 'JetBrains Mono', 'Cascadia Mono', Consolas, monospace;
-  font-size: 12.5px;
-  line-height: 1.65;
+  font-size: 12px;
+  line-height: 1.7;
 }
 
 .rt-inline {
   padding: 1px 5px;
-  border-radius: 5px;
-  background: rgba(15, 23, 42, 0.06);
+  border-radius: 4px;
+  background: rgba(26, 26, 24, 0.06);
   font-family: 'JetBrains Mono', 'Cascadia Mono', Consolas, monospace;
   font-size: 0.92em;
-  color: #be185d;
+  color: #6d5a4a;
 }
 
 strong { font-weight: 650; color: var(--ink-1); }

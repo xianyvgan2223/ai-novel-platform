@@ -456,7 +456,7 @@ onMounted(refresh);
 .warn-box {
   margin-top: 14px;
   background: var(--warn-soft);
-  border: 1px solid #fde68a;
+  border: 1px solid #eadfcb;
   border-radius: 10px;
   padding: 10px 12px;
 }
@@ -467,7 +467,7 @@ onMounted(refresh);
   gap: 7px;
   font-size: 12.5px;
   line-height: 1.6;
-  color: #92400e;
+  color: #6f5632;
 }
 .warn-line + .warn-line { margin-top: 5px; }
 .warn-line .el-icon { margin-top: 3px; color: var(--warn); flex: 0 0 auto; }

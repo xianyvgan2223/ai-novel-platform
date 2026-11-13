@@ -501,7 +501,7 @@ onMounted(() => {
   color: var(--ink-4);
 }
 
-.mode-tab.on .mode-hint { color: #7d92ff; }
+.mode-tab.on .mode-hint { color: #6b675f; }
 
 /* ── 文稿优化 ── */
 .opt-grid {
@@ -574,10 +574,10 @@ onMounted(() => {
   transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
 }
 
-.chip:hover { border-color: #c9d2ff; }
+.chip:hover { border-color: #d4cec2; }
 
 .chip.on {
-  border-color: #c9d2ff;
+  border-color: #d4cec2;
   background: var(--brand-soft);
   color: var(--brand);
   font-weight: 600;

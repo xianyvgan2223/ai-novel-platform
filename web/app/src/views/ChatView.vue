@@ -148,127 +148,151 @@ onMounted(load);
 </template>
 
 <style scoped>
+.page { max-width: 1120px; }
+
 .meta-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: 10px;
+  margin-bottom: 22px;
 }
 
 .meta-chip {
-  background: #fff;
+  background: transparent;
   border: 1px solid var(--line);
   border-radius: var(--r-md);
-  padding: 12px 16px;
-  box-shadow: var(--shadow-1);
+  padding: 13px 16px;
 }
 
-.meta-label { display: block; font-size: 12px; color: var(--ink-3); }
-.meta-value { display: block; margin-top: 4px; font-size: 19px; font-weight: 650; letter-spacing: -0.4px; }
+.meta-label {
+  display: block;
+  font-size: 9.5px;
+  letter-spacing: 0.5px;
+  color: var(--ink-3);
+}
+.meta-value {
+  display: block;
+  margin-top: 5px;
+  font-size: 20px;
+  font-weight: 520;
+  letter-spacing: -0.4px;
+  color: var(--ink-1);
+}
 
 .summary-card {
   display: flex;
-  gap: 12px;
-  background: linear-gradient(135deg, #f3f6ff, #eef1ff);
-  border: 1px solid #e0e7ff;
-  border-radius: var(--r-lg);
-  padding: 16px 18px;
-  margin-bottom: 20px;
+  gap: 14px;
+  background: transparent;
+  border: none;
+  border-left: 2px solid var(--ink-1);
+  border-radius: 0;
+  padding: 2px 0 2px 16px;
+  margin: 4px 0 30px;
 }
 
 .summary-icon {
-  width: 30px;
-  height: 30px;
-  flex: 0 0 30px;
-  border-radius: 9px;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
   display: grid;
   place-items: center;
-  background: #fff;
-  color: var(--brand);
+  color: var(--ink-3);
+  font-size: 14px;
 }
 
-.summary-label { font-size: 12px; font-weight: 600; color: var(--brand); letter-spacing: 0.3px; }
-.summary-text { margin-top: 5px; font-size: 13.5px; line-height: 1.75; color: var(--ink-2); }
+.summary-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--ink-3);
+  letter-spacing: 0.7px;
+}
+.summary-text { margin-top: 6px; font-size: 12.5px; line-height: 1.85; color: var(--ink-2); }
 
-.thread { display: flex; flex-direction: column; gap: 20px; }
+.thread { display: flex; flex-direction: column; gap: 26px; }
 
-.turn { display: flex; gap: 12px; }
+.turn { display: flex; gap: 13px; }
 .turn.is-user { flex-direction: row-reverse; }
 
 .avatar {
-  width: 34px;
-  height: 34px;
-  flex: 0 0 34px;
-  border-radius: 11px;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  border-radius: 50%;
   display: grid;
   place-items: center;
-  font-size: 15px;
-  color: #fff;
+  font-size: 13px;
   margin-top: 22px;
+  border: 1px solid var(--line-strong);
+  background: var(--bg-card);
+  color: var(--ink-2);
 }
 
-.av-ai { background: linear-gradient(135deg, #5b78ff, #3b57e8); box-shadow: 0 6px 16px -8px rgba(77, 107, 254, 0.9); }
-.av-user { background: linear-gradient(135deg, #94a3b8, #64748b); }
+.av-ai { color: var(--ink-1); }
+.av-user { background: var(--ink-1); border-color: var(--ink-1); color: #f7f4ed; }
 
-.bubble-wrap { min-width: 0; max-width: 80%; }
+.bubble-wrap { min-width: 0; max-width: 78%; }
 .turn.is-user .bubble-wrap { display: flex; flex-direction: column; align-items: flex-end; }
 
 .bubble-head {
   display: flex;
   align-items: center;
   gap: 9px;
-  margin-bottom: 6px;
-  font-size: 11.5px;
+  margin-bottom: 7px;
+  font-size: 10px;
   color: var(--ink-3);
+  letter-spacing: 0.2px;
 }
 
 .turn.is-user .bubble-head { flex-direction: row-reverse; }
-.who { font-weight: 600; color: var(--ink-2); font-size: 12.5px; }
+.who { font-weight: 600; color: var(--ink-2); font-size: 11.5px; }
 .mid { color: var(--ink-4); }
 
 .bubble {
-  background: #fff;
-  border: 1px solid var(--line);
-  border-radius: 4px 14px 14px 14px;
-  padding: 14px 16px;
-  box-shadow: var(--shadow-1);
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0 2px;
+  box-shadow: none;
 }
 
 .turn.is-user .bubble {
-  background: linear-gradient(135deg, #eef1ff, #e4e9ff);
-  border-color: #dbe2ff;
-  border-radius: 14px 4px 14px 14px;
+  background: var(--ink-1);
+  border: 1px solid var(--ink-1);
+  border-radius: 12px 3px 12px 12px;
+  padding: 12px 15px;
 }
 
-.bubble-text { line-height: 1.8; font-size: 13.8px; color: var(--ink-1); }
+.bubble-text { line-height: 1.85; font-size: 13px; color: var(--ink-1); }
+.turn.is-user .bubble-text { color: #f7f4ed; }
+.turn.is-user :deep(.rich-text) { color: #f7f4ed; }
 
-.think { margin-top: 10px; }
-.think-title { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--ink-3); }
+.think { margin-top: 12px; }
+.think-title { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--ink-3); }
 
 .think-body {
-  font-size: 12.8px;
-  line-height: 1.75;
+  font-size: 12px;
+  line-height: 1.8;
   color: var(--ink-2);
   background: var(--bg-soft);
-  border-left: 2px solid var(--line-strong);
-  border-radius: 0 8px 8px 0;
+  border-left: 1px solid var(--line-strong);
+  border-radius: 0 6px 6px 0;
   padding: 10px 12px;
 }
 
-.sources { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line-strong); }
-.sources-title { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--ink-3); margin-bottom: 7px; }
+.sources { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.sources-title { display: flex; align-items: center; gap: 5px; font-size: 10.5px; color: var(--ink-3); margin-bottom: 8px; }
 
 .source {
   display: block;
-  padding: 7px 10px;
-  border-radius: 8px;
+  padding: 8px 10px;
+  border-radius: 7px;
   text-decoration: none;
-  margin-bottom: 5px;
-  background: var(--bg-soft);
+  margin-bottom: 6px;
+  background: transparent;
   border: 1px solid var(--line);
-  transition: background 0.15s ease;
+  transition: border-color 0.15s ease, background 0.15s ease;
 }
-.source:hover { background: var(--brand-soft); border-color: #dbe2ff; }
-.source-title { display: block; font-size: 12.5px; color: var(--brand); font-weight: 500; }
-.source-url { display: block; font-size: 11px; color: var(--ink-4); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.source:hover { background: var(--bg-soft); border-color: var(--ink-4); }
+.source-title { display: block; font-size: 11.5px; color: var(--ink-1); font-weight: 500; }
+.source-url { display: block; font-size: 10px; color: var(--ink-4); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

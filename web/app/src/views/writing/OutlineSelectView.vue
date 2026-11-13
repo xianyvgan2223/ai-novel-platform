@@ -98,7 +98,7 @@ onMounted(load);
             <div class="oc-title">{{ item.title || '未命名作品' }}</div>
             <div class="oc-meta">
               <span>{{ item.genre || '未设类型' }}</span>
-              <span v-if="item.theme">· {{ item.theme }}</span>
+              <span v-if="item.theme" class="oc-theme">· {{ item.theme }}</span>
               <span>· {{ stats(Number(item.id)).minor }} 个小事件</span>
               <span>· 已写 {{ stats(Number(item.id)).written }}</span>
             </div>
@@ -113,26 +113,27 @@ onMounted(load);
 </template>
 
 <style scoped>
-.outline-list { display: flex; flex-direction: column; gap: 14px; }
+.outline-list { display: flex; flex-direction: column; gap: 10px; }
 
 .outline-card {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 18px 20px;
+  gap: 18px;
+  padding: 17px 20px;
   margin-bottom: 0;
   cursor: pointer;
-  transition: box-shadow 0.15s ease;
+  transition: border-color 0.16s ease, background 0.16s ease;
 }
 
-.outline-card:hover { box-shadow: var(--shadow-pop); }
+.outline-card:hover { border-color: var(--ink-4); background: #fbf9f4; }
 
 .oc-main { flex: 1; min-width: 0; }
 
 .oc-title {
-  font-size: 15.5px;
-  font-weight: 650;
+  font-size: 14px;
+  font-weight: 550;
+  letter-spacing: 0.1px;
   color: var(--ink-1);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -141,22 +142,39 @@ onMounted(load);
 
 .oc-meta {
   margin-top: 5px;
-  font-size: 12px;
+  font-size: 11.5px;
   color: var(--ink-3);
   display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.oc-theme {
+  max-width: 520px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-3);
 }
 
 .oc-enter {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 4px;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--brand);
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--ink-2);
+  white-space: nowrap;
 }
 
-.oc-arrow { font-size: 18px; line-height: 1; }
+.oc-arrow { font-size: 15px; line-height: 1; color: var(--ink-4); transition: transform 0.16s ease; }
+.outline-card:hover .oc-arrow { transform: translateX(2px); color: var(--ink-1); }
+
+@media (max-width: 760px) {
+  .oc-theme { max-width: 38vw; }
+  .oc-enter { font-size: 0; }
+  .oc-arrow { font-size: 16px; }
+}
 </style>

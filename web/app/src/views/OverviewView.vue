@@ -213,41 +213,43 @@ function openTable(db: string, table: string) {
   display: flex;
   align-items: center;
   gap: 14px;
-  padding: 16px 18px;
+  padding: 15px 18px;
   margin-bottom: 18px;
-  border-radius: var(--r-lg);
-  background: linear-gradient(135deg, #eef1ff, #f5f7ff);
-  border: 1px solid #dde3ff;
+  border-radius: var(--r-md);
+  background: var(--bg-card);
+  border: 1px solid var(--line);
 }
 
 .eb-icon {
-  width: 36px;
-  height: 36px;
-  flex: 0 0 36px;
-  border-radius: 11px;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  border-radius: 50%;
   display: grid;
   place-items: center;
-  background: #fff;
-  color: var(--brand);
-  font-size: 17px;
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  color: var(--ink-2);
+  font-size: 14px;
 }
 
 .eb-main { flex: 1; }
-.eb-title { font-size: 14px; font-weight: 620; color: var(--ink-1); }
-.eb-desc { margin-top: 3px; font-size: 12.5px; line-height: 1.6; color: var(--ink-2); }
+.eb-title { font-size: 13px; font-weight: 600; color: var(--ink-1); }
+.eb-desc { margin-top: 3px; font-size: 11.5px; line-height: 1.7; color: var(--ink-3); }
 
 .status-pill {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  padding: 4px 11px;
+  gap: 6px;
+  padding: 3px 9px;
   border-radius: 999px;
-  font-size: 12px;
+  border: 1px solid var(--line);
+  font-size: 10.5px;
   font-weight: 500;
 }
-.status-pill.on { color: #047857; background: var(--ok-soft); }
-.status-pill.off { color: #be123c; background: var(--danger-soft); }
-.status-pill .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.status-pill.on { color: var(--ok); background: transparent; }
+.status-pill.off { color: var(--danger); background: transparent; }
+.status-pill .dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
 
 .db-file {
   display: flex;
@@ -259,15 +261,16 @@ function openTable(db: string, table: string) {
 .db-file:last-child { border-bottom: none; }
 
 .db-file-icon {
-  width: 34px;
-  height: 34px;
-  flex: 0 0 34px;
-  border-radius: 9px;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  border-radius: 7px;
   display: grid;
   place-items: center;
-  background: var(--brand-soft);
-  color: var(--brand);
-  font-size: 16px;
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--ink-2);
+  font-size: 14px;
 }
 
 .db-file-main { flex: 1; min-width: 0; }

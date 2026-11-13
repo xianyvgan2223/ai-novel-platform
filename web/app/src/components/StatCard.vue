@@ -30,26 +30,17 @@ void props;
 <style scoped>
 .stat {
   position: relative;
-  background: #fff;
-  border-radius: var(--r-md);
-  padding: 16px 18px 14px;
-  box-shadow: var(--shadow-1);
-  border: 1px solid var(--line);
-  transition: transform 0.16s ease, box-shadow 0.16s ease;
+  background: var(--bg-card);
+  border-radius: 0;
+  padding: 19px 22px 17px;
+  box-shadow: none;
+  border: none;
+  transition: background 0.16s ease;
   overflow: hidden;
 }
 
-.stat::before {
-  content: '';
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 3px;
-  background: var(--tone-color);
-  opacity: 0.9;
-}
-
 .stat.clickable { cursor: pointer; }
-.stat.clickable:hover { transform: translateY(-2px); box-shadow: var(--shadow-2); }
+.stat.clickable:hover { background: #faf8f2; }
 
 .stat-top {
   display: flex;
@@ -59,42 +50,37 @@ void props;
 }
 
 .stat-label {
-  font-size: 12.5px;
+  font-size: 10.5px;
   color: var(--ink-3);
   font-weight: 500;
+  letter-spacing: 0.6px;
 }
 
 .stat-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 8px;
-  background: var(--tone-soft);
-  color: var(--tone-color);
-  font-size: 14px;
+  width: auto;
+  height: auto;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink-4);
+  font-size: 13px;
 }
 
 .stat-value {
-  margin-top: 8px;
-  font-size: 30px;
-  line-height: 1.1;
-  font-weight: 660;
-  letter-spacing: -0.8px;
+  margin-top: 12px;
+  font-size: 31px;
+  line-height: 1;
+  font-weight: 560;
+  letter-spacing: -1.2px;
   color: var(--ink-1);
 }
 
 .stat-hint {
-  margin-top: 6px;
+  margin-top: 9px;
   color: var(--ink-4);
-  font-size: 11px;
+  font-size: 9.5px;
+  letter-spacing: 0.2px;
 }
-
-.tone-brand { --tone-color: var(--brand); --tone-soft: var(--brand-soft); }
-.tone-violet { --tone-color: var(--violet); --tone-soft: var(--violet-soft); }
-.tone-emerald { --tone-color: var(--ok); --tone-soft: var(--ok-soft); }
-.tone-amber { --tone-color: var(--warn); --tone-soft: var(--warn-soft); }
-.tone-cyan { --tone-color: var(--cyan); --tone-soft: var(--cyan-soft); }
-.tone-rose { --tone-color: var(--danger); --tone-soft: var(--danger-soft); }
 </style>

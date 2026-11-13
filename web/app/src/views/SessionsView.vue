@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { Delete, Refresh, Search, View } from '@element-plus/icons-vue';
@@ -76,8 +76,6 @@ async function remove(row: Row) {
   }
 }
 
-const isEmpty = computed(() => !loading.value && rows.value.length === 0);
-
 watch([page, pageSize], () => void load());
 // 切换设备（数据隔离）后，列表要换成那台设备的会话
 watch(deviceEpoch, () => {
@@ -138,10 +136,6 @@ onMounted(load);
         </el-table-column>
       </el-table>
 
-      <div v-if="isEmpty" class="empty-hint">
-        没有匹配的会话{{ keyword ? '，换个关键字试试' : '' }}
-      </div>
-
       <div class="card-foot">
         <span class="text-muted" style="font-size: 12.5px">
           共 <b class="tnum">{{ total }}</b> 条会话
@@ -160,36 +154,37 @@ onMounted(load);
 </template>
 
 <style scoped>
-.sess { display: flex; align-items: center; gap: 12px; padding: 2px 0; }
+.sess { display: flex; align-items: center; gap: 13px; padding: 4px 0; }
 
 .sess-avatar {
   width: 34px;
   height: 34px;
   flex: 0 0 34px;
-  border-radius: 10px;
+  border-radius: 8px;
   display: grid;
   place-items: center;
-  font-size: 14px;
-  font-weight: 650;
-  color: var(--tone-color);
-  background: var(--tone-soft);
+  font-family: var(--font-serif);
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--ink-2);
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
 }
 
 .sess-main { min-width: 0; }
-.sess-title { font-weight: 600; color: var(--ink-1); font-size: 13.5px; }
+.sess-title { font-weight: 550; color: var(--ink-1); font-size: 13px; letter-spacing: 0.1px; }
 .sess-sub {
-  margin-top: 2px;
-  font-size: 12px;
+  margin-top: 3px;
+  font-size: 11.5px;
   color: var(--ink-3);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.tone-brand { --tone-color: var(--brand); --tone-soft: var(--brand-soft); }
-.tone-violet { --tone-color: var(--violet); --tone-soft: var(--violet-soft); }
-.tone-emerald { --tone-color: var(--ok); --tone-soft: var(--ok-soft); }
-.tone-amber { --tone-color: var(--warn); --tone-soft: var(--warn-soft); }
-.tone-cyan { --tone-color: var(--cyan); --tone-soft: var(--cyan-soft); }
-.tone-rose { --tone-color: var(--danger); --tone-soft: var(--danger-soft); }
+/* 兼容旧模板里的 tone class：统一成中性纸色 */
+.tone-brand, .tone-violet, .tone-emerald, .tone-amber, .tone-cyan, .tone-rose {
+  --tone-color: var(--ink-2);
+  --tone-soft: var(--bg-soft);
+}
 </style>
