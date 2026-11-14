@@ -261,8 +261,8 @@ async function confirmImport() {
   margin-top: 10px;
   padding: 9px 12px;
   border-radius: 9px;
-  border: 1px solid #d4cec2;
-  background: #f5f2eb;
+  border: 1px solid var(--line-strong);
+  background: var(--bg-soft);
   color: var(--ink-2);
   font-size: 12.5px;
   line-height: 1.6;
@@ -272,9 +272,9 @@ async function confirmImport() {
   margin-top: 10px;
   padding: 9px 12px;
   border-radius: 9px;
-  border: 1px solid #eadfcb;
+  border: 1px solid var(--line-strong);
   background: var(--warn-soft);
-  color: #6f5632;
+  color: var(--warn);
   font-size: 12.5px;
   line-height: 1.6;
 }

@@ -938,7 +938,7 @@ onMounted(() => {
   padding: 4px;
   margin-bottom: 16px;
   border-radius: 10px;
-  background: #fff;
+  background: var(--bg-card);
   border: 1px solid var(--line);
 }
 
@@ -992,7 +992,7 @@ onMounted(() => {
 }
 
 .structure-line:hover { background: var(--bg-soft); }
-.structure-line.on { background: var(--brand-soft); border-color: #d4cec2; }
+.structure-line.on { background: var(--brand-soft); border-color: var(--line-strong); }
 
 .pick { margin: 0 0 0 6px; accent-color: var(--brand); cursor: pointer; }
 
@@ -1012,7 +1012,7 @@ onMounted(() => {
 }
 
 .structure-row:hover { background: var(--bg-soft); }
-.structure-row.on { background: var(--brand-soft); border-color: #d4cec2; }
+.structure-row.on { background: var(--brand-soft); border-color: var(--line-strong); }
 
 .sr-index {
   width: 22px;
@@ -1021,7 +1021,7 @@ onMounted(() => {
   display: grid;
   place-items: center;
   border-radius: 6px;
-  background: #fff;
+  background: var(--bg-card);
   border: 1px solid var(--line-strong);
   color: var(--ink-3);
   font-size: 10.5px;
@@ -1050,7 +1050,7 @@ onMounted(() => {
   outline: none;
 }
 
-.outline-textarea-native:focus { border-color: #d4cec2; background: #fff; }
+.outline-textarea-native:focus { border-color: var(--line-strong); background: var(--bg-card); }
 
 .ai-hint { margin-top: 8px; font-size: 11.5px; color: var(--ink-4); }
 .ai-continue { display: flex; gap: 8px; margin-top: 10px; }
@@ -1094,7 +1094,7 @@ onMounted(() => {
   padding: 14px 16px 16px;
   border: 1px solid var(--line);
   border-radius: 12px;
-  background: #fff;
+  background: var(--bg-card);
 }
 
 .draft-head {
@@ -1116,7 +1116,7 @@ onMounted(() => {
   font-size: 10.5px;
 }
 
-.type-tag.major { color: var(--brand); border-color: #d4cec2; background: var(--brand-soft); }
+.type-tag.major { color: var(--brand); border-color: var(--line-strong); background: var(--brand-soft); }
 
 .dh-label { font-size: 12px; font-weight: 600; color: var(--ink-1); }
 .dh-meta { font-size: 11px; color: var(--ink-4); }
@@ -1126,7 +1126,7 @@ onMounted(() => {
   margin-top: 12px;
   padding: 10px 12px;
   border-radius: 10px;
-  border: 1px dashed #d4cec2;
+  border: 1px dashed var(--line-strong);
   background: var(--brand-soft);
 }
 
@@ -1205,7 +1205,7 @@ onMounted(() => {
   word-break: break-word;
 }
 
-.chat-msg.user .bubble { background: var(--brand); color: #fff; }
+.chat-msg.user .bubble { background: var(--brand); color: var(--bg-page); }
 .chat-msg.assistant .bubble { background: var(--bg-soft); border: 1px solid var(--line); color: var(--ink-1); }
 
 .apply-row { display: flex; flex-wrap: wrap; gap: 2px; margin-top: 4px; }
@@ -1218,13 +1218,13 @@ onMounted(() => {
   padding: 5px 10px;
   border-radius: 999px;
   border: 1px solid var(--line-strong);
-  background: #fff;
+  background: var(--bg-card);
   font-size: 11.5px;
   color: var(--ink-2);
   cursor: pointer;
 }
 
-.chip:hover { border-color: #d4cec2; color: var(--brand); }
+.chip:hover { border-color: var(--line-strong); color: var(--brand); }
 .chip:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .inject-check { margin: 2px 0 8px; }

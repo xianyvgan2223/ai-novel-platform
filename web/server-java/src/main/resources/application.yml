@@ -8,6 +8,10 @@ server:
 spring:
   application:
     name: deepseekapp-web-sync
+  servlet:
+    multipart:
+      max-file-size: ${RAG_MAX_UPLOAD:64MB}
+      max-request-size: ${RAG_MAX_UPLOAD:64MB}
   # Spring AI：OpenAI 兼容协议对接 DeepSeek，密钥从 web/server/.env 读取
   ai:
     openai:
@@ -55,3 +59,11 @@ app:
   bili-python: ${BILI_PYTHON:D:\tools\python3.10.10\python.exe}
   bili-whisper-model: ${BILI_WHISPER_MODEL:small}
   bili-max-video-minutes: ${BILI_MAX_VIDEO_MINUTES:180}
+  # ── RAG 情节素材库（Elasticsearch + 阿里百炼 embedding + DeepSeek）──
+  rag-es-url: ${RAG_ES_URL:http://127.0.0.1:9221}
+  rag-es-index: ${RAG_ES_INDEX:novel_rag_scenes}
+  dashscope-api-key: ${DASHSCOPE_API_KEY:}
+  dashscope-base-url: ${DASHSCOPE_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+  embedding-model: ${DASHSCOPE_EMBEDDING_MODEL:text-embedding-v3}
+  embedding-dim: ${DASHSCOPE_EMBEDDING_DIM:1024}
+  rag-chunk-chars: ${RAG_CHUNK_CHARS:8000}

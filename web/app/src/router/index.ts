@@ -90,10 +90,20 @@ export const router = createRouter({
       meta: { title: '写作工具' },
     },
     {
-      path: '/writing/bili',
-      name: 'writing-bili',
-      component: () => import('@/views/writing/BiliTranscriptView.vue'),
+      path: '/bili',
+      name: 'bili-transcript',
+      component: () => import('@/views/BiliTranscriptView.vue'),
       meta: { title: 'B站视频转文字' },
+    },
+    {
+      path: '/rag',
+      name: 'rag',
+      component: () => import('@/views/RagView.vue'),
+      meta: { title: '情节素材库' },
+    },
+    {
+      path: '/writing/bili',
+      redirect: '/bili',
     },
     {
       path: '/sessions/:id',

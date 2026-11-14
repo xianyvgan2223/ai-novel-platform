@@ -462,3 +462,68 @@ export function formatTime(value: unknown): string {
     ' ' + pad(date.getHours()) + ':' + pad(date.getMinutes()) + ':' + pad(date.getSeconds())
   );
 }
+/** ── RAG 情节素材库 ── */
+
+export interface RagBookStat {
+  book: string;
+  count: number;
+}
+
+export interface RagStatus {
+  esUrl: string;
+  index: string;
+  esOnline: boolean;
+  embeddingConfigured: boolean;
+  embeddingModel: string;
+  totalScenes: number;
+  totalBooks: number;
+  books: RagBookStat[];
+  tags: string[];
+  error?: string;
+}
+
+export interface RagScene {
+  id: string;
+  score?: number;
+  title: string;
+  book: string;
+  plot: string;
+  excerpt: string;
+  tags: string[];
+  characters: string[];
+  sceneType: string;
+  emotion: string;
+  reusable: string;
+  createdAt: string;
+}
+
+export interface RagJob {
+  id: string;
+  book: string;
+  status: 'running' | 'done' | 'failed';
+  progress: number;
+  phase: string;
+  message: string;
+  chunksDone: number;
+  chunksTotal: number;
+  sceneCount: number;
+  error: string;
+}
+
+export interface RagImportResult {
+  jobId: string;
+  book: string;
+  chars: number;
+  replace: boolean;
+}
+
+export interface RagSearchResult {
+  query: string;
+  hits: RagScene[];
+}
+
+export interface RagImitateResult {
+  draft: string;
+  references: RagScene[];
+  query: string;
+}

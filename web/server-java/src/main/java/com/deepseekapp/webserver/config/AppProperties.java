@@ -33,6 +33,71 @@ public class AppProperties {
     /** 超过该分钟数的视频拒绝本地转写（保护 CPU 与磁盘） */
     private int biliMaxVideoMinutes = 180;
 
+    /** ── RAG 情节素材库 ── */
+    private String ragEsUrl = "http://127.0.0.1:9211";
+    private String ragEsIndex = "novel_rag_scenes";
+    private String dashscopeApiKey = "";
+    private String dashscopeBaseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1";
+    private String embeddingModel = "text-embedding-v3";
+    private int embeddingDim = 1024;
+    private int ragChunkChars = 8000;
+
+    public String getRagEsUrl() {
+        return ragEsUrl;
+    }
+
+    public void setRagEsUrl(String ragEsUrl) {
+        this.ragEsUrl = ragEsUrl;
+    }
+
+    public String getRagEsIndex() {
+        return ragEsIndex;
+    }
+
+    public void setRagEsIndex(String ragEsIndex) {
+        this.ragEsIndex = ragEsIndex;
+    }
+
+    public String getDashscopeApiKey() {
+        return dashscopeApiKey;
+    }
+
+    public void setDashscopeApiKey(String dashscopeApiKey) {
+        this.dashscopeApiKey = dashscopeApiKey;
+    }
+
+    public String getDashscopeBaseUrl() {
+        return dashscopeBaseUrl;
+    }
+
+    public void setDashscopeBaseUrl(String dashscopeBaseUrl) {
+        this.dashscopeBaseUrl = dashscopeBaseUrl;
+    }
+
+    public String getEmbeddingModel() {
+        return embeddingModel;
+    }
+
+    public void setEmbeddingModel(String embeddingModel) {
+        this.embeddingModel = embeddingModel;
+    }
+
+    public int getEmbeddingDim() {
+        return embeddingDim;
+    }
+
+    public void setEmbeddingDim(int embeddingDim) {
+        this.embeddingDim = embeddingDim;
+    }
+
+    public int getRagChunkChars() {
+        return ragChunkChars;
+    }
+
+    public void setRagChunkChars(int ragChunkChars) {
+        this.ragChunkChars = ragChunkChars;
+    }
+
     public String getDataDir() {
         return dataDir;
     }

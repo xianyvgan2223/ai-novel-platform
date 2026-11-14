@@ -412,13 +412,13 @@ onUnmounted(() => {
   padding: 5px 11px;
   border-radius: 999px;
   border: 1px solid var(--line-strong);
-  background: #fff;
+  background: var(--bg-card);
   font-size: 12.5px;
   color: var(--ink-2);
   cursor: pointer;
 }
 
-.chip.on { border-color: #d4cec2; background: var(--brand-soft); color: var(--brand); font-weight: 600; }
+.chip.on { border-color: var(--line-strong); background: var(--brand-soft); color: var(--brand); font-weight: 600; }
 .chip-count { margin-left: 2px; font-size: 10.5px; color: var(--ink-4); }
 
 .hit-line { margin-top: 12px; font-size: 12.5px; color: var(--ink-3); }

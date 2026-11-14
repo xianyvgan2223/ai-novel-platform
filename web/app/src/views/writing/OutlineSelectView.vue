@@ -126,12 +126,12 @@ onMounted(load);
   transition: border-color 0.16s ease, background 0.16s ease;
 }
 
-.outline-card:hover { border-color: var(--ink-4); background: #fbf9f4; }
+.outline-card:hover { border-color: var(--ink-4); background: var(--bg-soft); }
 
 .oc-main { flex: 1; min-width: 0; }
 
 .oc-title {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 550;
   letter-spacing: 0.1px;
   color: var(--ink-1);
@@ -142,7 +142,7 @@ onMounted(load);
 
 .oc-meta {
   margin-top: 5px;
-  font-size: 11.5px;
+  font-size: 12.5px;
   color: var(--ink-3);
   display: flex;
   align-items: center;
@@ -163,7 +163,7 @@ onMounted(load);
   display: flex;
   align-items: center;
   gap: 5px;
-  font-size: 11.5px;
+  font-size: 12.5px;
   font-weight: 500;
   color: var(--ink-2);
   white-space: nowrap;

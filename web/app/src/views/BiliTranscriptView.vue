@@ -252,7 +252,6 @@ onMounted(loadSettings);
     <PageHeader
       title="B站视频转文字"
       desc="粘贴B站视频链接，优先提取官方字幕（含 AI 字幕）；没有字幕时自动下载音频用本地语音识别转写。"
-      back="/writing"
     />
 
     <div class="bili-grid">
@@ -515,17 +514,17 @@ onMounted(loadSettings);
   padding: 6px 13px;
   border-radius: 999px;
   border: 1px solid var(--line-strong);
-  background: #fff;
+  background: var(--bg-card);
   font-size: 12.5px;
   color: var(--ink-2);
   cursor: pointer;
   transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
 }
 
-.chip:hover:not(:disabled) { border-color: #d4cec2; }
+.chip:hover:not(:disabled) { border-color: var(--line-strong); }
 
 .chip.on {
-  border-color: #d4cec2;
+  border-color: var(--line-strong);
   background: var(--brand-soft);
   color: var(--brand);
   font-weight: 600;
@@ -674,5 +673,5 @@ onMounted(loadSettings);
 
 .env-status .ok { color: var(--brand); }
 
-.env-status .bad { color: #e08b00; }
+.env-status .bad { color: var(--warn); }
 </style>

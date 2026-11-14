@@ -195,8 +195,8 @@ const blocks = computed(() => parseBlocks(props.text));
 .rt-code {
   margin: 10px 0;
   padding: 12px 14px;
-  background: #1a1a18;
-  color: #f3efe6;
+  background: var(--code-block-bg);
+  color: var(--code-block-text);
   border-radius: 8px;
   overflow: auto;
   font-family: 'JetBrains Mono', 'Cascadia Mono', Consolas, monospace;
@@ -207,10 +207,10 @@ const blocks = computed(() => parseBlocks(props.text));
 .rt-inline {
   padding: 1px 5px;
   border-radius: 4px;
-  background: rgba(26, 26, 24, 0.06);
+  background: var(--code-inline-bg);
   font-family: 'JetBrains Mono', 'Cascadia Mono', Consolas, monospace;
   font-size: 0.92em;
-  color: #6d5a4a;
+  color: var(--code-inline-text);
 }
 
 strong { font-weight: 650; color: var(--ink-1); }

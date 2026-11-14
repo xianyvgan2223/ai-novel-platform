@@ -226,7 +226,7 @@ onMounted(() => {
   outline: none;
 }
 
-.raw-textarea:focus { border-color: #d4cec2; background: #fff; }
+.raw-textarea:focus { border-color: var(--line-strong); background: var(--bg-card); }
 
 .result-textarea { min-height: 420px; }
 

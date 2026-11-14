@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, type Component } from 'vue';
+import { computed, onMounted, ref, type Component } from 'vue';
 import { useRouter } from 'vue-router';
 import {
   Aim, ChatDotRound, ChatLineSquare, Collection, DataLine, Document, FolderOpened,
   InfoFilled, Notebook, Refresh, User,
 } from '@element-plus/icons-vue';
-import { formatTime, MODULE_LABELS } from '@/api';
+import { api, formatTime, MODULE_LABELS } from '@/api';
+import type { RagScene, RagStatus } from '@/api';
 import { useServerStore } from '@/stores/server';
 import { activeDeviceId } from '@/stores/device';
 import PageHeader from '@/components/PageHeader.vue';
@@ -13,6 +14,32 @@ import StatCard from '@/components/StatCard.vue';
 
 const store = useServerStore();
 const router = useRouter();
+
+const ragStatus = ref<RagStatus | null>(null);
+const ragScenes = ref<RagScene[]>([]);
+const ragLoading = ref(false);
+const ragError = ref('');
+
+async function loadRag() {
+  ragLoading.value = true;
+  try {
+    const [status, page] = await Promise.all([
+      api.rag.status(),
+      api.rag.scenes({ page: 1, pageSize: 3 }),
+    ]);
+    ragStatus.value = status;
+    ragScenes.value = page.data;
+    ragError.value = '';
+  } catch (err) {
+    ragError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    ragLoading.value = false;
+  }
+}
+
+onMounted(() => {
+  void loadRag();
+});
 
 /** 给每个统计指标配图标与配色，按 store.highlights 的 extra 匹配 */
 const DECOR: Record<string, { icon: Component; tone: 'brand' | 'violet' | 'emerald' | 'amber' | 'cyan' | 'rose' }> = {
@@ -96,6 +123,62 @@ function openTable(db: string, table: string) {
         :tone="item.tone"
       />
     </div>
+
+    <section class="card rag-entry">
+      <div class="rag-entry-head">
+        <div class="rag-entry-copy">
+          <div class="rag-eyebrow">RAG 情节素材库</div>
+          <h3>把看过的小说，变成可复用的情节</h3>
+          <p>DeepSeek 按情节拆段，百炼 embedding 生成向量，Elasticsearch 语义检索；想写类似桥段时，可以检索参考并仿写。</p>
+        </div>
+        <div class="rag-entry-actions">
+          <el-button type="primary" @click="router.push('/rag')">进入素材库</el-button>
+          <el-button @click="router.push('/rag')">导入小说</el-button>
+        </div>
+      </div>
+
+      <div class="rag-entry-body" v-loading="ragLoading">
+        <div class="rag-entry-stats">
+          <div>
+            <strong>{{ ragStatus?.totalScenes ?? '—' }}</strong>
+            <span>已入库情节</span>
+          </div>
+          <div>
+            <strong>{{ ragStatus?.totalBooks ?? '—' }}</strong>
+            <span>来源作品</span>
+          </div>
+          <div>
+            <strong>{{ ragStatus?.tags?.length ?? '—' }}</strong>
+            <span>情节标签</span>
+          </div>
+          <div class="rag-entry-conn" :class="ragStatus?.esOnline ? 'on' : 'off'">
+            <span class="dot" />
+            {{ ragStatus?.esOnline ? '向量库已连接' : (ragError ? '向量库未连接' : '连接中…') }}
+          </div>
+        </div>
+
+        <div v-if="ragScenes.length" class="rag-entry-scenes">
+          <article v-for="scene in ragScenes" :key="scene.id" class="rag-entry-scene" @click="router.push('/rag')">
+            <div class="rag-entry-scene-top">
+              <span>{{ scene.sceneType || '情节' }}</span>
+              <span>{{ scene.book }}</span>
+            </div>
+            <h4>{{ scene.title }}</h4>
+            <p>{{ scene.plot }}</p>
+            <div class="rag-entry-tags">
+              <span v-for="tag in scene.tags.slice(0, 3)" :key="tag">{{ tag }}</span>
+            </div>
+          </article>
+        </div>
+        <div v-else class="rag-entry-empty">
+          <el-icon><Collection /></el-icon>
+          <div>
+            <strong>{{ ragError ? '暂时无法读取向量库' : '还没有情节素材' }}</strong>
+            <span>{{ ragError || '导入第一部小说 txt，素材会出现在这里。' }}</span>
+          </div>
+        </div>
+      </div>
+    </section>
 
     <el-row :gutter="18">
       <el-col :xs="24" :lg="14">
@@ -235,7 +318,7 @@ function openTable(db: string, table: string) {
 
 .eb-main { flex: 1; }
 .eb-title { font-size: 13px; font-weight: 600; color: var(--ink-1); }
-.eb-desc { margin-top: 3px; font-size: 11.5px; line-height: 1.7; color: var(--ink-3); }
+.eb-desc { margin-top: 4px; font-size: 12.5px; line-height: 1.7; color: var(--ink-2); }
 
 .status-pill {
   display: inline-flex;
@@ -275,12 +358,50 @@ function openTable(db: string, table: string) {
 
 .db-file-main { flex: 1; min-width: 0; }
 .db-file-name { font-size: 13px; font-weight: 600; color: var(--ink-1); }
-.db-file-desc { font-size: 12px; color: var(--ink-3); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.db-file-desc { font-size: 12.5px; color: var(--ink-3); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .db-file-right { display: flex; align-items: center; gap: 10px; }
 .db-file-count { font-size: 13px; font-weight: 600; color: var(--ink-2); }
 
 .tbl-name { display: flex; flex-direction: column; gap: 3px; }
 .tbl-label { font-weight: 600; color: var(--ink-1); font-size: 13.5px; }
-.tbl-tag { color: var(--ink-4); font-size: 11px; }
+.tbl-tag { color: var(--ink-3); font-size: 11.5px; }
 .tbl-count { font-weight: 600; color: var(--ink-1); font-size: 14px; }
-</style>
+/* ── RAG 情节素材库入口 ── */
+.rag-entry { margin-bottom: 18px; }
+.rag-entry-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
+.rag-entry-copy { min-width: 0; }
+.rag-eyebrow { font-size: 10px; font-weight: 600; letter-spacing: 1.2px; color: var(--ink-3); text-transform: uppercase; }
+.rag-entry-copy h3 { margin: 7px 0 6px; font-family: var(--font-serif); font-size: 21px; font-weight: 600; letter-spacing: -0.2px; color: var(--ink-1); }
+.rag-entry-copy p { margin: 0; max-width: 720px; font-size: 12.5px; line-height: 1.75; color: var(--ink-2); }
+.rag-entry-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+
+.rag-entry-body { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
+.rag-entry-stats { display: flex; align-items: center; gap: 28px; flex-wrap: wrap; }
+.rag-entry-stats > div:not(.rag-entry-conn) { display: flex; align-items: baseline; gap: 8px; }
+.rag-entry-stats strong { font-size: 20px; font-weight: 560; letter-spacing: -0.5px; color: var(--ink-1); }
+.rag-entry-stats span { font-size: 11.5px; color: var(--ink-3); }
+.rag-entry-conn { margin-left: auto; display: inline-flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--ink-2); }
+.rag-entry-conn .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--ink-4); }
+.rag-entry-conn.on .dot { background: var(--ok); }
+.rag-entry-conn.off .dot { background: var(--danger); }
+
+.rag-entry-scenes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
+.rag-entry-scene { padding: 14px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--bg-card); cursor: pointer; transition: border-color 0.16s ease, background 0.16s ease; }
+.rag-entry-scene:hover { border-color: var(--ink-3); background: var(--bg-soft); }
+.rag-entry-scene-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 10px; color: var(--ink-3); }
+.rag-entry-scene-top span:last-child { max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rag-entry-scene h4 { margin: 7px 0 5px; font-size: 13px; font-weight: 550; line-height: 1.5; color: var(--ink-1); }
+.rag-entry-scene p { margin: 0; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 11.5px; line-height: 1.7; color: var(--ink-2); }
+.rag-entry-tags { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 10px; }
+.rag-entry-tags span { padding: 2px 6px; border: 1px solid var(--line-strong); border-radius: 4px; font-size: 10px; color: var(--ink-3); }
+
+.rag-entry-empty { display: flex; align-items: center; gap: 12px; padding: 16px 0 4px; color: var(--ink-3); }
+.rag-entry-empty .el-icon { font-size: 22px; color: var(--ink-4); }
+.rag-entry-empty div { display: flex; flex-direction: column; gap: 3px; }
+.rag-entry-empty strong { font-size: 12.5px; font-weight: 550; color: var(--ink-2); }
+.rag-entry-empty span { font-size: 11.5px; line-height: 1.6; }
+
+@media (max-width: 1000px) {
+  .rag-entry-scenes { grid-template-columns: minmax(0, 1fr); }
+  .rag-entry-head { flex-direction: column; gap: 14px; }
+}</style>

@@ -2,7 +2,7 @@
 import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 import {
-  Aim, DocumentCopy, Download, EditPen, Headset, MagicStick, Promotion, Reading, Upload, VideoPlay,
+  Aim, DocumentCopy, Download, EditPen, Headset, MagicStick, Promotion, Reading, Upload,
 } from '@element-plus/icons-vue';
 import PageHeader from '@/components/PageHeader.vue';
 import OutlineTxtExportDialog from './writing/OutlineTxtExportDialog.vue';
@@ -61,12 +61,6 @@ const features = [
     title: '写作工具',
     subtitle: '自由优化、短篇抽卡、大纲骨架抽卡',
     icon: Promotion,
-  },
-  {
-    path: '/writing/bili',
-    title: 'B站视频转文字',
-    subtitle: '粘贴B站链接，提取官方字幕或本地转写成文字稿',
-    icon: VideoPlay,
   },
 ];
 
@@ -161,56 +155,64 @@ function openFileFeature(key: string) {
   flex-direction: column;
   align-items: flex-start;
   gap: 9px;
-  min-height: 118px;
-  padding: 19px 20px 18px;
-  border: 1px solid var(--line);
+  min-height: 124px;
+  padding: 20px 21px 19px;
+  border: 1px solid var(--line-strong);
   border-radius: var(--r-lg);
   background: var(--bg-card);
+  box-shadow: var(--shadow-control);
   text-align: left;
   cursor: pointer;
-  transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
+  transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
 }
 
 .feature-row:hover {
-  border-color: var(--ink-4);
-  background: #fbf9f4;
+  border-color: var(--control-border);
+  background: var(--bg-soft);
+  box-shadow: var(--shadow-card);
   transform: translateY(-1px);
 }
 
+.feature-row:focus-visible {
+  outline: 2px solid var(--ink-1);
+  outline-offset: 2px;
+}
+
 .feature-icon {
-  width: 30px;
-  height: 30px;
-  flex: 0 0 30px;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
   display: grid;
   place-items: center;
   border-radius: 7px;
-  border: 1px solid var(--line);
-  background: transparent;
-  color: var(--ink-2);
-  font-size: 15px;
+  border: 1px solid var(--line-strong);
+  background: var(--bg-soft);
+  color: var(--ink-1);
+  font-size: 16px;
 }
 
 .feature-main { display: flex; flex-direction: column; gap: 4px; padding-right: 28px; }
 
 .feature-title {
-  font-size: 13.5px;
-  font-weight: 550;
+  font-size: 15px;
+  font-weight: 600;
   letter-spacing: 0.1px;
   color: var(--ink-1);
 }
 
 .feature-sub {
-  font-size: 11.5px;
+  font-size: 13px;
+  font-weight: 400;
   color: var(--ink-3);
-  line-height: 1.6;
+  line-height: 1.65;
 }
 
 .feature-arrow {
   position: absolute;
   right: 19px;
   bottom: 18px;
-  color: var(--ink-4);
-  font-size: 15px;
+  color: var(--ink-3);
+  font-size: 16px;
   line-height: 1;
   transition: transform 0.18s ease, color 0.18s ease;
 }

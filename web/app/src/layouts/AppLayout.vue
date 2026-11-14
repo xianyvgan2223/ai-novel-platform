@@ -2,13 +2,128 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { ChatDotRound, DataLine, Delete, Grid, Iphone, MagicStick, Monitor, Refresh, RefreshRight } from '@element-plus/icons-vue';
+import { ChatDotRound, Collection, DataLine, Delete, Expand, Fold, Grid, Iphone, MagicStick, Monitor, Moon, Refresh, RefreshRight, Sunny, VideoPlay } from '@element-plus/icons-vue';
 import { api, formatTime } from '@/api';
 import { useServerStore } from '@/stores/server';
+import { isDark, toggleTheme } from '@/stores/theme';
 import { activeDeviceId, deviceEpoch, setActiveDevice } from '@/stores/device';
 
 const store = useServerStore();
 const route = useRoute();
+
+// ── 侧栏宽度 / 收起状态 ──
+const SIDEBAR_WIDTH_KEY = 'dsh.sidebarWidth';
+const SIDEBAR_COLLAPSED_KEY = 'dsh.sidebarCollapsed';
+const SIDEBAR_MIN_WIDTH = 180;
+const SIDEBAR_MAX_WIDTH = 360;
+const SIDEBAR_DEFAULT_WIDTH = 232;
+const SIDEBAR_COLLAPSED_WIDTH = 66;
+
+function clampSidebarWidth(value: number): number {
+  return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(value)));
+}
+
+function readStoredSidebarWidth(): number {
+  try {
+    const saved = Number(localStorage.getItem(SIDEBAR_WIDTH_KEY));
+    if (Number.isFinite(saved) && saved >= SIDEBAR_MIN_WIDTH && saved <= SIDEBAR_MAX_WIDTH) {
+      return clampSidebarWidth(saved);
+    }
+  } catch {
+    /* localStorage 不可用时用默认值 */
+  }
+  return SIDEBAR_DEFAULT_WIDTH;
+}
+
+function readStoredSidebarCollapsed(): boolean {
+  try {
+    return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+const sidebarWidth = ref(readStoredSidebarWidth());
+const sidebarCollapsed = ref(readStoredSidebarCollapsed());
+const resizingSidebar = ref(false);
+let resizeStartX = 0;
+let resizeStartWidth = 0;
+
+const sidebarStyle = computed(() => ({
+  '--sidebar-width': (sidebarCollapsed.value ? SIDEBAR_COLLAPSED_WIDTH : sidebarWidth.value) + 'px',
+}));
+
+function persistSidebarState() {
+  try {
+    localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth.value));
+    localStorage.setItem(SIDEBAR_COLLAPSED_KEY, sidebarCollapsed.value ? '1' : '0');
+  } catch {
+    /* 私密模式下只保留当前会话状态 */
+  }
+}
+
+function toggleSidebar() {
+  sidebarCollapsed.value = !sidebarCollapsed.value;
+  persistSidebarState();
+}
+
+function resetSidebarWidth() {
+  sidebarWidth.value = SIDEBAR_DEFAULT_WIDTH;
+  sidebarCollapsed.value = false;
+  persistSidebarState();
+}
+
+function startSidebarResize(event: PointerEvent) {
+  if (sidebarCollapsed.value || window.innerWidth <= 960) return;
+  event.preventDefault();
+  resizingSidebar.value = true;
+  resizeStartX = event.clientX;
+  resizeStartWidth = sidebarWidth.value;
+  document.body.classList.add('sidebar-resizing');
+  window.addEventListener('pointermove', onSidebarResizeMove);
+  window.addEventListener('pointerup', endSidebarResize, { once: true });
+  window.addEventListener('pointercancel', endSidebarResize, { once: true });
+}
+
+function onSidebarResizeMove(event: PointerEvent) {
+  if (!resizingSidebar.value) return;
+  sidebarWidth.value = clampSidebarWidth(resizeStartWidth + event.clientX - resizeStartX);
+}
+
+function endSidebarResize() {
+  if (!resizingSidebar.value) return;
+  resizingSidebar.value = false;
+  document.body.classList.remove('sidebar-resizing');
+  window.removeEventListener('pointermove', onSidebarResizeMove);
+  window.removeEventListener('pointerup', endSidebarResize);
+  window.removeEventListener('pointercancel', endSidebarResize);
+  persistSidebarState();
+}
+
+function onSidebarResizeKey(event: KeyboardEvent) {
+  if (sidebarCollapsed.value) {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      sidebarCollapsed.value = false;
+      persistSidebarState();
+    }
+    return;
+  }
+  const step = event.shiftKey ? 32 : 12;
+  if (event.key === 'ArrowLeft') {
+    event.preventDefault();
+    sidebarWidth.value = clampSidebarWidth(sidebarWidth.value - step);
+    persistSidebarState();
+  } else if (event.key === 'ArrowRight') {
+    event.preventDefault();
+    sidebarWidth.value = clampSidebarWidth(sidebarWidth.value + step);
+    persistSidebarState();
+  } else if (event.key === 'Home') {
+    event.preventDefault();
+    sidebarWidth.value = SIDEBAR_DEFAULT_WIDTH;
+    persistSidebarState();
+  }
+}
 
 /**
  * 「同步手机」：网页这边读的永远是服务端实时数据，不需要同步；
@@ -125,6 +240,10 @@ async function forgetDevice(deviceId: string) {
 let deviceTimer: number | undefined;
 onUnmounted(() => {
   if (deviceTimer) window.clearInterval(deviceTimer);
+  window.removeEventListener('pointermove', onSidebarResizeMove);
+  window.removeEventListener('pointerup', endSidebarResize);
+  window.removeEventListener('pointercancel', endSidebarResize);
+  document.body.classList.remove('sidebar-resizing');
 });
 
 // ── 导航 ──
@@ -140,9 +259,14 @@ const creativeItems = [
   { path: '/writing', label: '写作', icon: MagicStick },
 ];
 
+const toolItems = [
+  { path: '/rag', label: '情节素材库', icon: Collection, match: (p: string) => p.startsWith('/rag') },
+  { path: '/bili', label: 'B站转文字', icon: VideoPlay, match: (p: string) => p.startsWith('/bili') },
+];
+
 const activeMenu = computed(() => {
   if (route.path.startsWith('/writing')) return '/writing';
-  return navItems.find((item) => item.match(route.path))?.path ?? '/';
+  return [...toolItems, ...navItems].find((item) => item.match(route.path))?.path ?? '/';
 });
 const pageTitle = computed(() => (route.meta.title as string | undefined) ?? '总览');
 
@@ -157,8 +281,13 @@ onMounted(() => {
 
 <template>
   <div class="shell">
-    <aside class="sidebar">
-      <div class="brand">
+    <aside
+      id="app-sidebar"
+      class="sidebar"
+      :class="{ collapsed: sidebarCollapsed, resizing: resizingSidebar }"
+      :style="sidebarStyle"
+    >
+      <div class="brand" :title="sidebarCollapsed ? 'deepseekapp' : undefined">
         <div class="brand-logo">DS</div>
         <div class="brand-text">
           <div class="brand-name">deepseekapp</div>
@@ -174,6 +303,22 @@ onMounted(() => {
           :to="item.path"
           class="nav-item"
           :class="{ active: activeMenu === item.path }"
+          :title="sidebarCollapsed ? item.label : undefined"
+        >
+          <el-icon class="nav-icon"><component :is="item.icon" /></el-icon>
+          <span>{{ item.label }}</span>
+        </router-link>
+      </nav>
+
+      <div class="nav-label">工具</div>
+      <nav class="nav nav-static">
+        <router-link
+          v-for="item in toolItems"
+          :key="item.path"
+          :to="item.path"
+          class="nav-item"
+          :class="{ active: activeMenu === item.path }"
+          :title="sidebarCollapsed ? item.label : undefined"
         >
           <el-icon class="nav-icon"><component :is="item.icon" /></el-icon>
           <span>{{ item.label }}</span>
@@ -188,6 +333,7 @@ onMounted(() => {
           :to="item.path"
           class="nav-item"
           :class="{ active: activeMenu === item.path }"
+          :title="sidebarCollapsed ? item.label : undefined"
         >
           <el-icon class="nav-icon"><component :is="item.icon" /></el-icon>
           <span>{{ item.label }}</span>
@@ -207,11 +353,38 @@ onMounted(() => {
           <div class="foot-meta">请在 web/server-java 执行 mvnw spring-boot:run</div>
         </div>
       </div>
+
+      <div
+        v-if="!sidebarCollapsed"
+        class="sidebar-resizer"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="拖动调整导航栏宽度"
+        :aria-valuenow="sidebarWidth"
+        :aria-valuemin="SIDEBAR_MIN_WIDTH"
+        :aria-valuemax="SIDEBAR_MAX_WIDTH"
+        tabindex="0"
+        title="拖动调整宽度，双击恢复默认"
+        @pointerdown="startSidebarResize"
+        @keydown="onSidebarResizeKey"
+        @dblclick="resetSidebarWidth"
+      />
     </aside>
 
     <div class="main">
       <header class="topbar">
         <div class="topbar-left">
+          <button
+            class="sidebar-toggle"
+            type="button"
+            :title="sidebarCollapsed ? '展开导航栏' : '收起导航栏'"
+            :aria-label="sidebarCollapsed ? '展开导航栏' : '收起导航栏'"
+            :aria-expanded="!sidebarCollapsed"
+            aria-controls="app-sidebar"
+            @click="toggleSidebar"
+          >
+            <el-icon><Expand v-if="sidebarCollapsed" /><Fold v-else /></el-icon>
+          </button>
           <span class="topbar-title">{{ pageTitle }}</span>
           <span v-if="store.stats" class="topbar-badge mono">seq {{ store.stats.deviceSeq }}</span>
         </div>
@@ -297,6 +470,14 @@ onMounted(() => {
           <el-tooltip content="重新拉取服务状态与表结构" placement="bottom-end">
             <el-button :loading="store.loading" :icon="Refresh" circle @click="store.bootstrap()" />
           </el-tooltip>
+          <el-tooltip :content="isDark ? '切换到日间模式' : '切换到夜间模式'" placement="bottom-end">
+            <el-button
+              :icon="isDark ? Sunny : Moon"
+              circle
+              :aria-label="isDark ? '切换到日间模式' : '切换到夜间模式'"
+              @click="toggleTheme"
+            />
+          </el-tooltip>
         </div>
       </header>
 
@@ -327,14 +508,85 @@ onMounted(() => {
   background: var(--bg-page);
 }
 
-/* ── 侧边栏：深炭黑，与暖白正文形成纸张/墨色的对比 ── */
+/* ── 侧边栏：浅暖白 / 暗夜炭黑，可通过拖拽调整宽度或收起 ── */
 .sidebar {
-  width: 232px;
-  flex: 0 0 232px;
+  width: var(--sidebar-width, 232px);
+  flex: 0 0 var(--sidebar-width, 232px);
+  position: relative;
   display: flex;
   flex-direction: column;
-  background: #141412;
-  color: #f3efe6;
+  background: var(--sidebar-bg);
+  color: var(--sidebar-text);
+  border-right: 1px solid var(--sidebar-border);
+  transition: width 0.18s ease, flex-basis 0.18s ease;
+}
+
+.sidebar.resizing {
+  transition: none;
+}
+
+.sidebar-resizer {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  width: 8px;
+  height: 100%;
+  z-index: 20;
+  cursor: col-resize;
+  outline: none;
+}
+
+.sidebar-resizer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 1px;
+  background: transparent;
+  transition: background 0.15s ease;
+}
+
+.sidebar-resizer:hover::after,
+.sidebar-resizer:focus-visible::after {
+  background: var(--sidebar-accent);
+  opacity: 0.35;
+}
+
+:global(body.sidebar-resizing) {
+  cursor: col-resize;
+  user-select: none;
+}
+
+.sidebar.collapsed .brand {
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.sidebar.collapsed .brand-text,
+.sidebar.collapsed .nav-label,
+.sidebar.collapsed .nav-item span,
+.sidebar.collapsed .sidebar-foot {
+  display: none;
+}
+
+.sidebar.collapsed .nav {
+  padding: 2px 8px;
+}
+
+.sidebar.collapsed .nav-item {
+  justify-content: center;
+  gap: 0;
+  padding: 11px 0;
+}
+
+.sidebar.collapsed .nav-item.active::before {
+  left: -8px;
+}
+
+.sidebar.collapsed .nav-icon {
+  font-size: 16px;
 }
 
 .brand {
@@ -353,31 +605,32 @@ onMounted(() => {
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.5px;
-  color: #141412;
-  background: #f3efe6;
+  color: var(--logo-text);
+  background: var(--logo-bg);
 }
 
 .brand-name {
   font-size: 14px;
   font-weight: 600;
-  color: #f3efe6;
+  color: var(--sidebar-text);
   letter-spacing: 0.1px;
 }
 
 .brand-sub {
   margin-top: 2px;
-  font-size: 10.5px;
-  color: #7f7b72;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--sidebar-sub);
   letter-spacing: 0.6px;
 }
 
 .nav-label {
   padding: 8px 22px 6px;
-  font-size: 9.5px;
+  font-size: 10.5px;
   font-weight: 600;
-  letter-spacing: 1.4px;
+  letter-spacing: 0.8px;
   text-transform: uppercase;
-  color: #615e56;
+  color: var(--sidebar-label);
 }
 
 .nav {
@@ -400,60 +653,63 @@ onMounted(() => {
   gap: 10px;
   padding: 9px 12px;
   border-radius: 7px;
-  font-size: 12.5px;
-  font-weight: 450;
+  font-size: 13px;
+  font-weight: 500;
   letter-spacing: 0.1px;
-  color: #a7a39a;
+  color: var(--sidebar-muted);
   text-decoration: none;
   transition: background 0.16s ease, color 0.16s ease;
 }
 
 .nav-item:hover {
-  background: rgba(255, 255, 255, 0.045);
-  color: #f3efe6;
+  background: var(--sidebar-hover-bg);
+  color: var(--sidebar-text);
 }
 
 .nav-item.active {
-  color: #f7f4ed;
-  background: rgba(255, 255, 255, 0.075);
+  color: var(--sidebar-text);
+  font-weight: 600;
+  background: var(--sidebar-active-bg);
 }
 
-/* 选中项左侧的暖金细线，仅在深色侧栏上出现 */
+/* 选中项左侧的强调细线 */
 .nav-item.active::before {
   content: '';
   position: absolute;
   left: -10px;
   top: 50%;
   transform: translateY(-50%);
-  width: 2px;
-  height: 14px;
+  width: 3px;
+  height: 16px;
   border-radius: 0 2px 2px 0;
-  background: #c8ad82;
+  background: var(--sidebar-accent);
 }
 
-.nav-icon { font-size: 14px; opacity: 0.85; }
+.nav-icon { font-size: 15px; opacity: 1; color: currentColor; }
 
 .sidebar-foot { padding: 14px 12px 16px; }
 
 .foot-card {
-  border: 1px solid rgba(255, 255, 255, 0.075);
+  border: 1px solid var(--sidebar-border);
   border-radius: 8px;
   padding: 11px 12px;
-  background: transparent;
+  background: var(--bg-card);
+  box-shadow: var(--shadow-control);
 }
 
 .foot-row {
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 11.5px;
-  color: #a7a39a;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--sidebar-muted);
 }
 
 .foot-meta {
   margin-top: 6px;
-  font-size: 9.5px;
-  color: #5f5b53;
+  font-size: 10.5px;
+  color: var(--sidebar-sub);
   line-height: 1.6;
   letter-spacing: 0.2px;
 }
@@ -465,8 +721,8 @@ onMounted(() => {
   flex: 0 0 6px;
 }
 
-.foot-dot.on, .status-pill.on .dot { background: #7fa98a; }
-.foot-dot.off, .status-pill.off .dot { background: #b46860; }
+.foot-dot.on, .status-pill.on .dot { background: var(--ok); }
+.foot-dot.off, .status-pill.off .dot { background: var(--danger); }
 
 /* ── 主区域 ── */
 .main {
@@ -484,7 +740,7 @@ onMounted(() => {
   justify-content: space-between;
   gap: 16px;
   padding: 0 32px;
-  background: rgba(245, 243, 238, 0.86);
+  background: var(--topbar-bg);
   backdrop-filter: saturate(140%) blur(14px);
   border-bottom: 1px solid var(--line);
   position: sticky;
@@ -494,9 +750,35 @@ onMounted(() => {
 
 .topbar-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
 
+.sidebar-toggle {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  background: var(--bg-card);
+  color: var(--ink-2);
+  cursor: pointer;
+  box-shadow: var(--shadow-control);
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.sidebar-toggle:hover {
+  border-color: var(--control-border);
+  background: var(--bg-soft);
+  color: var(--ink-1);
+}
+
+.sidebar-toggle:focus-visible {
+  outline: 2px solid var(--ink-1);
+  outline-offset: 2px;
+}
+
 .topbar-title {
-  font-size: 13px;
-  font-weight: 550;
+  font-size: 14px;
+  font-weight: 600;
   letter-spacing: 0.2px;
   color: var(--ink-1);
 }
@@ -505,9 +787,10 @@ onMounted(() => {
   padding: 2px 7px;
   border-radius: 4px;
   background: transparent;
-  border: 1px solid var(--line-strong);
-  color: var(--ink-3);
-  font-size: 10px;
+  border: 1px solid var(--control-border);
+  color: var(--ink-2);
+  font-size: 11.5px;
+  font-weight: 500;
   letter-spacing: 0.2px;
 }
 
@@ -520,9 +803,9 @@ onMounted(() => {
   padding: 0;
   border: none;
   border-radius: 0;
-  font-size: 11.5px;
-  font-weight: 450;
-  color: var(--ink-3);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--ink-2);
   background: transparent !important;
 }
 
@@ -530,7 +813,8 @@ onMounted(() => {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 11.5px;
+  font-size: 12.5px;
+  font-weight: 500;
   color: var(--ink-2);
   background: transparent;
   padding: 0;
@@ -555,31 +839,35 @@ onMounted(() => {
   gap: 9px;
   padding: 6px 10px;
   border-radius: 7px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--control-border);
   background: var(--bg-card);
+  box-shadow: var(--shadow-control);
   cursor: pointer;
-  transition: border-color 0.15s ease;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
   max-width: 300px;
 }
 
-.device-picker:hover { border-color: var(--ink-4); }
+.device-picker:hover {
+  border-color: var(--ink-3);
+  box-shadow: var(--shadow-card);
+}
 .device-picker.busy { opacity: 0.65; }
-.dp-icon { color: var(--ink-3); font-size: 14px; }
+.dp-icon { color: var(--ink-2); font-size: 15px; }
 
 .dp-text { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; }
-.dp-label { font-size: 9px; color: var(--ink-4); line-height: 1.25; letter-spacing: 0.3px; }
+.dp-label { font-size: 10.5px; font-weight: 500; color: var(--ink-3); line-height: 1.25; letter-spacing: 0.3px; }
 
 .dp-name {
-  font-size: 11.5px;
+  font-size: 13px;
   color: var(--ink-1);
-  font-weight: 550;
+  font-weight: 600;
   max-width: 230px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.dp-caret { font-size: 9px; color: var(--ink-4); }
+.dp-caret { font-size: 10px; color: var(--ink-3); }
 
 .dp-panel-head {
   display: flex;
@@ -657,6 +945,7 @@ onMounted(() => {
 
 @media (max-width: 960px) {
   .sidebar { width: 66px; flex-basis: 66px; }
+  .sidebar-resizer, .sidebar-toggle { display: none; }
   .brand { padding: 20px 0 18px; justify-content: center; }
   .brand-text, .nav-label, .nav-item span, .sidebar-foot { display: none; }
   .nav { padding: 2px 8px; }

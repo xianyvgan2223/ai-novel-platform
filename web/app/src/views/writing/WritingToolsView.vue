@@ -465,7 +465,7 @@ onMounted(() => {
   gap: 4px;
   padding: 4px;
   border-radius: 12px;
-  background: #fff;
+  background: var(--bg-card);
   box-shadow: var(--shadow-1);
   border: 1px solid var(--line);
   margin-bottom: 18px;
@@ -501,7 +501,7 @@ onMounted(() => {
   color: var(--ink-4);
 }
 
-.mode-tab.on .mode-hint { color: #6b675f; }
+.mode-tab.on .mode-hint { color: var(--ink-3); }
 
 /* ── 文稿优化 ── */
 .opt-grid {
@@ -567,17 +567,17 @@ onMounted(() => {
   padding: 6px 13px;
   border-radius: 999px;
   border: 1px solid var(--line-strong);
-  background: #fff;
+  background: var(--bg-card);
   font-size: 12.5px;
   color: var(--ink-2);
   cursor: pointer;
   transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
 }
 
-.chip:hover { border-color: #d4cec2; }
+.chip:hover { border-color: var(--line-strong); }
 
 .chip.on {
-  border-color: #d4cec2;
+  border-color: var(--line-strong);
   background: var(--brand-soft);
   color: var(--brand);
   font-weight: 600;
@@ -665,7 +665,7 @@ onMounted(() => {
 .empty-desc { font-size: 12.5px; color: var(--ink-3); }
 
 .idea-card {
-  background: #fff;
+  background: var(--bg-card);
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-2);
   padding: 18px 20px;

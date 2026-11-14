@@ -1,0 +1,28 @@
+name: novel-rag
+
+services:
+  elasticsearch:
+    # 本项目专用的 Elasticsearch；复用本机已有的 IK 版镜像，但使用独立容器与数据卷。
+    image: ershou-elasticsearch-ik:8.13.4
+    container_name: novel-rag-es
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - xpack.security.http.ssl.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - TZ=Asia/Shanghai
+    ports:
+      - "127.0.0.1:9221:9200"
+    volumes:
+      - novel-rag-es-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+volumes:
+  novel-rag-es-data:
+    name: novel-rag-es-data

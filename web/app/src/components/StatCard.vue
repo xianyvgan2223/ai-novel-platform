@@ -40,7 +40,7 @@ void props;
 }
 
 .stat.clickable { cursor: pointer; }
-.stat.clickable:hover { background: #faf8f2; }
+.stat.clickable:hover { background: var(--bg-soft); }
 
 .stat-top {
   display: flex;
@@ -50,10 +50,10 @@ void props;
 }
 
 .stat-label {
-  font-size: 10.5px;
+  font-size: 12.5px;
   color: var(--ink-3);
   font-weight: 500;
-  letter-spacing: 0.6px;
+  letter-spacing: 0.4px;
 }
 
 .stat-icon {
@@ -64,23 +64,23 @@ void props;
   height: auto;
   border-radius: 0;
   background: transparent;
-  color: var(--ink-4);
-  font-size: 13px;
+  color: var(--ink-3);
+  font-size: 15px;
 }
 
 .stat-value {
   margin-top: 12px;
-  font-size: 31px;
+  font-size: 32px;
   line-height: 1;
-  font-weight: 560;
+  font-weight: 600;
   letter-spacing: -1.2px;
   color: var(--ink-1);
 }
 
 .stat-hint {
   margin-top: 9px;
-  color: var(--ink-4);
-  font-size: 9.5px;
+  color: var(--ink-3);
+  font-size: 11.5px;
   letter-spacing: 0.2px;
 }
 </style>

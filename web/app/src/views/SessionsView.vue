@@ -172,10 +172,10 @@ onMounted(load);
 }
 
 .sess-main { min-width: 0; }
-.sess-title { font-weight: 550; color: var(--ink-1); font-size: 13px; letter-spacing: 0.1px; }
+.sess-title { font-weight: 550; color: var(--ink-1); font-size: 14px; letter-spacing: 0.1px; }
 .sess-sub {
   margin-top: 3px;
-  font-size: 11.5px;
+  font-size: 12.5px;
   color: var(--ink-3);
   overflow: hidden;
   text-overflow: ellipsis;

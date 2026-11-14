@@ -1,5 +1,5 @@
 /** api/index.ts —— 所有后端接口的集中入口（组件里只调用这里） */
-import { del, download, get, getWithMeta, post, postStream, put, uploadBinary } from './client';
+import { del, download, get, getWithMeta, post, postStream, put, uploadBinary, uploadForm } from './client';
 import type {
   Catalog, ChapterGeneratePayload, ChapterRewritePayload, ChapterRewriteResult, ConflictInfo, DbKey, DeleteResult,
   DeviceList, DrawPayload, DrawResult, HealthInfo, ImportReport, OptimizePayload, OutlineEditPayload,
@@ -7,7 +7,7 @@ import type {
   BiliExtractPayload, BiliSettingsInfo, BiliSettingsSaveResult, BiliSubtitle, BiliVideoInfo,
   OutlineChatPayload,
   OutlineGeneratePayload, OutlineSplitPayload, OutlineSplitResult, PagedMeta, Row, Stats, SyncOverview,
-  SyncRequestInfo, WriteResult,
+  SyncRequestInfo, WriteResult, RagStatus, RagScene, RagJob, RagImportResult, RagSearchResult, RagImitateResult,
 } from './types';
 import type { StreamHandlers } from './client';
 
@@ -85,6 +85,26 @@ export const api = {
   },
 
   // ── B站视频转文字（优先官方字幕，无字幕时本地 faster-whisper 转写）──
+  // ── RAG 情节素材库 ──
+  rag: {
+    status: () => get<RagStatus>('/api/rag/status'),
+    importNovel: (file: File, book: string) => {
+      const form = new FormData();
+      form.append('file', file);
+      form.append('book', book);
+      form.append('replace', 'true');
+      return uploadForm<RagImportResult>('/api/rag/import', form);
+    },
+    job: (id: string) => get<RagJob>('/api/rag/jobs/' + encodeURIComponent(id)),
+    scenes: (params: Record<string, unknown> = {}) =>
+      getWithMeta<RagScene[], PagedMeta>('/api/rag/scenes', params),
+    search: (payload: { query: string; size?: number; tags?: string[] }) =>
+      post<RagSearchResult>('/api/rag/search', payload),
+    imitate: (payload: { query: string; size?: number; tags?: string[]; style?: string; extra?: string }) =>
+      post<RagImitateResult>('/api/rag/imitate', payload),
+    deleteBook: (book: string) => del<{ book: string; deleted: boolean }>('/api/rag/books?book=' + encodeURIComponent(book)),
+  },
+
   bili: {
     /** 解析链接/BV号 → 视频信息 + 分P + 第一P字幕列表 */
     resolve: (input: string) => post<BiliVideoInfo>('/api/bili/resolve', { input }),

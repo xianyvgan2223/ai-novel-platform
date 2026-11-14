@@ -108,6 +108,17 @@ export async function uploadBinary<T>(path: string, file: File | Blob): Promise<
 }
 
 /** 下载二进制并触发浏览器保存（导出 .db，需要带令牌，所以不能用 window.open） */
+/** 上传 multipart 表单（RAG 小说导入等） */
+export async function uploadForm<T>(path: string, form: FormData): Promise<T> {
+  const url = BASE + path;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: headers(),
+    body: form,
+  });
+  return (await parse<T>(res, url)).data;
+}
+
 export async function download(path: string, fallbackName: string): Promise<void> {
   const url = BASE + path;
   const res = await fetch(url, { headers: headers() });
