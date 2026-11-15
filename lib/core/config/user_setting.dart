@@ -1,6 +1,8 @@
 /// lib/models/user_setting.dart
 /// 用户设置模型 — 映射 user_settings 表，纯数据实体，无业务逻辑
 
+import 'deepseek_models.dart';
+
 class UserSetting {
   static const int maxTokensMax = 384000;
 
@@ -26,15 +28,16 @@ class UserSetting {
   final int maxTokens;
   final String stop;
   final bool stream;
-  final String streamOptions;
-  final double frequencyPenalty;
-  final double presencePenalty;
   final String responseFormat;
   final bool thinking;
+  final String reasoningEffort;
+  final bool streamIncludeUsage;
+  final String toolChoice;
+  final String safetyCheck;
+  final bool titleEnabled;
+  final String userId;
   final bool logprobs;
   final int topLogprobs;
-  final String logitBias;
-  final int n;
   final String reasoningContent;
   final int contextRounds;
   final String systemPrompt;
@@ -66,15 +69,16 @@ class UserSetting {
     this.maxTokens = 4096,
     this.stop = '',
     this.stream = true,
-    this.streamOptions = '',
-    this.frequencyPenalty = 0.0,
-    this.presencePenalty = 0.0,
     this.responseFormat = 'text',
     this.thinking = false,
+    this.reasoningEffort = 'high',
+    this.streamIncludeUsage = false,
+    this.toolChoice = 'auto',
+    this.safetyCheck = 'low',
+    this.titleEnabled = false,
+    this.userId = '',
     this.logprobs = false,
     this.topLogprobs = 0,
-    this.logitBias = '',
-    this.n = 1,
     this.reasoningContent = '',
     this.contextRounds = 10,
     this.systemPrompt = '',
@@ -97,15 +101,16 @@ class UserSetting {
       'max_tokens': maxTokens,
       'stop': stop,
       'stream': stream ? 1 : 0,
-      'stream_options': streamOptions,
-      'frequency_penalty': frequencyPenalty,
-      'presence_penalty': presencePenalty,
       'response_format': responseFormat,
       'thinking': thinking ? 1 : 0,
+      'reasoning_effort': reasoningEffort,
+      'stream_include_usage': streamIncludeUsage ? 1 : 0,
+      'tool_choice': toolChoice,
+      'safety_check': safetyCheck,
+      'title_enabled': titleEnabled ? 1 : 0,
+      'user_id': userId,
       'logprobs': logprobs ? 1 : 0,
       'top_logprobs': topLogprobs,
-      'logit_bias': logitBias,
-      'n': n,
       'reasoning_content': reasoningContent,
       'context_rounds': contextRounds,
       'system_prompt': systemPrompt,
@@ -129,15 +134,16 @@ class UserSetting {
       maxTokens: map['max_tokens'] as int? ?? 4096,
       stop: map['stop'] as String? ?? '',
       stream: (map['stream'] as int?) == 1,
-      streamOptions: map['stream_options'] as String? ?? '',
-      frequencyPenalty: (map['frequency_penalty'] as num?)?.toDouble() ?? 0.0,
-      presencePenalty: (map['presence_penalty'] as num?)?.toDouble() ?? 0.0,
       responseFormat: map['response_format'] as String? ?? 'text',
       thinking: (map['thinking'] as int?) == 1,
+      reasoningEffort: map['reasoning_effort'] as String? ?? 'high',
+      streamIncludeUsage: (map['stream_include_usage'] as int?) == 1,
+      toolChoice: map['tool_choice'] as String? ?? 'auto',
+      safetyCheck: map['safety_check'] as String? ?? 'low',
+      titleEnabled: (map['title_enabled'] as int?) == 1,
+      userId: map['user_id'] as String? ?? '',
       logprobs: (map['logprobs'] as int?) == 1,
       topLogprobs: map['top_logprobs'] as int? ?? 0,
-      logitBias: map['logit_bias'] as String? ?? '',
-      n: map['n'] as int? ?? 1,
       reasoningContent: map['reasoning_content'] as String? ?? '',
       contextRounds: map['context_rounds'] as int? ?? 10,
       systemPrompt: map['system_prompt'] as String? ?? '',
@@ -172,15 +178,16 @@ class UserSetting {
     int? maxTokens,
     String? stop,
     bool? stream,
-    String? streamOptions,
-    double? frequencyPenalty,
-    double? presencePenalty,
     String? responseFormat,
     bool? thinking,
+    String? reasoningEffort,
+    bool? streamIncludeUsage,
+    String? toolChoice,
+    String? safetyCheck,
+    bool? titleEnabled,
+    String? userId,
     bool? logprobs,
     int? topLogprobs,
-    String? logitBias,
-    int? n,
     String? reasoningContent,
     int? contextRounds,
     String? systemPrompt,
@@ -200,15 +207,16 @@ class UserSetting {
       maxTokens: maxTokens ?? this.maxTokens,
       stop: stop ?? this.stop,
       stream: stream ?? this.stream,
-      streamOptions: streamOptions ?? this.streamOptions,
-      frequencyPenalty: frequencyPenalty ?? this.frequencyPenalty,
-      presencePenalty: presencePenalty ?? this.presencePenalty,
       responseFormat: responseFormat ?? this.responseFormat,
       thinking: thinking ?? this.thinking,
+      reasoningEffort: reasoningEffort ?? this.reasoningEffort,
+      streamIncludeUsage: streamIncludeUsage ?? this.streamIncludeUsage,
+      toolChoice: toolChoice ?? this.toolChoice,
+      safetyCheck: safetyCheck ?? this.safetyCheck,
+      titleEnabled: titleEnabled ?? this.titleEnabled,
+      userId: userId ?? this.userId,
       logprobs: logprobs ?? this.logprobs,
       topLogprobs: topLogprobs ?? this.topLogprobs,
-      logitBias: logitBias ?? this.logitBias,
-      n: n ?? this.n,
       reasoningContent: reasoningContent ?? this.reasoningContent,
       contextRounds: contextRounds ?? this.contextRounds,
       systemPrompt: systemPrompt ?? this.systemPrompt,
@@ -221,43 +229,68 @@ class UserSetting {
     );
   }
 
-  /// 快速转换为 DeepSeek API 请求参数（不含 messages）
+  /// 快速转换为 DeepSeek Chat Completions 请求参数（不含 messages）。
+  ///
+  /// 字段与官方文档保持一致：
+  /// model / thinking / reasoning_effort / max_tokens / response_format /
+  /// stop / stream / stream_options / temperature / top_p / tools /
+  /// tool_choice / safety_check / title / logprobs / top_logprobs / user_id。
   Map<String, dynamic> toApiParams() {
+    final effort =
+        const {'none', 'low', 'high', 'max'}.contains(reasoningEffort)
+        ? reasoningEffort
+        : 'high';
     final params = <String, dynamic>{
-      'model': model,
-      'temperature': temperature,
-      'top_p': topP,
-      'max_tokens': maxTokens,
+      'model': DeepSeekModels.toApiId(model),
+      'temperature': temperature.clamp(0.0, 2.0).toDouble(),
+      'top_p': topP.clamp(0.0001, 1.0).toDouble(),
+      'max_tokens': maxTokens.clamp(1, UserSetting.maxTokensMax),
       'stream': stream,
-      'frequency_penalty': frequencyPenalty,
-      'presence_penalty': presencePenalty,
     };
 
-    // stop：逗号分隔字符串 → 数组
-    if (stop.trim().isNotEmpty) {
-      params['stop'] = stop.split(',').map((s) => s.trim()).toList();
+    // thinking 与 reasoning_effort 的优先级：传了 thinking 时 effort 会被忽略。
+    // 因此关闭思考时显式 disabled；开启思考时只传 reasoning_effort，让强度生效。
+    if (!thinking || effort == 'none') {
+      params['thinking'] = {'type': 'disabled'};
+    } else {
+      params['reasoning_effort'] = effort;
     }
 
-    // stream_options：非空时解析为 JSON
-    if (streamOptions.trim().isNotEmpty) {
-      params['stream_options'] = streamOptions;
+    // stream_options 只能和 stream=true 一起使用，否则官方 API 会返回 400。
+    if (stream && streamIncludeUsage) {
+      params['stream_options'] = {'include_usage': true};
     }
 
-    // response_format：非 text 时传入
-    if (responseFormat != 'text') {
-      params['response_format'] = {'type': responseFormat};
+    final stops = stop
+        .split(RegExp(r'[,，\n]'))
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .take(16)
+        .toList(growable: false);
+    if (stops.isNotEmpty) params['stop'] = stops;
+
+    if (responseFormat == 'json_object') {
+      params['response_format'] = {'type': 'json_object'};
     }
 
-    // 深度推理（V1.3.5 修复：关时显式禁用，避免 API 默认启用）
-    params['thinking'] = thinking ? {'type': 'enabled'} : {'type': 'disabled'};
-
-    // 调试参数
-    if (logprobs) params['logprobs'] = true;
-    if (topLogprobs > 0) params['top_logprobs'] = topLogprobs;
-    if (logitBias.trim().isNotEmpty) {
-      params['logit_bias'] = logitBias;
+    if (logprobs) {
+      params['logprobs'] = true;
+      final top = topLogprobs.clamp(0, 20);
+      if (top > 0) params['top_logprobs'] = top;
     }
-    if (n > 1) params['n'] = n;
+
+    if (safetyCheck == 'high') {
+      params['safety_check'] = {'level': 'high'};
+    }
+    if (titleEnabled) {
+      params['title'] = {'enabled': true};
+    }
+
+    final uid = userId.trim();
+    if (uid.isNotEmpty) {
+      // 官方建议仅使用英文字母、数字、下划线和连字符，UTF-8 不超过 512 字节。
+      params['user_id'] = uid.length > 512 ? uid.substring(0, 512) : uid;
+    }
 
     return params;
   }

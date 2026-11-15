@@ -307,6 +307,15 @@ class ChatController extends ChangeNotifier {
 
     if (tools.isNotEmpty) {
       apiParams['tools'] = tools;
+      // 官方 tool_choice：auto / none / required。
+      // 思考模式下官方不支持 required，这里自动降级为 auto，避免 400。
+      final thinkingActive =
+          setting.thinking && setting.reasoningEffort != 'none';
+      var choice = setting.toolChoice;
+      if (thinkingActive && choice == 'required') choice = 'auto';
+      if (choice != 'auto') {
+        apiParams['tool_choice'] = choice;
+      }
     }
 
     // ⑥ 发起流式请求
@@ -602,6 +611,7 @@ class ChatController extends ChangeNotifier {
     // 发起第二阶段流式请求
     final apiParams = setting.toApiParams();
     apiParams.remove('tools'); // 第二阶段不需要 tools
+    apiParams.remove('tool_choice');
     _cancelToken = CancelToken();
     await _apiService.streamChat(
       apiKey: setting.apiKey,

@@ -191,7 +191,9 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
     if (index < 0 || index == _lastScrolledIndex) return;
     _lastScrolledIndex = index;
     if (FocusManager.instance.primaryFocus?.hasFocus ?? false) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToSegment(index));
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _scrollToSegment(index),
+    );
   }
 
   /// 读取事件结构（**与「大纲编辑」的章节选择页同一套**）。
@@ -213,7 +215,10 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
     final id = widget.outline.id;
     // 没有 id（测试 / 未入库）：直接用传进来的章节
     if (id == null) {
-      _controller.init(widget.chapters ?? const <OutlineChapter>[], reload: false);
+      _controller.init(
+        widget.chapters ?? const <OutlineChapter>[],
+        reload: false,
+      );
       if (mounted) setState(() => _loading = false);
       return;
     }
@@ -277,16 +282,11 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('未保存的修改'),
-        content: Text(
-          '有 ${_controller.dirtyCount} 处大纲改动还没保存，要保存后退出吗？',
-        ),
+        content: Text('有 ${_controller.dirtyCount} 处大纲改动还没保存，要保存后退出吗？'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop('discard'),
-            child:  Text(
-              '不保存',
-              style: TextStyle(color: _p.textTertiary),
-            ),
+            child: Text('不保存', style: TextStyle(color: _p.textTertiary)),
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop('cancel'),
@@ -339,9 +339,7 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
                           _controller.engineHint.isNotEmpty)
                         _buildEngineHintBar(),
                       Expanded(
-                        child: hasContent
-                            ? _buildList()
-                            : _buildEmptyBody(),
+                        child: hasContent ? _buildList() : _buildEmptyBody(),
                       ),
                     ],
                   ),
@@ -374,7 +372,7 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
         },
       ),
       leading: IconButton(
-        icon:  Icon(Icons.arrow_back, color: _p.textPrimary),
+        icon: Icon(Icons.arrow_back, color: _p.textPrimary),
         visualDensity: VisualDensity.compact,
         padding: const EdgeInsets.all(4),
         constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
@@ -456,9 +454,7 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
     await _controller.undo();
     if (!mounted) return;
     _lastScrolledIndex = -1; // 高度/文本变了，让下一次朗读重新跟随一次
-    _toast(
-      _controller.canRedo ? '已撤回上一步（可用「取消撤回」恢复）' : '已撤回上一步',
-    );
+    _toast(_controller.canRedo ? '已撤回上一步（可用「取消撤回」恢复）' : '已撤回上一步');
   }
 
   /// 取消撤回：把刚刚撤回的那一步再做一遍
@@ -493,7 +489,7 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
     return Container(
       width: double.infinity,
       height: 22,
-      decoration:  BoxDecoration(
+      decoration: BoxDecoration(
         color: _p.accentSoft,
         border: Border(bottom: BorderSide(color: _p.border)),
       ),
@@ -503,7 +499,7 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
             message: '展开播放控制',
             child: InkWell(
               onTap: _toggleCollapsed,
-              child:  SizedBox(
+              child: SizedBox(
                 width: 30,
                 height: 22,
                 child: Center(
@@ -568,7 +564,7 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
     return Container(
       width: double.infinity,
       // 浅主色底 + 左侧 2dp 主色竖条：与卡片「朗读中」的配色同一套，不抢注意力
-      decoration:  BoxDecoration(
+      decoration: BoxDecoration(
         color: _p.accentSoft,
         border: Border(
           left: BorderSide(color: _p.accent, width: 2),
@@ -605,7 +601,7 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
                   _controller.activeSentenceText,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style:  TextStyle(
+                  style: TextStyle(
                     fontSize: 10.5,
                     height: 1.35,
                     color: _p.textPrimary,
@@ -637,7 +633,7 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(10, 2, 6, 2),
-      decoration:  BoxDecoration(
+      decoration: BoxDecoration(
         color: _p.accentSoft,
         border: Border(bottom: BorderSide(color: _p.border)),
       ),
@@ -651,7 +647,7 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
             _controller.settings.scope == OutlineListenScope.all
                 ? '${_controller.activeIndex + 1}/${_controller.segments.length}'
                 : '${_controller.activePlayableOrdinal}/${_controller.playableCount}',
-            style:  TextStyle(fontSize: 9.5, color: _p.textTertiary),
+            style: TextStyle(fontSize: 9.5, color: _p.textTertiary),
           ),
           const SizedBox(width: 8),
           // 当前朗读的是哪一个事件：听的时候最怕「不知道读到哪了」
@@ -663,9 +659,7 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
                 fontSize: 10.5,
                 height: 1.2,
                 fontWeight: playing ? FontWeight.w600 : FontWeight.w400,
-                color: playing
-                    ? _p.accent
-                    : _p.textSecondary,
+                color: playing ? _p.accent : _p.textSecondary,
               ),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
@@ -700,25 +694,11 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
             onPressed: _controller.activeIndex >= 0 ? _controller.stop : null,
           ),
           const SizedBox(width: 2),
-          // 正在用 App 自带的离线语音（手机系统里没有可用的 TTS 引擎）：
-          // 让用户知道声音从哪来，别以为是手机系统在念
-          if (_controller.usingBuiltinVoice)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-              decoration: BoxDecoration(
-                color: _p.accentSoft,
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child:  Text(
-                '内置语音',
-                style: TextStyle(fontSize: 9, color: _p.accent),
-              ),
-            ),
-          // 语速：窄屏放不下时干脆不显示（设置面板里既能看到也能改）
+          // 语速：窄屏放不下时隐藏，设置面板里仍可调（最大 4x）
           if (showRate)
             Text(
               _controller.settings.rateLabel,
-              style:  TextStyle(fontSize: 9.5, color: _p.textTertiary),
+              style: TextStyle(fontSize: 9.5, color: _p.textTertiary),
               maxLines: 1,
             ),
         ],
@@ -736,7 +716,7 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(10, 2, 6, 2),
-      decoration:  BoxDecoration(
+      decoration: BoxDecoration(
         color: _p.accentSoft,
         border: Border(bottom: BorderSide(color: _p.border)),
       ),
@@ -748,7 +728,7 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
               hasContent ? '点卡片播放' : '暂无可朗读事件',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style:  TextStyle(fontSize: 10.5, color: _p.textTertiary),
+              style: TextStyle(fontSize: 10.5, color: _p.textTertiary),
             ),
           ),
           const SizedBox(width: 6),
@@ -762,7 +742,7 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
             const SizedBox(width: 6),
             Text(
               _controller.settings.rateLabel,
-              style:  TextStyle(fontSize: 9.5, color: _p.textTertiary),
+              style: TextStyle(fontSize: 9.5, color: _p.textTertiary),
               maxLines: 1,
             ),
           ],
@@ -806,6 +786,7 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
     required IconData icon,
     required String tooltip,
     required VoidCallback? onPressed,
+
     /// 图标颜色（默认主色）：停止按钮用红色，把自己和普通播控区分开
     Color? color,
   }) {
@@ -827,7 +808,6 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
   /// 重建再读——用户按提示去系统里装好 / 启用好语音引擎后，只有这样才能在不杀
   /// App 的前提下恢复（只重发一次 init 会拿回原生缓存的失败结果）。
   Widget _buildErrorBar() {
-    final noEngine = !_controller.engine.isAvailable && _controller.engineHint.isNotEmpty;
     final ink = _p.isDark ? _p.warning : _p.warning;
     return Container(
       width: double.infinity,
@@ -860,27 +840,6 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
           Row(
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
-              // 本机一个引擎都没有时，第一条该走的是「先去商店装一个」：
-              // 系统设置页里首选引擎是「无」，用户到那儿没有东西可选
-              if (noEngine)
-                TextButton(
-                  onPressed: _openVoiceEngineStore,
-                  style: TextButton.styleFrom(
-                    visualDensity: VisualDensity.compact,
-                    minimumSize: Size.zero,
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                  ),
-                  child: const Text('去商店装引擎', style: TextStyle(fontSize: 12)),
-                ),
-              TextButton(
-                onPressed: _openTtsSettings,
-                style: TextButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                  minimumSize: Size.zero,
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                ),
-                child: const Text('去系统设置', style: TextStyle(fontSize: 12)),
-              ),
               TextButton(
                 onPressed: _retryPlay,
                 style: TextButton.styleFrom(
@@ -928,54 +887,7 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
               ),
             ],
           ),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              TextButton(
-                onPressed: _openVoiceEngineStore,
-                style: TextButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                  minimumSize: Size.zero,
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                ),
-                child: Text(
-                  '去商店装引擎',
-                  style: TextStyle(fontSize: 12, color: ink),
-                ),
-              ),
-              TextButton(
-                onPressed: _openTtsSettings,
-                style: TextButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                  minimumSize: Size.zero,
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                ),
-                child: Text(
-                  '去系统设置',
-                  style: TextStyle(fontSize: 12, color: ink),
-                ),
-              ),
-            ],
-          ),
         ],
-      ),
-    );
-  }
-
-  /// 去应用商店搜「语音引擎」：本机一个引擎都没有时的第一步。
-  ///
-  /// App 不能替用户装引擎（Android 不允许静默安装 APK），但能把他送到商店搜索页，
-  /// 在手机上一键搜到、一键装完，回来点「重试」即可。
-  Future<void> _openVoiceEngineStore() async {
-    final ok = await _controller.openVoiceEngineStore();
-    if (!mounted || ok) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          '没找到应用商店，请在手机商店里搜「语音引擎」安装（讯飞语音引擎 / Google 语音服务等）',
-          style: TextStyle(fontSize: 12.5),
-        ),
-        duration: Duration(seconds: 5),
       ),
     );
   }
@@ -984,26 +896,13 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
   Future<void> _retryPlay() async {
     final ok = await _controller.retryPlay();
     if (!mounted || ok) return;
-    final reason = _controller.errorMessage.isEmpty ? '还是没能开始朗读' : _controller.errorMessage;
+    final reason = _controller.errorMessage.isEmpty
+        ? '还是没能开始朗读'
+        : _controller.errorMessage;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(reason, style: const TextStyle(fontSize: 12.5)),
         duration: const Duration(seconds: 4),
-      ),
-    );
-  }
-
-  /// 去系统「文字转语音」设置页：装引擎 / 换引擎 / 换发音人都在这一步
-  Future<void> _openTtsSettings() async {
-    final ok = await _controller.openTtsSettings();
-    if (!mounted || ok) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          '本机没找到「文字转语音」设置页，请在系统设置里搜索「文字转语音」或「TTS」',
-          style: TextStyle(fontSize: 12.5),
-        ),
-        duration: Duration(seconds: 4),
       ),
     );
   }
@@ -1050,14 +949,14 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
       ),
       child: Row(
         children: [
-           Icon(Icons.volume_off, size: 13, color: _p.textTertiary),
+          Icon(Icons.volume_off, size: 13, color: _p.textTertiary),
           const SizedBox(width: 5),
           Expanded(
             child: Text(
               majorOnly ? '只听大事件 · 小事件不参与朗读' : '只听小事件 · 大事件不参与朗读',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style:  TextStyle(fontSize: 10.5, color: _p.textTertiary),
+              style: TextStyle(fontSize: 10.5, color: _p.textTertiary),
             ),
           ),
         ],
@@ -1145,21 +1044,15 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
                 const SizedBox(width: 6),
                 Text(
                   '已写正文 ${segment.contentLength} 字',
-                  style:  TextStyle(
-                    fontSize: 9.5,
-                    color: _p.success,
-                  ),
+                  style: TextStyle(fontSize: 9.5, color: _p.success),
                 ),
               ],
               const SizedBox(width: 6),
               if (segment.isDirty)
-                 Text(
-                  '已改',
-                  style: TextStyle(fontSize: 9.5, color: _p.warning),
-                ),
+                Text('已改', style: TextStyle(fontSize: 9.5, color: _p.warning)),
               const Spacer(),
               if (playing)
-                 Text(
+                Text(
                   '朗读中',
                   style: TextStyle(
                     fontSize: 9.5,
@@ -1177,7 +1070,7 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
               controller: segment.titleCtrl,
               minLines: 1,
               maxLines: null,
-              decoration:  InputDecoration(
+              decoration: InputDecoration(
                 hintText: '事件标题',
                 hintStyle: TextStyle(
                   fontSize: 13.5,
@@ -1188,7 +1081,7 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
                 border: InputBorder.none,
                 contentPadding: EdgeInsets.zero,
               ),
-              style:  TextStyle(
+              style: TextStyle(
                 fontSize: 13.5,
                 height: 1.4,
                 fontWeight: FontWeight.w600,
@@ -1205,7 +1098,7 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
               minLines: 2,
               maxLines: null,
               keyboardType: TextInputType.multiline,
-              decoration:  InputDecoration(
+              decoration: InputDecoration(
                 hintText: '事件概要（大纲内容）',
                 hintStyle: TextStyle(
                   fontSize: 11.5,
@@ -1218,7 +1111,7 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
               ),
               // 字号比上一版小一号、行高收一点：真机上一张 20 行的概要卡片
               // 原来要占满整屏（桌面截图看不出来，手机上一眼就顶到屏幕底）
-              style:  TextStyle(
+              style: TextStyle(
                 fontSize: 11.5,
                 height: 1.5,
                 color: _p.textSecondary,
@@ -1245,18 +1138,14 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-             Icon(
-              Icons.headphones_outlined,
-              size: 56,
-              color: _p.textTertiary,
-            ),
+            Icon(Icons.headphones_outlined, size: 56, color: _p.textTertiary),
             const SizedBox(height: 12),
-             Text(
+            Text(
               '这条大纲还没有可朗读的事件',
               style: TextStyle(fontSize: 14, color: _p.textTertiary),
             ),
             const SizedBox(height: 6),
-             Text(
+            Text(
               '请先在「一键生成大纲」里生成，或在「大纲编辑」里添加事件',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 11.5, color: _p.textTertiary),
@@ -1266,7 +1155,7 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
               Text(
                 _controller.engineHint,
                 textAlign: TextAlign.center,
-                style:  TextStyle(fontSize: 11, color: _p.warning),
+                style: TextStyle(fontSize: 11, color: _p.warning),
               ),
             ],
           ],
@@ -1293,22 +1182,19 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
             Icon(
               dirty > 0 ? Icons.info_outline : Icons.check_circle_outline,
               size: 14,
-              color: dirty > 0
-                  ? _p.warning
-                  : _p.success,
+              color: dirty > 0 ? _p.warning : _p.success,
             ),
             const SizedBox(width: 6),
             Expanded(
               child: Text(
                 dirty > 0 ? '$dirty 处改动未保存' : '所有改动已保存',
-                style:  TextStyle(
-                  fontSize: 12,
-                  color: _p.textSecondary,
-                ),
+                style: TextStyle(fontSize: 12, color: _p.textSecondary),
               ),
             ),
             ElevatedButton(
-              onPressed: (dirty == 0 || _controller.saving) ? null : () => _save(),
+              onPressed: (dirty == 0 || _controller.saving)
+                  ? null
+                  : () => _save(),
               style: ElevatedButton.styleFrom(
                 backgroundColor: _p.accent,
                 foregroundColor: _p.onAccent,
@@ -1355,10 +1241,8 @@ class _OutlineListenPageState extends State<OutlineListenPage> {
       isScrollControlled: true,
       useSafeArea: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => OutlineRenameSheet(
-        controller: _controller,
-        candidates: candidates,
-      ),
+      builder: (_) =>
+          OutlineRenameSheet(controller: _controller, candidates: candidates),
     );
     if (!mounted) return;
     // 改名后段落文本整体变了：清掉滚动记忆，下次朗读重新跟随
@@ -1440,14 +1324,16 @@ class _PlayerSentenceSliderState extends State<_PlayerSentenceSlider> {
       child: Row(
         children: [
           // 一个滑动小图标提示「这里可以拖」——通知栏只能点，很多人不知道页面这条能滑
-           Icon(Icons.swipe, size: 12, color: _p.textTertiary),
+          Icon(Icons.swipe, size: 12, color: _p.textTertiary),
           const SizedBox(width: 2),
           Expanded(
             child: SliderTheme(
               data: SliderTheme.of(context).copyWith(
                 trackHeight: 2.5,
                 trackShape: const RectangularSliderTrackShape(),
-                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5.5),
+                thumbShape: const RoundSliderThumbShape(
+                  enabledThumbRadius: 5.5,
+                ),
                 overlayShape: const RoundSliderOverlayShape(overlayRadius: 13),
                 activeTrackColor: _p.accent,
                 inactiveTrackColor: _p.borderStrong,
@@ -1472,7 +1358,7 @@ class _PlayerSentenceSliderState extends State<_PlayerSentenceSlider> {
               ordinal <= 0 ? '共 $total 句' : '第 $ordinal/$total 句',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style:  TextStyle(fontSize: 9.5, color: _p.textTertiary),
+              style: TextStyle(fontSize: 9.5, color: _p.textTertiary),
             ),
           ),
         ],
@@ -1560,7 +1446,7 @@ class _SentenceSeekBarState extends State<_SentenceSeekBar> {
               label,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style:  TextStyle(fontSize: 9.5, color: _p.textTertiary),
+              style: TextStyle(fontSize: 9.5, color: _p.textTertiary),
             ),
           ),
           Expanded(
@@ -1568,7 +1454,9 @@ class _SentenceSeekBarState extends State<_SentenceSeekBar> {
               data: SliderTheme.of(context).copyWith(
                 trackHeight: 2,
                 trackShape: const RectangularSliderTrackShape(),
-                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 4.5),
+                thumbShape: const RoundSliderThumbShape(
+                  enabledThumbRadius: 4.5,
+                ),
                 overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
                 activeTrackColor: _p.accent,
                 inactiveTrackColor: _p.borderStrong,
@@ -1608,7 +1496,6 @@ class _SpeechSettingsSheet extends StatefulWidget {
 class _SpeechSettingsSheetState extends State<_SpeechSettingsSheet> {
   AppPalette get _p => context.palette;
 
-  /// 本机可选的朗读引擎（跟随系统 / 内置语音 / 各个系统引擎），打开面板时拉一次
   List<TtsEngineOption> _engines = const [];
   bool _loadingEngines = true;
   bool _switchingEngine = false;
@@ -1628,7 +1515,6 @@ class _SpeechSettingsSheetState extends State<_SpeechSettingsSheet> {
     });
   }
 
-  /// 换引擎：立刻重新初始化，并把结果反馈给用户（起不来就说清原因）
   Future<void> _pickEngine(TtsEngineOption option) async {
     if (_switchingEngine) return;
     setState(() => _switchingEngine = true);
@@ -1647,8 +1533,7 @@ class _SpeechSettingsSheetState extends State<_SpeechSettingsSheet> {
     );
   }
 
-  /// 改设置时**不打断朗读**：正在读的那一条读完后，下一条就用新设置
-  /// （改一下语速就从头重读，听感上更烦）。因此这里只改配置、不重启引擎。
+  /// 改设置时**不打断朗读**：正在读的那一条读完后，下一条就用新设置。
   void _update(OutlineSpeechSettings next) {
     widget.controller.updateSettings(next);
     setState(() {});
@@ -1673,205 +1558,163 @@ class _SpeechSettingsSheetState extends State<_SpeechSettingsSheet> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-            Row(
-              children: [
-                 Icon(Icons.tune, size: 18, color: _p.accent),
-                const SizedBox(width: 6),
-                const Text(
-                  '朗读设置',
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
-                ),
-                const Spacer(),
-                IconButton(
-                  icon: const Icon(Icons.close, size: 18),
-                  color: _p.textTertiary,
-                  tooltip: '关闭',
-                  onPressed: () => Navigator.of(context).pop(),
-                ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            // 朗读引擎：默认「跟随系统」，系统没有引擎时自动用 App 自带的离线语音；
-            // 也可以在这里指定某个系统引擎（例如装了 eSpeak 之后想固定用它）。
-             Text(
-              '朗读引擎',
-              style: TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w600,
-                color: _p.textPrimary,
+              Row(
+                children: [
+                  Icon(Icons.tune, size: 18, color: _p.accent),
+                  const SizedBox(width: 6),
+                  const Text(
+                    '朗读设置',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.close, size: 18),
+                    color: _p.textTertiary,
+                    tooltip: '关闭',
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                ],
               ),
-            ),
-            const SizedBox(height: 6),
-            if (_loadingEngines)
-               Padding(
-                padding: EdgeInsets.symmetric(vertical: 6),
-                child: Text(
-                  '正在读取本机可用的引擎…',
-                  style: TextStyle(fontSize: 11.5, color: _p.textTertiary),
+              const SizedBox(height: 4),
+              Text(
+                '朗读引擎',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: _p.textPrimary,
                 ),
-              )
-            else
+              ),
+              const SizedBox(height: 6),
+              if (_loadingEngines)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: Text(
+                    '正在读取可用引擎…',
+                    style: TextStyle(fontSize: 11.5, color: _p.textTertiary),
+                  ),
+                )
+              else
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final option in _engines)
+                      _choice(
+                        label: option.label,
+                        selected:
+                            widget.controller.selectedEngineId == option.id,
+                        onTap: _switchingEngine
+                            ? () {}
+                            : () => _pickEngine(option),
+                      ),
+                  ],
+                ),
+              const SizedBox(height: 4),
+              Text(
+                widget.controller.usingBuiltinVoice
+                    ? '当前使用 App 内置离线语音（系统没有可用 TTS 引擎）'
+                    : '可选 DeepSeek 官方音色，也可切回手机系统 TTS 引擎；语速支持到 4x。',
+                style: TextStyle(fontSize: 11, color: _p.textTertiary),
+              ),
+              const SizedBox(height: 14),
+              Text(
+                '语速',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: _p.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 6),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
                 children: [
-                  for (final option in _engines)
+                  for (final rate in OutlineSpeechSettings.rateOptions)
                     _choice(
-                      label: option.label,
-                      selected: widget.controller.selectedEngineId == option.id,
-                      onTap: _switchingEngine ? () {} : () => _pickEngine(option),
+                      label: '${rate}x',
+                      selected: s.rate == rate,
+                      onTap: () => _update(s.copyWith(rate: rate)),
                     ),
                 ],
               ),
-            const SizedBox(height: 4),
-            Text(
-              widget.controller.usingBuiltinVoice
-                  ? '当前用的是 App 自带语音（系统里没有可用引擎）'
-                  : '正在用手机系统里的语音引擎；想换手机自带的其他引擎去系统设置里换',
-              style:  TextStyle(fontSize: 11, color: _p.textTertiary),
-            ),
-            const SizedBox(height: 12),
-             Text(
-              '朗读范围',
-              style: TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w600,
-                color: _p.textPrimary,
+              const SizedBox(height: 12),
+              Text(
+                '朗读范围',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: _p.textPrimary,
+                ),
               ),
-            ),
-            const SizedBox(height: 6),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final mode in OutlineListenMode.values)
-                  _choice(
-                    label: mode.label,
-                    selected: s.mode == mode,
-                    onTap: () => _update(s.copyWith(mode: mode)),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            // 「朗读事件类型」与「朗读范围」是两件事：范围决定一个事件读多少内容，
-            // 这里决定哪些事件参与朗读推进（全部 / 只大事件 / 只小事件）。
-            // 长篇小说上百个事件时，只听大事件能顺着主线快速过一遍。
-             Text(
-              '朗读事件类型',
-              style: TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w600,
-                color: _p.textPrimary,
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final mode in OutlineListenMode.values)
+                    _choice(
+                      label: mode.label,
+                      selected: s.mode == mode,
+                      onTap: () => _update(s.copyWith(mode: mode)),
+                    ),
+                ],
               ),
-            ),
-            const SizedBox(height: 6),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final scope in OutlineListenScope.values)
-                  _choice(
-                    label: scope.label,
-                    selected: s.scope == scope,
-                    onTap: () => _update(s.copyWith(scope: scope)),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 4),
-             Text(
-              '只听大/小事件时，自动连读与上一个/下一个都只走范围内事件；卡片仍可编辑',
-              style: TextStyle(fontSize: 11, color: _p.textTertiary),
-            ),
-            const SizedBox(height: 14),
-             Text(
-              '语速',
-              style: TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w600,
-                color: _p.textPrimary,
+              const SizedBox(height: 14),
+              // 「朗读事件类型」与「朗读范围」是两件事：范围决定一个事件读多少内容，
+              // 这里决定哪些事件参与朗读推进（全部 / 只大事件 / 只小事件）。
+              // 长篇小说上百个事件时，只听大事件能顺着主线快速过一遍。
+              Text(
+                '朗读事件类型',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: _p.textPrimary,
+                ),
               ),
-            ),
-            const SizedBox(height: 6),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final rate in OutlineSpeechSettings.rateOptions)
-                  _choice(
-                    label: '${rate}x',
-                    selected: s.rate == rate,
-                    onTap: () => _update(s.copyWith(rate: rate)),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 14),
-             Text(
-              '音调',
-              style: TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w600,
-                color: _p.textPrimary,
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final scope in OutlineListenScope.values)
+                    _choice(
+                      label: scope.label,
+                      selected: s.scope == scope,
+                      onTap: () => _update(s.copyWith(scope: scope)),
+                    ),
+                ],
               ),
-            ),
-            const SizedBox(height: 6),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final pitch in const [0.8, 1.0, 1.2, 1.4])
-                  _choice(
-                    label: '${pitch}x',
-                    selected: s.pitch == pitch,
-                    onTap: () => _update(s.copyWith(pitch: pitch)),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 14),
-             Text(
-              '语音（中文朗读用 zh-CN；设备缺该语音包时会退回系统默认语言）',
-              style: TextStyle(fontSize: 11, color: _p.textTertiary),
-            ),
-            const SizedBox(height: 6),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final lang in const ['zh-CN', 'zh-TW', 'en-US'])
-                  _choice(
-                    label: lang,
-                    selected: s.language == lang,
-                    onTap: () => _update(s.copyWith(language: lang)),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              dense: true,
-              title: const Text(
-                '自动连读下一条',
-                style: TextStyle(fontSize: 13),
-              ),
-              subtitle:  Text(
-                '关闭后每读完一条就停下，适合边听边改',
+              const SizedBox(height: 4),
+              Text(
+                '只听大/小事件时，自动连读与上一个/下一个都只走范围内事件；卡片仍可编辑',
                 style: TextStyle(fontSize: 11, color: _p.textTertiary),
               ),
-              value: s.autoNext,
-              activeThumbColor: _p.accent,
-              onChanged: (v) => _update(s.copyWith(autoNext: v)),
-            ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              dense: true,
-              title: const Text('读完后循环', style: TextStyle(fontSize: 13)),
-              subtitle:  Text(
-                '读到最后一条后回到第一条继续',
-                style: TextStyle(fontSize: 11, color: _p.textTertiary),
+              const SizedBox(height: 14),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                title: const Text('自动连读下一条', style: TextStyle(fontSize: 13)),
+                subtitle: Text(
+                  '关闭后每读完一条就停下，适合边听边改',
+                  style: TextStyle(fontSize: 11, color: _p.textTertiary),
+                ),
+                value: s.autoNext,
+                activeThumbColor: _p.accent,
+                onChanged: (v) => _update(s.copyWith(autoNext: v)),
               ),
-              value: s.repeat,
-              activeThumbColor: _p.accent,
-              onChanged: (v) => _update(s.copyWith(repeat: v)),
-            ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                title: const Text('读完后循环', style: TextStyle(fontSize: 13)),
+                subtitle: Text(
+                  '读到最后一条后回到第一条继续',
+                  style: TextStyle(fontSize: 11, color: _p.textTertiary),
+                ),
+                value: s.repeat,
+                activeThumbColor: _p.accent,
+                onChanged: (v) => _update(s.copyWith(repeat: v)),
+              ),
             ],
           ),
         ),
@@ -1892,9 +1735,7 @@ class _SpeechSettingsSheetState extends State<_SpeechSettingsSheet> {
         decoration: BoxDecoration(
           color: selected ? _p.accent : _p.surfaceMuted,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: selected ? _p.accent : _p.borderStrong,
-          ),
+          border: Border.all(color: selected ? _p.accent : _p.borderStrong),
         ),
         child: Text(
           label,

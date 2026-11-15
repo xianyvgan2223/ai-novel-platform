@@ -22,12 +22,18 @@ class OutlinePromptTemplate {
       '请始终使用纯文本格式输出，禁止使用markdown、表格、json、加粗符号或任何标记语言。\n'
       '不要添加多余的解释性文字。';
 
+  /// 官方 Chat Completions JSON Output 模式参数。
+  /// 与提示词要求配合使用：API 保证输出是合法 JSON，提示词负责约束字段结构。
+  static const Map<String, dynamic> jsonResponseFormat = {
+    'type': 'json_object',
+  };
+
   /// 步骤 1/2 使用的 JSON 系统提示 — 与文本系统提示解耦，
   /// 避免默认提示中「禁止 json」的约束与结构化输出冲突
   static const String jsonSystemPrompt =
       '你是一个专业的小说大纲生成助手，擅长搭建逻辑闭环、人物成长清晰、'
       '伏笔回收完整的长篇小说大纲。\n'
-      '请严格按照用户要求的结构输出 JSON 数据，'
+      '请只输出一个合法 JSON 对象，并严格按照用户要求的结构输出，'
       '不要输出 JSON 以外的任何文字、解释或 markdown 代码块。';
 
   /// 构建步骤 3（展开）的系统提示词

@@ -6,7 +6,7 @@ import 'package:path/path.dart' as p;
 
 class DatabaseHelper {
   static const _dbName = 'deepseek.db';
-  static const _dbVersion = 42;
+  static const _dbVersion = 46;
   static Database? _database;
 
   /// 单例入口，全局复用同一个数据库连接
@@ -109,6 +109,12 @@ class DatabaseHelper {
         presence_penalty REAL NOT NULL DEFAULT 0.0,
         response_format TEXT NOT NULL DEFAULT 'text',
         thinking INTEGER NOT NULL DEFAULT 0,
+        reasoning_effort TEXT NOT NULL DEFAULT 'high',
+        stream_include_usage INTEGER NOT NULL DEFAULT 0,
+        tool_choice TEXT NOT NULL DEFAULT 'auto',
+        safety_check TEXT NOT NULL DEFAULT 'low',
+        title_enabled INTEGER NOT NULL DEFAULT 0,
+        user_id TEXT NOT NULL DEFAULT '',
         logprobs INTEGER NOT NULL DEFAULT 0,
         top_logprobs INTEGER NOT NULL DEFAULT 0,
         logit_bias TEXT NOT NULL DEFAULT '',
@@ -196,6 +202,7 @@ class DatabaseHelper {
         model TEXT NOT NULL DEFAULT 'deepseek-flash',
         system_prompt TEXT NOT NULL DEFAULT '',
         enable_thinking INTEGER NOT NULL DEFAULT 1,
+        reasoning_effort TEXT NOT NULL DEFAULT 'high',
         pause_after_skeleton INTEGER NOT NULL DEFAULT 0,
         pause_after_events INTEGER NOT NULL DEFAULT 0,
         pause_after_minor INTEGER NOT NULL DEFAULT 0
@@ -474,6 +481,11 @@ class DatabaseHelper {
         max_tokens INTEGER NOT NULL DEFAULT 4096,
         system_prompt TEXT NOT NULL DEFAULT '',
         enable_thinking INTEGER NOT NULL DEFAULT 1,
+        reasoning_effort TEXT NOT NULL DEFAULT 'high',
+        tts_voice TEXT NOT NULL DEFAULT 'stella',
+        tts_engine TEXT NOT NULL DEFAULT 'auto',
+        tts_rate REAL NOT NULL DEFAULT 1.0,
+        show_scroll_to_bottom INTEGER NOT NULL DEFAULT 1,
         concurrency INTEGER NOT NULL DEFAULT 3
       )
     ''');
@@ -1251,6 +1263,78 @@ class DatabaseHelper {
           )
         ''');
       } catch (_) {}
+    }
+
+    // V42→V43：聊天设置补齐 DeepSeek Chat Completions 官方参数。
+    if (oldVersion < 43) {
+      final cols = await db.rawQuery('PRAGMA table_info(user_settings)');
+      Future<void> addColumn(
+        String name,
+        String type,
+        String defaultValue,
+      ) async {
+        if (!cols.any((c) => c['name'] == name)) {
+          await db.execute(
+            'ALTER TABLE user_settings ADD COLUMN $name $type NOT NULL DEFAULT $defaultValue',
+          );
+        }
+      }
+
+      await addColumn('reasoning_effort', 'TEXT', "'high'");
+      await addColumn('stream_include_usage', 'INTEGER', '0');
+      await addColumn('tool_choice', 'TEXT', "'auto'");
+      await addColumn('safety_check', 'TEXT', "'low'");
+      await addColumn('title_enabled', 'INTEGER', '0');
+      await addColumn('user_id', 'TEXT', "''");
+    }
+
+    // V43→V44：大纲/灵感设置补齐思考强度，灵感设置增加 DeepSeek TTS 音色。
+    if (oldVersion < 44) {
+      Future<void> addTo(
+        String table,
+        String name,
+        String type,
+        String def,
+      ) async {
+        final cols = await db.rawQuery('PRAGMA table_info($table)');
+        if (!cols.any((c) => c['name'] == name)) {
+          await db.execute(
+            'ALTER TABLE $table ADD COLUMN $name $type NOT NULL DEFAULT $def',
+          );
+        }
+      }
+
+      await addTo('outline_settings', 'reasoning_effort', 'TEXT', "'high'");
+      await addTo('inspiration_settings', 'reasoning_effort', 'TEXT', "'high'");
+      await addTo('inspiration_settings', 'tts_voice', 'TEXT', "'stella'");
+    }
+
+    // V44→V45：小说灵感朗读可选择系统/本地引擎，并支持 0.75–5.0x 语速。
+    if (oldVersion < 45) {
+      Future<void> addTo(String table, String name, String type, String def) async {
+        final cols = await db.rawQuery('PRAGMA table_info($table)');
+        if (!cols.any((c) => c['name'] == name)) {
+          await db.execute(
+            'ALTER TABLE $table ADD COLUMN $name $type NOT NULL DEFAULT $def',
+          );
+        }
+      }
+
+      await addTo('inspiration_settings', 'tts_engine', 'TEXT', "'auto'");
+      await addTo('inspiration_settings', 'tts_rate', 'REAL', '1.0');
+    }
+
+    // V45→V46：小说灵感可关闭「回到底部」悬浮按钮。
+    if (oldVersion < 46) {
+      final cols = await db.rawQuery(
+        'PRAGMA table_info(inspiration_settings)',
+      );
+      if (!cols.any((c) => c['name'] == 'show_scroll_to_bottom')) {
+        await db.execute(
+          'ALTER TABLE inspiration_settings ADD COLUMN '
+          'show_scroll_to_bottom INTEGER NOT NULL DEFAULT 1',
+        );
+      }
     }
   }
 

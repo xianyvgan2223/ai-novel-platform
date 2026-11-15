@@ -527,3 +527,73 @@ export interface RagImitateResult {
   references: RagScene[];
   query: string;
 }
+/** ── 分阶段一键生成大纲（与移动端流程/检查点对齐） ── */
+
+export interface OutlineEvent {
+  title: string;
+  summary: string;
+}
+
+export interface OutlineAct {
+  name: string;
+  events: OutlineEvent[];
+}
+
+export interface OutlineStagePayload {
+  genre: string;
+  theme: string;
+  protagonist: string;
+  worldview: string;
+  extra?: string;
+  majorCount?: number;
+  minorCount?: number;
+  title?: string;
+  concept?: string;
+  conceptText?: string;
+  acts?: OutlineAct[];
+  ledgerText?: string;
+  settings?: AiRequestSettings;
+}
+
+export interface OutlineConceptResult {
+  title: string;
+  concept: string;
+  conceptText: string;
+  genre: string;
+  theme: string;
+  protagonist: string;
+  worldview: string;
+}
+
+export interface OutlineSkeletonResult {
+  title: string;
+  concept: string;
+  acts: OutlineAct[];
+  coarseText: string;
+  skeletonText: string;
+  eventCount: number;
+  majorCount: number;
+  minorCount: number;
+}
+
+export interface OutlineEventsResult {
+  title: string;
+  concept: string;
+  acts: OutlineAct[];
+  coarseActs: OutlineAct[];
+  coarseText: string;
+  eventsText: string;
+  ledgerText: string;
+  ledger?: Record<string, unknown>;
+  minorCount: number;
+}
+
+export interface OutlineMinorResult {
+  title: string;
+  concept: string;
+  acts: OutlineAct[];
+  outlineText: string;
+  chapters: GeneratedChapterRow[];
+  ledgerText: string;
+  minorCount: number;
+}

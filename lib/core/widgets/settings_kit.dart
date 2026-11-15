@@ -178,7 +178,7 @@ _labelWidthCache =
 /// 用真实字体测量单行标签的自然宽度（含当前系统字号缩放）。
 ///
 /// 为什么不按 textScale 阈值猜：真机系统 font_scale=1.15 时恰好卡在
-/// 阈值边缘上（这之前真机就出现过 frequency_penalty 被截成
+/// 阈值边缘上（这之前真机就出现过 reasoning_effort 被截成
 /// `frequency_penal…` 的事故）。TextPainter 用 DefaultTextStyle 合并
 /// 标签样式，保证和真实渲染同一套字体 / fallback / 缩放，
 /// 任何字体、任何系统字号下都不会截断。
@@ -405,24 +405,55 @@ class SettingsCard extends StatelessWidget {
 class SettingsLabel extends StatelessWidget {
   final String label;
   final String? subtitle;
+
+  /// 参数说明。默认完全隐藏，只在标题后的 info 图标被点击时展示。
+  final String? help;
   final VoidCallback? onTap;
 
-  const SettingsLabel(this.label, {super.key, this.subtitle, this.onTap});
+  const SettingsLabel(
+    this.label, {
+    super.key,
+    this.subtitle,
+    this.help,
+    this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
-    final content = Column(
+    Widget titleText = Text(
+      label,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      // 与 _measureLabelWidth 共用同一份字体样式，测量/渲染不会漂移。
+      style: kSettingsRowLabelStyle.copyWith(color: p.textPrimary),
+    );
+    if (onTap != null) {
+      titleText = GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: titleText,
+      );
+    }
+
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisAlignment: MainAxisAlignment.center,
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(
-          label,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          // 与 _measureLabelWidth 共用同一份字体样式，测量/渲染不会漂移。
-          style: kSettingsRowLabelStyle.copyWith(color: p.textPrimary),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Flexible(child: titleText),
+            if (help != null) ...[
+              const SizedBox(width: 4),
+              SettingsHelpIcon(
+                title: label,
+                message: help!,
+                color: p.textTertiary,
+              ),
+            ],
+          ],
         ),
         if (subtitle != null) ...[
           const SizedBox(height: 2),
@@ -430,22 +461,103 @@ class SettingsLabel extends StatelessWidget {
             subtitle!,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 11,
-              color: p.textTertiary,
-              height: 1.25,
-            ),
+            style: TextStyle(fontSize: 11, color: p.textTertiary, height: 1.25),
           ),
         ],
       ],
     );
-    if (onTap == null) return content;
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      child: content,
+  }
+}
+
+/// 参数说明入口：默认只显示一个小 info 图标，说明内容在点击后才出现。
+///
+/// 说明用底部弹层展示而不是 Tooltip：手机端说明文字通常较长，弹层能完整
+/// 阅读、可滚动，也不会因长按/悬浮触发而显得隐蔽难发现。
+class SettingsHelpIcon extends StatelessWidget {
+  final String title;
+  final String message;
+  final Color? color;
+  final double size;
+
+  const SettingsHelpIcon({
+    super.key,
+    required this.title,
+    required this.message,
+    this.color,
+    this.size = 15,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.palette;
+    return Semantics(
+      button: true,
+      label: '查看 $title 说明',
+      child: InkResponse(
+        onTap: () =>
+            showSettingsHelpSheet(context, title: title, message: message),
+        radius: 14,
+        containedInkWell: false,
+        child: Padding(
+          padding: const EdgeInsets.all(2),
+          child: Icon(
+            Icons.info_outline_rounded,
+            size: size,
+            color: color ?? p.textTertiary,
+          ),
+        ),
+      ),
     );
   }
+}
+
+/// 展示单个设置的默认隐藏说明。
+Future<void> showSettingsHelpSheet(
+  BuildContext context, {
+  required String title,
+  required String message,
+}) {
+  final p = context.palette;
+  return showModalBottomSheet<void>(
+    context: context,
+    useSafeArea: true,
+    showDragHandle: true,
+    isScrollControlled: true,
+    backgroundColor: p.surface,
+    builder: (ctx) {
+      return ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(ctx).height * 0.72,
+        ),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                title,
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: p.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                message,
+                style: TextStyle(
+                  fontSize: 13.5,
+                  height: 1.65,
+                  color: p.textSecondary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    },
+  );
 }
 
 // ─── 行类型 ───
@@ -460,6 +572,9 @@ class SettingsTextRow extends StatefulWidget {
   final String initialValue;
   final ValueChanged<String> onChanged;
 
+  /// 默认隐藏的参数说明，点击标题后的 info 图标时展示。
+  final String? help;
+
   /// 输入格式化器：用户输入后调用，返回与显示同步的值（如裁剪数字范围）
   final String? Function(String input)? formatter;
 
@@ -472,6 +587,7 @@ class SettingsTextRow extends StatefulWidget {
     required this.hint,
     required this.initialValue,
     required this.onChanged,
+    this.help,
     this.formatter,
     this.keyboardType = TextInputType.text,
   });
@@ -524,6 +640,7 @@ class _SettingsTextRowState extends State<SettingsTextRow> {
         );
         final label = SettingsLabel(
           widget.label,
+          help: widget.help,
           onTap: () => _focusNode.requestFocus(),
         );
         final field = TextField(
@@ -563,7 +680,7 @@ class _SettingsTextRowState extends State<SettingsTextRow> {
             ),
             child: stacked
                 // 窄屏 / 大字号：标签独占一行，输入框整行宽、内容仍右对齐。
-                // 这样 frequency_penalty 这类长参数名永远不会被省略号截断。
+                // 这样 reasoning_effort 这类长参数名永远不会被省略号截断。
                 ? Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     mainAxisSize: MainAxisSize.min,
@@ -576,7 +693,7 @@ class _SettingsTextRowState extends State<SettingsTextRow> {
                       // Expanded 强制标签占满 6/11、值占满 5/11，右侧值的右边缘
                       // 才永远落在卡片 16dp 内边距这条线上。
                       // 标签给 6/11 而不是 5/11：真机 font_scale=1.15 时
-                      // frequency_penalty 实测约 131dp，5/11（129dp）正好放不下。
+                      // reasoning_effort 实测约 131dp，5/11（129dp）正好放不下。
                       Expanded(flex: 6, child: label),
                       const SizedBox(width: 12),
                       Expanded(flex: 5, child: field),
@@ -613,12 +730,16 @@ class SettingsSelectRow extends StatelessWidget {
   final List<SettingsSelectOption> options;
   final ValueChanged<String> onChanged;
 
+  /// 默认隐藏的参数说明，点击标题后的 info 图标时展示。
+  final String? help;
+
   const SettingsSelectRow({
     super.key,
     required this.label,
     required this.value,
     required this.options,
     required this.onChanged,
+    this.help,
   });
 
   @override
@@ -675,12 +796,7 @@ class SettingsSelectRow extends StatelessWidget {
             constraints.maxWidth - 2 * kSettingsCardPadH,
             label,
           );
-          final labelText = Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: kSettingsRowLabelStyle.copyWith(color: p.textPrimary),
-          );
+          final labelWidget = SettingsLabel(label, help: help);
           // 「当前值 + 小箭头」：箭头永远贴最右，值右对齐在箭头左侧。
           final valueRow = Row(
             mainAxisSize: MainAxisSize.min,
@@ -716,7 +832,7 @@ class SettingsSelectRow extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        labelText,
+                        labelWidget,
                         const SizedBox(height: 2),
                         Align(
                           alignment: Alignment.centerRight,
@@ -729,7 +845,7 @@ class SettingsSelectRow extends StatelessWidget {
                         // 与 SettingsTextRow 同理：Expanded 才能把行尾剩余空间吃掉，
                         // 让下拉箭头（= 值的右边缘）压在同一条 16dp 线上。
                         // 下拉标签都很短，保持 5:6 给值留更宽的位置。
-                        Expanded(flex: 5, child: labelText),
+                        Expanded(flex: 5, child: labelWidget),
                         const SizedBox(width: 12),
                         Expanded(
                           flex: 6,
@@ -759,6 +875,9 @@ class SettingsSelectRow extends StatelessWidget {
 class SettingsSwitchRow extends StatefulWidget {
   final String label;
   final String? subtitle;
+
+  /// 默认隐藏的参数说明，点击标题后的 info 图标时展示。
+  final String? help;
   final bool initialValue;
   final ValueChanged<bool> onChanged;
 
@@ -768,6 +887,7 @@ class SettingsSwitchRow extends StatefulWidget {
     required this.initialValue,
     required this.onChanged,
     this.subtitle,
+    this.help,
   });
 
   @override
@@ -781,6 +901,16 @@ class _SettingsSwitchRowState extends State<SettingsSwitchRow> {
   void initState() {
     super.initState();
     _value = widget.initialValue;
+  }
+
+  @override
+  void didUpdateWidget(covariant SettingsSwitchRow oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 让开关也能反映「别的设置联动改了值」的情况，例如 reasoning_effort
+    // 选择 none 时把 thinking 关掉。
+    if (oldWidget.initialValue != widget.initialValue) {
+      _value = widget.initialValue;
+    }
   }
 
   void _toggle() {
@@ -806,7 +936,11 @@ class _SettingsSwitchRowState extends State<SettingsSwitchRow> {
           child: Row(
             children: [
               Expanded(
-                child: SettingsLabel(widget.label, subtitle: widget.subtitle),
+                child: SettingsLabel(
+                  widget.label,
+                  subtitle: widget.subtitle,
+                  help: widget.help,
+                ),
               ),
               const SizedBox(width: 12),
               SizedBox(
@@ -847,6 +981,9 @@ class _SettingsSwitchRowState extends State<SettingsSwitchRow> {
 class SettingsSliderRow extends StatelessWidget {
   final String label;
   final String? subtitle;
+
+  /// 默认隐藏的参数说明，点击标题后的 info 图标时展示。
+  final String? help;
   final double value;
   final double min;
   final double max;
@@ -864,6 +1001,7 @@ class SettingsSliderRow extends StatelessWidget {
     required this.max,
     required this.onChanged,
     this.subtitle,
+    this.help,
     this.divisions,
     this.valueLabel,
   });
@@ -891,7 +1029,9 @@ class SettingsSliderRow extends StatelessWidget {
             constraints: const BoxConstraints(minHeight: 32),
             child: Row(
               children: [
-                Expanded(child: SettingsLabel(label, subtitle: subtitle)),
+                Expanded(
+                  child: SettingsLabel(label, subtitle: subtitle, help: help),
+                ),
                 const SizedBox(width: 12),
                 Text(
                   valueText,
@@ -1041,6 +1181,9 @@ class SettingsActionRow extends StatelessWidget {
 class SettingsPromptCard extends StatefulWidget {
   final String title;
 
+  /// 默认隐藏的说明：点击标题后的 info 图标时展示。
+  final String? help;
+
   /// 图标 chip 的图标；默认是一页笔记（提示词 / 说明类文本）。
   final IconData icon;
 
@@ -1069,6 +1212,7 @@ class SettingsPromptCard extends StatefulWidget {
     super.key,
     required this.title,
     required this.controller,
+    this.help,
     this.icon = Icons.edit_note_rounded,
     this.hintText,
     this.minLines = 3,
@@ -1133,15 +1277,29 @@ class _SettingsPromptCardState extends State<SettingsPromptCard> {
               ),
               const SizedBox(width: 10),
               Expanded(
-                child: Text(
-                  widget.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: p.textPrimary,
-                  ),
+                child: Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        widget.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: p.textPrimary,
+                        ),
+                      ),
+                    ),
+                    if (widget.help != null) ...[
+                      const SizedBox(width: 4),
+                      SettingsHelpIcon(
+                        title: widget.title,
+                        message: widget.help!,
+                        color: p.textTertiary,
+                      ),
+                    ],
+                  ],
                 ),
               ),
               if (widget.statusText != null)
@@ -1180,10 +1338,7 @@ class _SettingsPromptCardState extends State<SettingsPromptCard> {
               ),
               decoration: InputDecoration(
                 hintText: widget.hintText,
-                hintStyle: TextStyle(
-                  fontSize: 12.5,
-                  color: p.textTertiary,
-                ),
+                hintStyle: TextStyle(fontSize: 12.5, color: p.textTertiary),
                 border: InputBorder.none,
                 isDense: true,
                 contentPadding: EdgeInsets.zero,

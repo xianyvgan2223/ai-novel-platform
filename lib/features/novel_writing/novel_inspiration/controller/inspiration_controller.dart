@@ -10,6 +10,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../../../core/config/deepseek_models.dart';
 import '../data/inspiration_db_helper.dart';
+import '../../../chat/presentation/markdown_cleaner.dart';
 import '../domain/inspiration_models.dart';
 import '../service/inspiration_service.dart';
 
@@ -416,7 +417,8 @@ class InspirationController extends ChangeNotifier {
     if (sessionId == null) return;
     final generationNo = (await _db.maxGenerationNo(messageId)) + 1;
     for (final d in draftBranches) {
-      final content = d.text.trim();
+      // 生成结果统一去掉 Markdown 标记，避免气泡/导出/朗读里出现 **、##、代码块围栏。
+      final content = stripMarkdownForChat(d.text.trim());
       if (content.isEmpty) continue;
       await _db.insertBranch(
         InspirationBranch(
@@ -548,7 +550,7 @@ class InspirationController extends ChangeNotifier {
           errorText = '对话生成失败：$error';
         },
       );
-      final content = buffer.toString().trim();
+      final content = stripMarkdownForChat(buffer.toString().trim());
       if (content.isNotEmpty) {
         await _db.insertChatMessage(
           sessionId: sessionId,
@@ -716,7 +718,7 @@ class InspirationController extends ChangeNotifier {
         errorText = null;
         notifyListeners();
         await runMergeStream(_directApiParams());
-        content = draft.text.trim();
+        content = stripMarkdownForChat(draft.text.trim());
       }
       final sessionId = session?.id;
       if (content.isEmpty) {

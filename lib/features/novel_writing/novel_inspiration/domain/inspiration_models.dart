@@ -13,6 +13,21 @@ class InspirationSettings {
   final String systemPrompt;
   final bool enableThinking;
 
+  /// 思考强度：none / low / high / max（仅开启思考时生效）
+  final String reasoningEffort;
+
+  /// DeepSeek TTS 音色：stella / tide（旧字段，保留以兼容旧数据）
+  final String ttsVoice;
+
+  /// 朗读引擎：auto（系统优先，本地兜底）/ builtin（本地离线）/ deepseek:stella / deepseek:tide
+  final String ttsEngineId;
+
+  /// 朗读语速（0.75 ~ 4.0）
+  final double ttsRate;
+
+  /// 是否显示「回到底部」按钮（只在未到底时显示）
+  final bool showScrollToBottom;
+
   /// 一次请求并行生成多少个推演（默认 3）
   final int concurrency;
 
@@ -22,6 +37,11 @@ class InspirationSettings {
     this.maxTokens = 4096,
     this.systemPrompt = '',
     this.enableThinking = true,
+    this.reasoningEffort = 'high',
+    this.ttsVoice = 'stella',
+    this.ttsEngineId = 'auto',
+    this.ttsRate = 1.0,
+    this.showScrollToBottom = true,
     this.concurrency = 3,
   });
 
@@ -31,6 +51,11 @@ class InspirationSettings {
     int? maxTokens,
     String? systemPrompt,
     bool? enableThinking,
+    String? reasoningEffort,
+    String? ttsVoice,
+    String? ttsEngineId,
+    double? ttsRate,
+    bool? showScrollToBottom,
     int? concurrency,
   }) => InspirationSettings(
     model: model ?? this.model,
@@ -38,6 +63,11 @@ class InspirationSettings {
     maxTokens: maxTokens ?? this.maxTokens,
     systemPrompt: systemPrompt ?? this.systemPrompt,
     enableThinking: enableThinking ?? this.enableThinking,
+    reasoningEffort: reasoningEffort ?? this.reasoningEffort,
+    ttsVoice: ttsVoice ?? this.ttsVoice,
+    ttsEngineId: ttsEngineId ?? this.ttsEngineId,
+    ttsRate: ttsRate ?? this.ttsRate,
+    showScrollToBottom: showScrollToBottom ?? this.showScrollToBottom,
     concurrency: concurrency ?? this.concurrency,
   );
 
@@ -47,6 +77,11 @@ class InspirationSettings {
     'max_tokens': maxTokens,
     'system_prompt': systemPrompt,
     'enable_thinking': enableThinking ? 1 : 0,
+    'reasoning_effort': reasoningEffort,
+    'tts_voice': ttsVoice,
+    'tts_engine': ttsEngineId,
+    'tts_rate': ttsRate,
+    'show_scroll_to_bottom': showScrollToBottom ? 1 : 0,
     'concurrency': concurrency,
   };
 
@@ -59,6 +94,15 @@ class InspirationSettings {
         enableThinking:
             map['enable_thinking'] == null ||
             (map['enable_thinking'] as int?) == 1,
+        reasoningEffort: map['reasoning_effort'] as String? ?? 'high',
+        ttsVoice: map['tts_voice'] as String? ?? 'stella',
+        ttsEngineId: map['tts_engine'] as String? ?? 'auto',
+        ttsRate: ((map['tts_rate'] as num?)?.toDouble() ?? 1.0).clamp(
+          0.75,
+          4.0,
+        ),
+        showScrollToBottom: map['show_scroll_to_bottom'] == null ||
+            (map['show_scroll_to_bottom'] as int?) == 1,
         concurrency: ((map['concurrency'] as int?) ?? 3).clamp(1, 10),
       );
 }

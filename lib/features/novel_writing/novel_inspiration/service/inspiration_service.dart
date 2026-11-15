@@ -422,7 +422,10 @@ class NovelInspirationService {
     'model': settings.model,
     'temperature': settings.temperature,
     'max_tokens': settings.maxTokens,
-    if (!settings.enableThinking) 'thinking': {'type': 'disabled'},
+    if (!settings.enableThinking)
+      'thinking': {'type': 'disabled'}
+    else if (settings.reasoningEffort != 'high')
+      'reasoning_effort': settings.reasoningEffort,
   };
 
   Future<void> stream({

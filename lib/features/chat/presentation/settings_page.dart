@@ -7,7 +7,7 @@
 //   流式交互 / 去重与结构化 / 推理与调试 / 数据管理）；
 // - 每行统一「左标签 + 右值」：值一律右对齐，下拉 = 值 + 小箭头、开关贴右，
 //   所有右边缘都落在卡片 16dp 内边距这条线上；窄屏 / 大字号时长标签会自动
-//   改成两行堆叠，保证 frequency_penalty 这类参数名不被省略号截断；
+//   改成两行堆叠，保证 reasoning_effort 这类参数名不被省略号截断；
 // - 除 API Key 这一处「焦点输入」外不再画灰底输入框：文本参数是一行无框、
 //   右对齐的输入，聚焦时只出现一条 1px 主色下划线；
 // - 数据管理是四条动作行（导出 / 导入 / 数据同步 / 检查更新），危险操作只用红色
@@ -185,15 +185,21 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           isLoaded: c.isLoaded,
           engine: _normalizeEngine(c.searchEngine),
           stream: c.stream,
+          thinking: c.thinking,
+          // 这些是 Stateless 的 SettingsSelectRow 直接展示的值。
+          // 只把它们纳入订阅：下拉选中后页面会重建，右侧当前值立即刷新；
+          // 文本输入 / 开关仍由各自 StatefulWidget 持有，不会每敲一个字重建整页。
+          reasoningEffort: c.reasoningEffort,
+          responseFormat: c.responseFormat,
+          toolChoice: c.toolChoice,
+          safetyCheck: c.safetyCheck,
         ),
       ),
     );
     if (!form.isLoaded) {
       return Scaffold(
         backgroundColor: p.background,
-        body: Center(
-          child: CircularProgressIndicator(color: p.accent),
-        ),
+        body: Center(child: CircularProgressIndicator(color: p.accent)),
       );
     }
 
@@ -230,12 +236,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 key: _k('theme_mode'),
                 label: '主题',
                 value: themeModeValue,
+                help: '只改变界面外观，不影响对话内容或 API 参数。跟随系统时会自动适配手机的浅色/深色模式。',
                 options: const [
-                  SettingsSelectOption(
-                    'system',
-                    '跟随系统',
-                    shortLabel: '跟随系统',
-                  ),
+                  SettingsSelectOption('system', '跟随系统', shortLabel: '跟随系统'),
                   SettingsSelectOption('light', '浅色', shortLabel: '浅色'),
                   SettingsSelectOption('dark', '深色', shortLabel: '深色'),
                 ],
@@ -256,15 +259,22 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           ),
           SettingsCard(
             children: [
-              _ApiKeyCard(initialValue: ctrl.apiKey, onChanged: ctrl.setApiKey),
+              _ApiKeyCard(
+                initialValue: ctrl.apiKey,
+                onChanged: ctrl.setApiKey,
+                help:
+                    'DeepSeek 官方 API Key，仅保存在本机数据库，不会上传到其他服务器。'
+                    '对话请求、DeepSeek 官方联网搜索共用这一把 Key；'
+                    'Key 以 sk- 开头，可在 DeepSeek 开放平台创建。',
+              ),
             ],
           ),
 
-          // ── 2. 模型与联网搜索 ──
+          // ── 2. 模型与推理 ──
           const SettingsSectionHeader(
             icon: Icons.memory_rounded,
-            title: '模型与联网搜索',
-            subtitle: '选择对话模型与联网搜索行为',
+            title: '模型与推理',
+            subtitle: '官方 Chat Completions 的模型与思考参数',
           ),
           SettingsCard(
             children: [
@@ -272,11 +282,53 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               _ModelSelector(
                 initialValue: ctrl.model,
                 onChanged: ctrl.setModel,
+                help:
+                    'deepseek-flash 响应更快，适合日常对话；DeepSeek Pro（请求 ID deepseek-v4-pro）能力更强。'
+                    '自定义模型会按原样发送模型 ID，由 API 或代理校验。',
               ),
+              SettingsSwitchRow(
+                key: _k('thinking'),
+                label: 'thinking',
+                subtitle: '先思考再回答',
+                help:
+                    '开启后模型会先输出 reasoning_content 思考过程，再给出最终回答；'
+                    '思考内容会消耗输出 token。关闭时会显式发送 thinking={type:disabled}。',
+                initialValue: ctrl.thinking,
+                onChanged: ctrl.setThinking,
+              ),
+              SettingsSelectRow(
+                key: _k('reasoning_effort'),
+                label: 'reasoning_effort',
+                value: ctrl.reasoningEffort,
+                help:
+                    '思考强度：none 关闭思考，low 快速思考，high 默认强度，max 最深思考。'
+                    'none 会把 thinking 一并关闭；选择 low/high/max 时请求只发送 reasoning_effort，避免被 thinking 覆盖。',
+                options: const [
+                  SettingsSelectOption('none', 'none · 关闭思考'),
+                  SettingsSelectOption('low', 'low · 快速'),
+                  SettingsSelectOption('high', 'high · 默认'),
+                  SettingsSelectOption('max', 'max · 最深'),
+                ],
+                onChanged: ctrl.setReasoningEffort,
+              ),
+            ],
+          ),
+
+          // ── 3. 联网搜索与工具 ──
+          const SettingsSectionHeader(
+            icon: Icons.travel_explore_rounded,
+            title: '联网搜索与工具',
+            subtitle: '模型可调用搜索工具获取实时信息',
+          ),
+          SettingsCard(
+            children: [
               SettingsSelectRow(
                 key: _k('search_engine'),
                 label: '联网搜索',
                 value: engine,
+                help:
+                    '开启后，聊天请求会注入一个 web_search function tool。'
+                    'DeepSeek 官方搜索复用同一把 API Key；百度千帆需要单独填写 Key。',
                 options: const [
                   SettingsSelectOption(
                     'deepseek',
@@ -294,9 +346,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 SettingsTextRow(
                   key: _k('baidu_api_key'),
                   label: '百度 API Key',
-                  // 提示文案要在 1.15/1.3 倍字号下仍能整行放下，
-                  // 否则空输入时会被省略号截断（真机 1.15 倍实测）。
                   hint: '百度千帆 Token',
+                  help: '仅百度千帆搜索需要；DeepSeek 官方搜索不使用此 Key。',
                   initialValue: ctrl.baiduApiKey,
                   onChanged: ctrl.setBaiduApiKey,
                 ),
@@ -305,6 +356,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   key: _k('search_count'),
                   label: '最大搜索条数',
                   hint: '默认 5，上限 20',
+                  help: '每次搜索注入上下文的结果条数。条数越多，回答信息越全，但 token 和耗时也越高。',
                   keyboardType: const TextInputType.numberWithOptions(
                     decimal: true,
                   ),
@@ -316,6 +368,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   key: _k('search_freshness'),
                   label: '时间筛选',
                   hint: '留空不限',
+                  help:
+                      '搜索接口的时间过滤参数，例如可填 day / week / month；具体格式由搜索来源决定，留空表示不限。',
                   initialValue: ctrl.searchFreshness,
                   onChanged: ctrl.setSearchFreshness,
                 ),
@@ -325,13 +379,29 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   key: _k('search_need_content'),
                   label: '抓取网页正文',
                   subtitle: '抓取正文后回答更准，但更慢',
+                  help: '开启后搜索接口会返回网页正文并注入上下文，回答更准确，但会显著增加 token 消耗。',
                   initialValue: ctrl.searchNeedContent,
                   onChanged: ctrl.setSearchNeedContent,
+                ),
+              if (engine != 'off')
+                SettingsSelectRow(
+                  key: _k('tool_choice'),
+                  label: 'tool_choice',
+                  value: ctrl.toolChoice,
+                  help:
+                      '官方工具调用策略：auto 由模型决定是否搜索；none 禁止调用工具；'
+                      'required 强制调用搜索（思考模式下官方不支持 required，会自动降级为 auto）。',
+                  options: const [
+                    SettingsSelectOption('auto', 'auto · 由模型决定'),
+                    SettingsSelectOption('none', 'none · 禁止工具'),
+                    SettingsSelectOption('required', 'required · 必须搜索'),
+                  ],
+                  onChanged: ctrl.setToolChoice,
                 ),
             ],
           ),
 
-          // ── 3. 生成参数 ──
+          // ── 4. 生成参数 ──
           const SettingsSectionHeader(
             icon: Icons.tune_rounded,
             title: '生成参数',
@@ -343,6 +413,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 key: _k('temperature'),
                 label: 'temperature',
                 hint: '0.0 ~ 2.0',
+                help: '采样温度：越高越发散，越低越稳定。思考模式下官方会忽略此参数。',
                 keyboardType: const TextInputType.numberWithOptions(
                   decimal: true,
                 ),
@@ -354,6 +425,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 key: _k('top_p'),
                 label: 'top_p',
                 hint: '0.0 ~ 1.0',
+                help:
+                    '核采样：只从累计概率前 top_p 的 token 中采样。通常只调 temperature 或 top_p 其中一项；'
+                    '不同模型/思考模式的实际生效值不同。',
                 keyboardType: const TextInputType.numberWithOptions(
                   decimal: true,
                 ),
@@ -364,6 +438,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 key: _k('max_tokens'),
                 label: 'max_tokens',
                 hint: '上限 384000',
+                help:
+                    '单次请求最多生成多少 token，官方允许范围 1~384000。'
+                    '未设置时非思考默认 8K、思考默认 64K；值越大越慢、越贵。',
                 keyboardType: const TextInputType.numberWithOptions(
                   decimal: true,
                 ),
@@ -375,19 +452,33 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   return parsed.clamp(1, 384000).toString();
                 },
               ),
+              SettingsSelectRow(
+                key: _k('response_format'),
+                label: 'response_format',
+                value: ctrl.responseFormat == 'json_object'
+                    ? 'json_object'
+                    : 'text',
+                help:
+                    'text：普通文本；json_object：要求模型输出 JSON 对象。'
+                    'JSON 模式仍需在系统提示词里明确要求模型输出 JSON，否则内容可能被清空。',
+                options: const [
+                  SettingsSelectOption('text', 'text · 普通文本'),
+                  SettingsSelectOption('json_object', 'json_object · JSON'),
+                ],
+                onChanged: ctrl.setResponseFormat,
+              ),
               SettingsTextRow(
                 key: _k('stop'),
                 label: 'stop',
-                // 提示文案要在 1.3 倍字号下仍能整行放下（原「停止词，逗号分隔」
-                // 在 1.3 倍时超出值区域会被省略号截断）。
                 hint: '多个用逗号分隔',
+                help: '最多 16 个停止字符串，命中任意一个即停止生成；用中文或英文逗号分隔。',
                 initialValue: ctrl.stop,
                 onChanged: ctrl.setStop,
               ),
             ],
           ),
 
-          // ── 4. 流式交互 ──
+          // ── 5. 流式交互 ──
           const SettingsSectionHeader(
             icon: Icons.bolt_rounded,
             title: '流式交互',
@@ -399,80 +490,38 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 key: _k('stream'),
                 label: 'stream',
                 subtitle: '逐字返回，打字机效果',
+                help: '开启后通过 SSE 逐块返回；关闭则等完整结果返回后一次性显示。',
                 initialValue: ctrl.stream,
                 onChanged: ctrl.setStream,
               ),
-              // stream_options 仅在流式开启时显示
               if (form.stream)
-                SettingsTextRow(
-                  key: _k('stream_options'),
-                  label: 'stream_options',
-                  hint: 'JSON 格式',
-                  initialValue: ctrl.streamOptions,
-                  onChanged: ctrl.setStreamOptions,
+                SettingsSwitchRow(
+                  key: _k('stream_include_usage'),
+                  label: 'stream_options.include_usage',
+                  subtitle: '返回 token 用量',
+                  help:
+                      '开启后流式响应的最后一个 chunk 会携带 usage 字段，便于统计 prompt/completion token；'
+                      '仅 stream=true 时可用，关闭 stream 时会自动省略。',
+                  initialValue: ctrl.streamIncludeUsage,
+                  onChanged: ctrl.setStreamIncludeUsage,
                 ),
             ],
           ),
-
-          // ── 5. 去重与结构化 ──
-          const SettingsSectionHeader(
-            icon: Icons.filter_alt_rounded,
-            title: '去重与结构化',
-            subtitle: '减少重复用词，约束输出格式',
-          ),
-          SettingsCard(
-            children: [
-              SettingsTextRow(
-                key: _k('frequency_penalty'),
-                label: 'frequency_penalty',
-                hint: '-2.0 ~ 2.0',
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
-                initialValue: ctrl.frequencyPenalty.toString(),
-                onChanged: (v) =>
-                    ctrl.setFrequencyPenalty(double.tryParse(v) ?? 0.0),
-              ),
-              SettingsTextRow(
-                key: _k('presence_penalty'),
-                label: 'presence_penalty',
-                hint: '-2.0 ~ 2.0',
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
-                initialValue: ctrl.presencePenalty.toString(),
-                onChanged: (v) =>
-                    ctrl.setPresencePenalty(double.tryParse(v) ?? 0.0),
-              ),
-              SettingsTextRow(
-                key: _k('response_format'),
-                label: 'response_format',
-                hint: 'text / json_object',
-                initialValue: ctrl.responseFormat,
-                onChanged: ctrl.setResponseFormat,
-              ),
-            ],
-          ),
-
-          // ── 6. 推理与调试 ──
+          // ── 6. 调试与 DeepSeek 扩展 ──
           const SettingsSectionHeader(
             icon: Icons.psychology_rounded,
-            title: '推理与调试',
-            subtitle: '推理过程、上下文轮数与调试参数',
+            title: '调试与扩展',
+            subtitle: '日志概率、安全审核、会话标题与本地上下文',
           ),
           SettingsCard(
             children: [
-              SettingsSwitchRow(
-                key: _k('thinking'),
-                label: 'thinking',
-                subtitle: '返回推理过程，便于核对回答依据',
-                initialValue: ctrl.thinking,
-                onChanged: ctrl.setThinking,
-              ),
               SettingsSwitchRow(
                 key: _k('logprobs'),
                 label: 'logprobs',
                 subtitle: '返回每个 token 的对数概率',
+                help:
+                    '官方调试参数。开启后响应会包含每个输出 token 的对数概率；'
+                    '流式模式下也会随 chunk 返回，普通聊天一般无需开启。',
                 initialValue: ctrl.logprobs,
                 onChanged: ctrl.setLogprobs,
               ),
@@ -480,35 +529,60 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 key: _k('top_logprobs'),
                 label: 'top_logprobs',
                 hint: '0 ~ 20',
+                help:
+                    '每个输出位置额外返回概率最高的 N 个 token 及其对数概率，范围 0~20。'
+                    '必须先开启 logprobs，否则 API 会拒绝。',
                 keyboardType: const TextInputType.numberWithOptions(
                   decimal: true,
                 ),
                 initialValue: ctrl.topLogprobs.toString(),
                 onChanged: (v) => ctrl.setTopLogprobs(int.tryParse(v) ?? 0),
+                formatter: (v) {
+                  final parsed = int.tryParse(v);
+                  if (parsed == null) return v;
+                  return parsed.clamp(0, 20).toString();
+                },
+              ),
+              SettingsSelectRow(
+                key: _k('safety_check'),
+                label: 'safety_check',
+                value: ctrl.safetyCheck,
+                help:
+                    'DeepSeek 扩展风控参数。high 开启基础风控，审核模型输入与输出；'
+                    'low 为默认检查，等同于不传此参数。开启 high 可能额外消耗安全 token。',
+                options: const [
+                  SettingsSelectOption('low', 'low · 默认检查'),
+                  SettingsSelectOption('high', 'high · 基础风控'),
+                ],
+                onChanged: ctrl.setSafetyCheck,
+              ),
+              SettingsSwitchRow(
+                key: _k('title_enabled'),
+                label: 'title.enabled',
+                subtitle: '返回会话标题',
+                help:
+                    'DeepSeek 扩展参数。开启后 API 会额外返回一个简短会话标题，'
+                    '本 App 目前只发送参数，不自动覆盖已有会话标题。',
+                initialValue: ctrl.titleEnabled,
+                onChanged: ctrl.setTitleEnabled,
               ),
               SettingsTextRow(
-                key: _k('logit_bias'),
-                label: 'logit_bias',
-                hint: 'JSON 格式',
-                initialValue: ctrl.logitBias,
-                onChanged: ctrl.setLogitBias,
-              ),
-              SettingsTextRow(
-                key: _k('n'),
-                label: 'n',
-                hint: '生成数量',
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
-                initialValue: ctrl.n.toString(),
-                onChanged: (v) => ctrl.setN(int.tryParse(v) ?? 1),
+                key: _k('user_id'),
+                label: 'user_id',
+                hint: '业务用户标识',
+                help:
+                    '用于区分业务侧用户的标识，建议仅使用字母、数字、下划线、连字符，'
+                    'UTF-8 不超过 512 字节；不要填写真实姓名、手机号等隐私信息。留空则不发送。',
+                initialValue: ctrl.userId,
+                onChanged: ctrl.setUserId,
               ),
               SettingsTextRow(
                 key: _k('context_rounds'),
                 label: '上下文轮数',
-                // 默认值 10 作为当前值已经显示在右侧，提示只留取值范围，
-                // 保证 1.15/1.3 倍字号下整行放得下、不出现省略号。
                 hint: '1 ~ 100',
+                help:
+                    '本地参数，不是官方 API 字段：发送请求时只带最近 N 轮用户消息；'
+                    '更早的对话会被摘要压缩后作为 system 消息注入。轮数越大越占 token。',
                 keyboardType: const TextInputType.numberWithOptions(
                   decimal: true,
                 ),
@@ -579,10 +653,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             child: Center(
               child: Text(
                 '当前版本 v$kAppVersion',
-                style: TextStyle(
-                  fontSize: 11,
-                  color: p.textTertiary,
-                ),
+                style: TextStyle(fontSize: 11, color: p.textTertiary),
               ),
             ),
           ),
@@ -603,8 +674,13 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 class _ApiKeyCard extends StatefulWidget {
   final String initialValue;
   final ValueChanged<String> onChanged;
+  final String? help;
 
-  const _ApiKeyCard({required this.initialValue, required this.onChanged});
+  const _ApiKeyCard({
+    required this.initialValue,
+    required this.onChanged,
+    this.help,
+  });
 
   @override
   State<_ApiKeyCard> createState() => _ApiKeyCardState();
@@ -656,11 +732,7 @@ class _ApiKeyCardState extends State<_ApiKeyCard> {
                   color: p.accentSoft,
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: Icon(
-                  Icons.vpn_key_rounded,
-                  size: 17,
-                  color: p.accent,
-                ),
+                child: Icon(Icons.vpn_key_rounded, size: 17, color: p.accent),
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -675,6 +747,14 @@ class _ApiKeyCardState extends State<_ApiKeyCard> {
                   ),
                 ),
               ),
+              if (widget.help != null) ...[
+                const SizedBox(width: 4),
+                SettingsHelpIcon(
+                  title: 'DeepSeek API Key',
+                  message: widget.help!,
+                  color: p.textTertiary,
+                ),
+              ],
               _KeyStatusChip(configured: configured),
             ],
           ),
@@ -702,10 +782,7 @@ class _ApiKeyCardState extends State<_ApiKeyCard> {
                     enableSuggestions: false,
                     textInputAction: TextInputAction.done,
                     cursorColor: p.accent,
-                    style: TextStyle(
-                      fontSize: 13.5,
-                      color: p.textSecondary,
-                    ),
+                    style: TextStyle(fontSize: 13.5, color: p.textSecondary),
                     onChanged: (v) {
                       // 首字符输入/清空时要刷新「已配置」徽标，所以这里 setState。
                       setState(() {});
@@ -794,7 +871,12 @@ class _KeyStatusChip extends StatelessWidget {
 class _ModelSelector extends StatefulWidget {
   final String initialValue;
   final ValueChanged<String> onChanged;
-  const _ModelSelector({required this.initialValue, required this.onChanged});
+  final String? help;
+  const _ModelSelector({
+    required this.initialValue,
+    required this.onChanged,
+    this.help,
+  });
 
   @override
   State<_ModelSelector> createState() => _ModelSelectorState();
@@ -842,6 +924,7 @@ class _ModelSelectorState extends State<_ModelSelector> {
           label: '模型',
           value: _isCustom ? 'custom' : _value,
           options: _options,
+          help: widget.help,
           onChanged: (v) {
             if (v == 'custom') {
               setState(() => _isCustom = true);
@@ -869,6 +952,7 @@ class _ModelSelectorState extends State<_ModelSelector> {
             key: _k('custom_model'),
             label: '自定义模型',
             hint: '输入模型标识',
+            help: '直接填写官方或代理支持的模型 ID；未知标识会原样发给 API，由服务端校验。',
             initialValue: _customCtrl.text,
             onChanged: (v) => widget.onChanged(v),
           ),

@@ -96,6 +96,18 @@ function resetPrompt() {
           <el-form-item label="大纲系统提示词">
             <el-input v-model="outlineSettings.systemPrompt" type="textarea" :rows="6" />
           </el-form-item>
+          <el-form-item label="粗骨架检查点">
+            <el-switch v-model="outlineSettings.pauseAfterSkeleton" />
+            <span class="field-hint inline">三幕粗骨架生成后暂停，可编辑后再继续</span>
+          </el-form-item>
+          <el-form-item label="大事件检查点">
+            <el-switch v-model="outlineSettings.pauseAfterEvents" />
+            <span class="field-hint inline">大事件精写完成后暂停，可编辑后再继续</span>
+          </el-form-item>
+          <el-form-item label="小事件检查点">
+            <el-switch v-model="outlineSettings.pauseAfterMinor" />
+            <span class="field-hint inline">全部小事件展开后暂停，可编辑全文</span>
+          </el-form-item>
         </template>
 
         <template v-else-if="isChapter">

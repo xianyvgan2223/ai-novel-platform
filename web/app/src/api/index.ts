@@ -8,6 +8,7 @@ import type {
   OutlineChatPayload,
   OutlineGeneratePayload, OutlineSplitPayload, OutlineSplitResult, PagedMeta, Row, Stats, SyncOverview,
   SyncRequestInfo, WriteResult, RagStatus, RagScene, RagJob, RagImportResult, RagSearchResult, RagImitateResult,
+  OutlineStagePayload,
 } from './types';
 import type { StreamHandlers } from './client';
 
@@ -81,6 +82,18 @@ export const api = {
       /** AI 写战斗：按三要素生成战斗场面（SSE） */
       generateBattle: (payload: BattleGeneratePayload, handlers: StreamHandlers, signal?: AbortSignal) =>
         postStream('/api/writing/novel/battle/generate', payload, handlers, signal),
+
+      /** 分阶段一键生成：定调 / 粗骨架 / 大事件 / 小事件 */
+      outlineStages: {
+        concept: (payload: OutlineStagePayload, handlers: StreamHandlers, signal?: AbortSignal) =>
+          postStream('/api/writing/novel/outline/stages/concept', payload, handlers, signal),
+        skeleton: (payload: OutlineStagePayload, handlers: StreamHandlers, signal?: AbortSignal) =>
+          postStream('/api/writing/novel/outline/stages/skeleton', payload, handlers, signal),
+        events: (payload: OutlineStagePayload, handlers: StreamHandlers, signal?: AbortSignal) =>
+          postStream('/api/writing/novel/outline/stages/events', payload, handlers, signal),
+        minor: (payload: OutlineStagePayload, handlers: StreamHandlers, signal?: AbortSignal) =>
+          postStream('/api/writing/novel/outline/stages/minor', payload, handlers, signal),
+      },
     },
   },
 

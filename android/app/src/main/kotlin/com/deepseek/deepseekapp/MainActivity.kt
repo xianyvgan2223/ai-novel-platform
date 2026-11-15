@@ -72,6 +72,9 @@ class MainActivity : FlutterActivity() {
     /** 内置离线朗读（sherpa-onnx）：系统没有 TTS 引擎时兜底，见 LocalTtsChannel */
     private var localTts: LocalTtsChannel? = null
 
+    /** DeepSeek 官方 TTS 音频播放通道（Flutter 下载 WAV，原生只播放） */
+    private var deepSeekTts: DeepSeekTtsChannel? = null
+
     /** 应用内更新：读取 versionCode、调起 APK 安装器，见 AppUpdateChannel */
     private var appUpdate: AppUpdateChannel? = null
 
@@ -97,6 +100,10 @@ class MainActivity : FlutterActivity() {
         // Dart 侧一套回调就能同时接住系统引擎与内置引擎的「读完了」
         localTts = LocalTtsChannel(applicationContext)
         localTts?.register(flutterEngine.dartExecutor.binaryMessenger)
+
+        // DeepSeek TTS：Flutter 请求官方接口并下载 WAV，原生 MediaPlayer 播放。
+        deepSeekTts = DeepSeekTtsChannel(flutterEngine.dartExecutor.binaryMessenger)
+        deepSeekTts?.register()
 
         // 应用内更新通道：读 versionCode / 检查安装权限 / 调起安装器
         appUpdate = AppUpdateChannel(applicationContext)

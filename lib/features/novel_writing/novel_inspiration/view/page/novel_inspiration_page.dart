@@ -12,7 +12,9 @@ import 'package:deepseekapp/core/theme/app_palette.dart';
 import '../../../outline_editing/view/page/outline_edit_chapter_list_page.dart';
 import '../../../outline_editing/view/page/outline_edit_novel_list_page.dart';
 import '../../../shared/domain/outline_chapter.dart';
+import '../../../../chat/presentation/markdown_cleaner.dart';
 import '../../controller/inspiration_controller.dart';
+import '../../controller/inspiration_tts_controller.dart';
 import '../../domain/inspiration_models.dart';
 import '../widget/inspiration_history_drawer.dart';
 import '../widget/inspiration_theme.dart';
@@ -33,6 +35,7 @@ enum _InspirationMode { chat, deduction }
 
 class _NovelInspirationPageState extends State<NovelInspirationPage> {
   final InspirationController _controller = InspirationController();
+  late final InspirationTtsController _tts;
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final TextEditingController _inputCtrl = TextEditingController();
   final ScrollController _scrollCtrl = ScrollController();
@@ -54,18 +57,115 @@ class _NovelInspirationPageState extends State<NovelInspirationPage> {
   bool _lastBusy = false;
   bool _lastChatGenerating = false;
   String? _lastErrorShown;
+  bool _atBottom = true;
+  Timer? _uiRefreshTimer;
+  final Map<String, String> _cleanCache = <String, String>{};
+
+  /// 只有用户主动进入「选择文字」模式的推演才挂 SelectableText。
+  /// 普通浏览/滚动用轻量 Text，避免每个气泡都承担文本选择布局开销。
+  final Set<String> _selectionModeKeys = <String>{};
+
+  /// 推演正文的展开状态：用 messageId + 当前版本号做 key，
+  /// 因为旧版 `_ExpandableProse` 自己持有状态，翻页/重建后会串。
+  final Set<String> _expandedContentKeys = <String>{};
 
   @override
   void initState() {
     super.initState();
+    _tts = InspirationTtsController();
+    _tts.addListener(_onTtsChanged);
     _controller.addListener(_onControllerChanged);
+    _scrollCtrl.addListener(_handleScrollPosition);
     _controller.init();
+  }
+
+  void _handleScrollPosition() {
+    _updateAtBottom(_scrollCtrl.hasClients ? _scrollCtrl.position : null);
+  }
+
+  void _updateAtBottom(ScrollMetrics? metrics) {
+    final m = metrics ?? (_scrollCtrl.hasClients ? _scrollCtrl.position : null);
+    if (m == null || !m.hasContentDimensions) return;
+    final atBottom = m.pixels >= m.maxScrollExtent - 12;
+    if (atBottom != _atBottom && mounted) {
+      setState(() => _atBottom = atBottom);
+    }
+  }
+
+  void _scheduleUiRefresh() {
+    if (!mounted || _uiRefreshTimer != null) return;
+    _uiRefreshTimer = Timer(const Duration(milliseconds: 140), () {
+      _uiRefreshTimer = null;
+      if (mounted) setState(() {});
+    });
+  }
+
+  String _cleanContent(String raw) {
+    final cached = _cleanCache[raw];
+    if (cached != null) return cached;
+    final cleaned = stripMarkdownForChat(raw);
+    // 生成中的正文每个 chunk 都是新字符串，保留太多会白占内存；
+    // 只缓存最近一小批，主要收益来自已经落定的历史/当前版本。
+    if (_cleanCache.length >= 12) _cleanCache.clear();
+    _cleanCache[raw] = cleaned;
+    return cleaned;
+  }
+
+  void _onTtsChanged() {
+    if (!mounted) return;
+    setState(() {});
+    if (_tts.error.isNotEmpty) {
+      final message = _tts.error;
+      _tts.error = '';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message, style: const TextStyle(fontSize: 12.5)),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
+  }
+
+  Future<void> _toggleRead(InspirationBranch branch) async {
+    final id = branch.id;
+    if (id == null || branch.content.trim().isEmpty) return;
+    await _tts.toggle(
+      branchId: id,
+      text: branch.content,
+      engineId: _controller.settings.ttsEngineId,
+      rate: _controller.settings.ttsRate,
+    );
+  }
+
+  /// 选中正文后从系统选择菜单「朗读选中」调用：只读选中的那段。
+  Future<void> _readSelected(InspirationBranch branch, String text) async {
+    final id = branch.id;
+    if (id == null || text.trim().isEmpty) return;
+    await _tts.speak(
+      branchId: id,
+      text: text,
+      engineId: _controller.settings.ttsEngineId,
+      rate: _controller.settings.ttsRate,
+    );
+  }
+
+  Future<void> _scrollToBottom() async {
+    if (!_scrollCtrl.hasClients) return;
+    await _scrollCtrl.animateTo(
+      _scrollCtrl.position.maxScrollExtent,
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOutCubic,
+    );
   }
 
   @override
   void dispose() {
     _controller.removeListener(_onControllerChanged);
+    _tts.removeListener(_onTtsChanged);
+    _tts.dispose();
+    _uiRefreshTimer?.cancel();
     _inputCtrl.dispose();
+    _scrollCtrl.removeListener(_handleScrollPosition);
     _scrollCtrl.dispose();
     _inlineCtrl.dispose();
     _inlineFocus.dispose();
@@ -76,7 +176,16 @@ class _NovelInspirationPageState extends State<NovelInspirationPage> {
   void _onControllerChanged() {
     if (!mounted) return;
     _syncVersions();
-    setState(() {});
+    // 流式生成时 controller 约每 80ms notify 一次；如果每个 notify 都 setState，
+    // 整页（含所有可见气泡、SelectableText、Markdown 清洗）会反复重建，低端机
+    // 直接掉帧。这里把生成期间的 UI 刷新合并到 140ms 一次；非生成状态立即刷新。
+    if (_controller.busy || _controller.chatGenerating) {
+      _scheduleUiRefresh();
+    } else {
+      _uiRefreshTimer?.cancel();
+      _uiRefreshTimer = null;
+      setState(() {});
+    }
     final sessionId = _controller.session?.id;
     if (sessionId != _lastSessionId) {
       _lastSessionId = sessionId;
@@ -836,12 +945,49 @@ class _NovelInspirationPageState extends State<NovelInspirationPage> {
 
   Widget _buildPageBody(AppPalette p) {
     final viewing = _viewRevisionMessageId != null;
+    // 列表首次布局/内容变高时也要重新判断是否到底；只靠滚动监听会漏掉
+    // 「没滚动但内容已经超过一屏」的情况。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _updateAtBottom(null);
+    });
     return Column(
       children: [
         if (viewing) _buildRevisionBanner(p),
-        Expanded(child: _buildConversation(p)),
+        Expanded(
+          child: Stack(
+            children: [
+              _buildConversation(p),
+              if (_controller.settings.showScrollToBottom && !_atBottom)
+                Positioned(
+                  right: 10,
+                  bottom: 10,
+                  child: _scrollToBottomButton(p),
+                ),
+            ],
+          ),
+        ),
         if (!viewing) _buildComposer(p),
       ],
+    );
+  }
+
+  Widget _scrollToBottomButton(AppPalette p) {
+    return Material(
+      color: p.surfaceElevated,
+      elevation: 3,
+      shape: const CircleBorder(),
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: _scrollToBottom,
+        child: Padding(
+          padding: const EdgeInsets.all(7),
+          child: Icon(
+            Icons.keyboard_arrow_down_rounded,
+            size: 20,
+            color: p.textSecondary,
+          ),
+        ),
+      ),
     );
   }
 
@@ -1082,31 +1228,44 @@ class _NovelInspirationPageState extends State<NovelInspirationPage> {
         !_controller.chatGenerating) {
       return _buildEmptyState(p);
     }
-    return ListView.builder(
-      controller: _scrollCtrl,
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
-      itemCount: visible.length + (showChatStreaming ? 1 : 0),
-      itemBuilder: (context, index) {
-        if (index >= visible.length) {
-          return _buildChatMessage(
-            p,
-            _controller.chatStreamingText.isEmpty
-                ? '…'
-                : _controller.chatStreamingText,
-            isUser: false,
-          );
-        }
-        final event = visible[index];
-        final deduction = event.deduction;
-        if (deduction != null) {
-          if (viewingIndex == index && _viewRevisionIndex != null) {
-            return _buildVersionedRound(p, deduction, _viewRevisionIndex!);
-          }
-          return _buildRound(p, deduction);
-        }
-        final chat = event.chat!;
-        return _buildChatMessage(p, chat.content, isUser: chat.isUser);
+    return NotificationListener<ScrollMetricsNotification>(
+      onNotification: (n) {
+        _updateAtBottom(n.metrics);
+        return false;
       },
+      child: Scrollbar(
+        controller: _scrollCtrl,
+        thumbVisibility: true,
+        interactive: true,
+        thickness: 3,
+        radius: const Radius.circular(2),
+        child: ListView.builder(
+          controller: _scrollCtrl,
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
+          itemCount: visible.length + (showChatStreaming ? 1 : 0),
+          itemBuilder: (context, index) {
+            if (index >= visible.length) {
+              return _buildChatMessage(
+                p,
+                _controller.chatStreamingText.isEmpty
+                    ? '…'
+                    : _controller.chatStreamingText,
+                isUser: false,
+              );
+            }
+            final event = visible[index];
+            final deduction = event.deduction;
+            if (deduction != null) {
+              if (viewingIndex == index && _viewRevisionIndex != null) {
+                return _buildVersionedRound(p, deduction, _viewRevisionIndex!);
+              }
+              return _buildRound(p, deduction);
+            }
+            final chat = event.chat!;
+            return _buildChatMessage(p, chat.content, isUser: chat.isUser);
+          },
+        ),
+      ),
     );
   }
 
@@ -1361,10 +1520,16 @@ class _NovelInspirationPageState extends State<NovelInspirationPage> {
 
     final activeBranch = isDraft ? null : branches[active];
     final activeDraft = isDraft ? _controller.draftBranches[active] : null;
-    final content = isDraft
+    final rawContent = isDraft
         ? (activeDraft?.text ?? '')
         : (activeBranch?.content ?? '');
+    // 生成流和已落库正文都先经过清洗，**、##、代码围栏等 Markdown 标记不上屏。
+    final content = _cleanContent(rawContent);
     final wordCount = content.trim().characters.length;
+    final expandedKey = '${message.id}:$active';
+    final couldCollapse = content.characters.length > 220;
+    final expanded = _expandedContentKeys.contains(expandedKey);
+    final selecting = _selectionModeKeys.contains(expandedKey);
 
     return Container(
       width: double.infinity,
@@ -1399,6 +1564,26 @@ class _NovelInspirationPageState extends State<NovelInspirationPage> {
                   ),
                 ],
                 const Spacer(),
+                if (couldCollapse)
+                  TextButton(
+                    onPressed: () => setState(() {
+                      if (expanded) {
+                        _expandedContentKeys.remove(expandedKey);
+                      } else {
+                        _expandedContentKeys.add(expandedKey);
+                      }
+                    }),
+                    style: TextButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      foregroundColor: p.textTertiary,
+                      minimumSize: Size.zero,
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                    ),
+                    child: Text(
+                      expanded ? '收起' : '展开',
+                      style: const TextStyle(fontSize: 10.5),
+                    ),
+                  ),
                 if (!isDraft)
                   IconButton(
                     tooltip: '推演操作',
@@ -1427,11 +1612,16 @@ class _NovelInspirationPageState extends State<NovelInspirationPage> {
                   )
                 : _ExpandableProse(
                     text: content,
+                    expanded: expanded,
+                    selectable: !isDraft && selecting,
                     style: TextStyle(
                       fontSize: 11.8,
                       height: 1.72,
                       color: p.textPrimary,
                     ),
+                    onSpeakSelection: activeBranch == null
+                        ? null
+                        : (text) => _readSelected(activeBranch, text),
                   ),
           ),
           Padding(
@@ -1466,6 +1656,52 @@ class _NovelInspirationPageState extends State<NovelInspirationPage> {
                         )
                       : null,
                 ),
+                if (!isDraft && activeBranch != null && activeBranch.id != null)
+                  Tooltip(
+                    message: selecting ? '退出选择' : '选择文字复制',
+                    child: TextButton(
+                      onPressed: () => setState(() {
+                        if (selecting) {
+                          _selectionModeKeys.remove(expandedKey);
+                        } else {
+                          _selectionModeKeys.add(expandedKey);
+                          // 选择前先展开，避免只能选到折叠后的前 8 行。
+                          _expandedContentKeys.add(expandedKey);
+                        }
+                      }),
+                      style: TextButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        foregroundColor: selecting
+                            ? p.accent
+                            : p.textSecondary,
+                        minimumSize: Size.zero,
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                      ),
+                      child: Text(
+                        selecting ? '完成' : '选择',
+                        style: const TextStyle(fontSize: 10.5),
+                      ),
+                    ),
+                  ),
+                if (!isDraft && activeBranch != null && activeBranch.id != null)
+                  IconButton(
+                    tooltip: _tts.isSpeakingBranch(activeBranch.id!)
+                        ? '停止朗读'
+                        : '朗读正文',
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.all(4),
+                    constraints: const BoxConstraints(),
+                    onPressed: () => _toggleRead(activeBranch),
+                    icon: Icon(
+                      _tts.isSpeakingBranch(activeBranch.id!)
+                          ? Icons.stop_circle_outlined
+                          : Icons.volume_up_outlined,
+                      size: 18,
+                      color: _tts.isSpeakingBranch(activeBranch.id!)
+                          ? p.accent
+                          : p.textSecondary,
+                    ),
+                  ),
                 const Spacer(),
                 if (!isDraft && activeBranch != null)
                   TextButton(
@@ -1736,51 +1972,64 @@ class _NovelInspirationPageState extends State<NovelInspirationPage> {
   }
 }
 
-/// 长正文折叠：默认最多 8 行，超过时可展开 / 收起。
-class _ExpandableProse extends StatefulWidget {
-  const _ExpandableProse({required this.text, required this.style});
+/// 长正文折叠：默认最多 8 行；展开/收起按钮在气泡右上角。
+/// 正文用 SelectableText：可长按选择、复制，并在系统选择菜单里朗读选中内容。
+class _ExpandableProse extends StatelessWidget {
+  const _ExpandableProse({
+    required this.text,
+    required this.style,
+    required this.expanded,
+    required this.selectable,
+    this.onSpeakSelection,
+  });
 
   final String text;
   final TextStyle style;
-
-  @override
-  State<_ExpandableProse> createState() => _ExpandableProseState();
-}
-
-class _ExpandableProseState extends State<_ExpandableProse> {
-  bool _expanded = false;
+  final bool expanded;
+  final bool selectable;
+  final ValueChanged<String>? onSpeakSelection;
 
   @override
   Widget build(BuildContext context) {
-    final p = inspirationPalette(context.palette);
-    final couldCollapse = widget.text.characters.length > 220;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          widget.text,
-          maxLines: _expanded ? null : 8,
-          overflow: _expanded ? TextOverflow.visible : TextOverflow.ellipsis,
-          style: widget.style,
-        ),
-        if (couldCollapse)
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton(
-              onPressed: () => setState(() => _expanded = !_expanded),
-              style: TextButton.styleFrom(
-                visualDensity: VisualDensity.compact,
-                minimumSize: Size.zero,
-                padding: const EdgeInsets.symmetric(vertical: 2),
-                foregroundColor: p.textTertiary,
-              ),
-              child: Text(
-                _expanded ? '收起' : '展开',
-                style: const TextStyle(fontSize: 10.5),
-              ),
+    // 生成中的草稿每 80ms 变一次；SelectableText 会做额外的文本选择布局，
+    // 长文流式生成时开销明显。草稿用普通 Text，落定后再切换为可选择文本。
+    if (!selectable) {
+      return Text(
+        text,
+        maxLines: expanded ? null : 8,
+        overflow: expanded ? TextOverflow.visible : TextOverflow.ellipsis,
+        style: style,
+      );
+    }
+    return SelectableText(
+      text,
+      maxLines: expanded ? null : 8,
+      style: style,
+      contextMenuBuilder: (context, editableTextState) {
+        final value = editableTextState.textEditingValue;
+        final selected = value.selection.textInside(value.text).trim();
+        // 保留 Flutter 默认的复制/全选菜单项（它们已经处理好剪贴板和选区），
+        // 只额外插入「朗读选中」；之前自己重建复制项导致选择后复制无效。
+        final items = List<ContextMenuButtonItem>.of(
+          editableTextState.contextMenuButtonItems,
+        );
+        if (selected.isNotEmpty && onSpeakSelection != null) {
+          items.insert(
+            0,
+            ContextMenuButtonItem(
+              label: '朗读选中',
+              onPressed: () {
+                editableTextState.hideToolbar();
+                onSpeakSelection!(selected);
+              },
             ),
-          ),
-      ],
+          );
+        }
+        return AdaptiveTextSelectionToolbar.buttonItems(
+          anchors: editableTextState.contextMenuAnchors,
+          buttonItems: items,
+        );
+      },
     );
   }
 }

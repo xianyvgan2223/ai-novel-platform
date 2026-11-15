@@ -84,6 +84,9 @@ class OutlineSpeechSettings {
   /// 朗读模式
   final OutlineListenMode mode;
 
+  /// DeepSeek TTS 音色：stella（女声）/ tide（男声）
+  final String ttsVoice;
+
   /// 朗读事件范围（全部 / 只听大事件 / 只听小事件）
   final OutlineListenScope scope;
 
@@ -98,6 +101,7 @@ class OutlineSpeechSettings {
     this.pitch = 1.0,
     this.language = 'zh-CN',
     this.mode = OutlineListenMode.titleAndSummary,
+    this.ttsVoice = 'stella',
     this.scope = OutlineListenScope.all,
     this.autoNext = true,
     this.repeat = false,
@@ -108,13 +112,23 @@ class OutlineSpeechSettings {
   /// 3.0x / 4.0x 是「快速过一遍大纲」用的高档位：本地离线合成（VITS）在 4.0x
   /// 下会明显发紧、个别字可能糊，但内容能听懂；系统引擎能接受多快取决于引擎本身
   /// （有的引擎上限就是 3.0，传更大值会被它自己夹住）。
-  static const List<double> rateOptions = [0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0];
+  static const List<double> rateOptions = [
+    0.75,
+    1.0,
+    1.25,
+    1.5,
+    2.0,
+    2.5,
+    3.0,
+    4.0,
+  ];
 
   OutlineSpeechSettings copyWith({
     double? rate,
     double? pitch,
     String? language,
     OutlineListenMode? mode,
+    String? ttsVoice,
     OutlineListenScope? scope,
     bool? autoNext,
     bool? repeat,
@@ -123,6 +137,7 @@ class OutlineSpeechSettings {
     pitch: pitch ?? this.pitch,
     language: language ?? this.language,
     mode: mode ?? this.mode,
+    ttsVoice: ttsVoice ?? this.ttsVoice,
     scope: scope ?? this.scope,
     autoNext: autoNext ?? this.autoNext,
     repeat: repeat ?? this.repeat,
@@ -138,13 +153,22 @@ class OutlineSpeechSettings {
       other.pitch == pitch &&
       other.language == language &&
       other.mode == mode &&
+      other.ttsVoice == ttsVoice &&
       other.scope == scope &&
       other.autoNext == autoNext &&
       other.repeat == repeat;
 
   @override
-  int get hashCode =>
-      Object.hash(rate, pitch, language, mode, scope, autoNext, repeat);
+  int get hashCode => Object.hash(
+    rate,
+    pitch,
+    language,
+    mode,
+    ttsVoice,
+    scope,
+    autoNext,
+    repeat,
+  );
 }
 
 /// 可高亮的文本编辑控制器：朗读时给「当前正在读的句子」加一层背景色。
@@ -272,10 +296,10 @@ class OutlineListenSegment {
     required String title,
     required String summary,
     required this.content,
-  })  : titleCtrl = OutlineListenTextController(text: title),
-        summaryCtrl = OutlineListenTextController(text: summary),
-        savedTitle = title,
-        savedSummary = summary {
+  }) : titleCtrl = OutlineListenTextController(text: title),
+       summaryCtrl = OutlineListenTextController(text: summary),
+       savedTitle = title,
+       savedSummary = summary {
     titleCtrl.addListener(_notifyChanged);
     summaryCtrl.addListener(_notifyChanged);
   }
@@ -425,8 +449,7 @@ class SpeechPiece {
   });
 
   @override
-  String toString() =>
-      'SpeechPiece(${part.name}, $start..$end, "$text")';
+  String toString() => 'SpeechPiece(${part.name}, $start..$end, "$text")';
 }
 
 /// 一个事件的完整朗读计划：按「标题句 → 概要逐句 → 正文逐句」排好序。

@@ -15,7 +15,7 @@ import '../service/name_ai_service.dart';
 import '../service/name_finder.dart';
 import '../service/outline_rename.dart';
 import '../service/tts_engine.dart';
-import '../service/tts_engine_fallback.dart';
+import '../service/hybrid_tts_engine.dart';
 
 /// 「听大纲改名」控制器：把一条大纲拆成**一个事件一张卡片**，逐事件朗读，
 /// 并负责把改动写回 `outline_chapters` 与大纲正文。
@@ -38,11 +38,10 @@ class OutlineListenController extends ChangeNotifier {
     TtsEngine? engine,
     OutlineNameAiService? nameAiService,
     OutlineListeningNotification? notification,
-  })  : _engine = engine ?? FallbackTtsEngine(),
-        _nameAi = nameAiService ?? OutlineNameAiService(),
-        _notification =
-            notification ?? OutlineListeningNotification.instance,
-        outlineContent = outline.content {
+  }) : _engine = engine ?? HybridTtsEngine(),
+       _nameAi = nameAiService ?? OutlineNameAiService(),
+       _notification = notification ?? OutlineListeningNotification.instance,
+       outlineContent = outline.content {
     _engine.setCallbacks(
       // 逐句朗读：一次 onDone 只代表「这一句读完了」，由这里决定是下一句
       // 还是下一个事件（见 _handleSentenceDone / _handleSegmentDone）。
@@ -59,12 +58,10 @@ class OutlineListenController extends ChangeNotifier {
 
   TtsEngine get engine => _engine;
 
-  /// 正在用内置离线语音吗（系统里没有可用引擎时自动回落到它）
-  ///
-  /// 页面用它给用户一句说明：声音不是手机系统的，是 App 自带的。
+  /// 是否正在用本机内置离线语音（选了系统引擎且系统引擎不可用时）
   bool get usingBuiltinVoice {
     final engine = _engine;
-    return engine is FallbackTtsEngine && engine.usingLocal;
+    return engine is HybridTtsEngine && engine.usingBuiltinVoice;
   }
 
   /// 大纲正文（改标题 / 概要、批量改名都会合并写回其中并持久化）
@@ -267,9 +264,8 @@ class OutlineListenController extends ChangeNotifier {
 
   /// 把章节列表变成卡片列表（一个事件一张）
   List<OutlineListenSegment> _buildSegments(List<OutlineChapter> chapters) {
-    final ordered = [...chapters]..sort(
-      (a, b) => a.eventIndex.compareTo(b.eventIndex),
-    );
+    final ordered = [...chapters]
+      ..sort((a, b) => a.eventIndex.compareTo(b.eventIndex));
     // 卡片上的序号按**大纲正文的写法**算（与「大纲编辑」页同一套）：
     // 大事件全篇只数大事件；小事件在所属大事件内部从 1 重新计数。不能直接用
     // eventIndex：它是所有事件的连续序号，大事件也占号，小事件会跳号
@@ -293,17 +289,16 @@ class OutlineListenController extends ChangeNotifier {
     OutlineChapter c, {
     required int? majorNumber,
     required int? minorNumber,
-  }) =>
-      OutlineListenSegment(
-        chapterId: c.id ?? 0,
-        eventIndex: c.eventIndex,
-        isMajor: c.isMajor,
-        majorNumber: majorNumber,
-        minorNumber: minorNumber,
-        title: c.eventTitle,
-        summary: c.eventSummary,
-        content: c.content,
-      );
+  }) => OutlineListenSegment(
+    chapterId: c.id ?? 0,
+    eventIndex: c.eventIndex,
+    isMajor: c.isMajor,
+    majorNumber: majorNumber,
+    minorNumber: minorNumber,
+    title: c.eventTitle,
+    summary: c.eventSummary,
+    content: c.content,
+  );
 
   // ---- 设置 ----
 
@@ -332,7 +327,10 @@ class OutlineListenController extends ChangeNotifier {
       unawaited(replayCurrent());
       return;
     }
-    if (scopeChanged && playing && activeIndex >= 0 && !isPlayableAt(activeIndex)) {
+    if (scopeChanged &&
+        playing &&
+        activeIndex >= 0 &&
+        !isPlayableAt(activeIndex)) {
       final nextIndex = _nextPlayableIndex(activeIndex);
       unawaited(nextIndex >= 0 ? playFrom(nextIndex) : pause());
     }
@@ -706,6 +704,7 @@ class OutlineListenController extends ChangeNotifier {
         language: settings.language,
         rate: settings.rate,
         pitch: settings.pitch,
+        voiceId: settings.ttsVoice,
       ),
     );
     if (_disposed || seq != _speechSeq) return false;
@@ -727,7 +726,9 @@ class OutlineListenController extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    final plan = activeIndex >= 0 ? planForIndex(activeIndex) : SpeechPlan.empty;
+    final plan = activeIndex >= 0
+        ? planForIndex(activeIndex)
+        : SpeechPlan.empty;
     if (activeSentenceIndex + 1 < plan.length) {
       activeSentenceIndex++;
       notifyListeners();
@@ -765,7 +766,9 @@ class OutlineListenController extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    activeIndex = last ? _firstPlayableIndex() : _nextPlayableIndex(activeIndex);
+    activeIndex = last
+        ? _firstPlayableIndex()
+        : _nextPlayableIndex(activeIndex);
     if (activeIndex < 0) {
       playing = false;
       finished = true;
@@ -955,7 +958,8 @@ class OutlineListenController extends ChangeNotifier {
       _engine.openVoiceEngineStore(query: query);
 
   /// 设置面板可选用的朗读引擎（跟随系统 / 内置语音 / 本机各个系统引擎）
-  Future<List<TtsEngineOption>> availableEngines() => _engine.availableEngines();
+  Future<List<TtsEngineOption>> availableEngines() =>
+      _engine.availableEngines();
 
   /// 当前选中的引擎标识
   String get selectedEngineId => _engine.selectedEngineId;
@@ -997,8 +1001,9 @@ class OutlineListenController extends ChangeNotifier {
     final status = await _engine.diagnose();
     if (_disposed) return '';
     if (!status.hasEngine) {
-      engineHint = '本机没有可用的「文字转语音」引擎，朗读功能用不了；'
-          '点「去商店装引擎」在手机上一键装一个（也可点「去系统设置」自查）';
+      engineHint =
+          '未配置 DeepSeek API Key，DeepSeek 朗读不可用；'
+          '请先到「设置」中填写 API Key 后重试';
     } else if (status.zhState == 'missing_data') {
       // 只有在**明确问出**缺中文语音包时才提示。引擎还没就绪时原生侧返回
       // unknown（不是 missing_data），这里就不会误报。
@@ -1136,7 +1141,10 @@ class OutlineListenController extends ChangeNotifier {
   ///
   /// 注意调用顺序：**先把这一条从栈里摘下来**（调用方负责），再走这里。
   /// 若先在这里压栈再取目标，压进去的就是「改动后」的状态，撤回会原地不动。
-  Future<void> _applyHistory(_HistoryEntry entry, {required bool toUndo}) async {
+  Future<void> _applyHistory(
+    _HistoryEntry entry, {
+    required bool toUndo,
+  }) async {
     if (_applyingHistory) return;
     // 朗读中的文本马上要被换掉：先停下，免得读的是已经不存在的字
     await pause();
@@ -1149,10 +1157,7 @@ class OutlineListenController extends ChangeNotifier {
       // 页面上的文本由快照还原，但库里的行与小说设定不在整页快照里。
       final step = entry.step;
       if (step != null) {
-        await _writeRename(
-          toUndo ? step : step.reversed(),
-          applyToText: false,
-        );
+        await _writeRename(toUndo ? step : step.reversed(), applyToText: false);
       }
       _lastCommitted = _takeSnapshot();
       if (toUndo) {
@@ -1318,7 +1323,9 @@ class OutlineListenController extends ChangeNotifier {
         if (c.abilities.trim().isNotEmpty) '能力：${c.abilities.trim()}',
         if (c.personality.trim().isNotEmpty) '性格：${c.personality.trim()}',
       ];
-      buf.writeln('$name：${c.description.trim()}${extras.isEmpty ? "" : "（${extras.join("；")}）"}');
+      buf.writeln(
+        '$name：${c.description.trim()}${extras.isEmpty ? "" : "（${extras.join("；")}）"}',
+      );
     }
     return buf.toString().trim();
   }
@@ -1365,11 +1372,8 @@ class OutlineListenController extends ChangeNotifier {
   /// 设定里的命中单独放在 [OutlineRenameResult.settingHits]：面板要如实显示
   /// 「世界观 / 主题 / 主角简介 / 人物档案里也有几处」，并在用户勾选
   /// 「同时改小说设定」后一起替换。
-  OutlineRenameResult checkName(String source) => findRenameHits(
-    outlineContent,
-    source,
-    settings: _settingTexts(),
-  );
+  OutlineRenameResult checkName(String source) =>
+      findRenameHits(outlineContent, source, settings: _settingTexts());
 
   /// 一键改名：把 [rules]（原文 → 新文）应用到**大纲正文 + 所有章节行 +
   /// 伏笔清单 + 内存里的卡片**，并即时落库。
@@ -1571,9 +1575,9 @@ class RenameStep {
   });
 
   const RenameStep.empty()
-      : mapping = const {},
-        includeSettings = false,
-        count = 0;
+    : mapping = const {},
+      includeSettings = false,
+      count = 0;
 
   /// 反向映射（新文 → 原文）。
   ///
@@ -1657,9 +1661,5 @@ class _HistoryEntry {
   /// 普通文本改动为 null（状态快照已经足够）
   final RenameStep? step;
 
-  const _HistoryEntry({
-    required this.baseline,
-    required this.after,
-    this.step,
-  });
+  const _HistoryEntry({required this.baseline, required this.after, this.step});
 }

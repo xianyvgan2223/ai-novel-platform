@@ -44,6 +44,20 @@ public class NovelAiService {
         return content == null ? "" : content;
     }
 
+    /**
+     * 流式 JSON 阶段：要求服务端以 response_format={"type":"json_object"} 约束输出。
+     * 用于定调 / 粗骨架 / 大事件精写 / 伏笔账本。
+     */
+    public Flux<String> streamJson(String system, String user, AiSettings settings) {
+        AiSettings effective = settings == null ? AiSettings.jsonOnly(null) : AiSettings.jsonOnly(settings);
+        String finalSystem = effective.applySystem(system);
+        ChatClient.ChatClientRequestSpec spec = chatClient.prompt()
+                .system(finalSystem)
+                .user(user)
+                .options(effective.options());
+        return spec.stream().content();
+    }
+
     /** 流式：逐段返回模型输出 */
     public Flux<String> stream(String system, String user) {
         return stream(system, user, null);

@@ -854,7 +854,12 @@ class OutlineController extends ChangeNotifier {
       }
       _apiKey = settings.apiKey;
       _outlineSetting = settings.outlineSetting;
-      _baseParams = {'model': settings.outlineSetting.model, 'stream': true};
+      _baseParams = {
+        'model': settings.outlineSetting.model,
+        'stream': true,
+        if (settings.outlineSetting.enableThinking)
+          'reasoning_effort': settings.outlineSetting.reasoningEffort,
+      };
 
       final estBatchSize = _calcBatchSize(majorEventCount);
       final estBatchCount = estBatchSize <= 0
@@ -1045,7 +1050,7 @@ class OutlineController extends ChangeNotifier {
             'temperature': temperature,
             'max_tokens': maxTokens,
             'stream': true,
-            'response_format': {'type': 'json_object'},
+            'response_format': OutlinePromptTemplate.jsonResponseFormat,
             if (!_outlineSetting.enableThinking)
               'thinking': {'type': 'disabled'},
           },

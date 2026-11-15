@@ -19,15 +19,16 @@ class SettingController extends ChangeNotifier {
   int get maxTokens => _setting.maxTokens;
   String get stop => _setting.stop;
   bool get stream => _setting.stream;
-  String get streamOptions => _setting.streamOptions;
-  double get frequencyPenalty => _setting.frequencyPenalty;
-  double get presencePenalty => _setting.presencePenalty;
   String get responseFormat => _setting.responseFormat;
   bool get thinking => _setting.thinking;
+  String get reasoningEffort => _setting.reasoningEffort;
+  bool get streamIncludeUsage => _setting.streamIncludeUsage;
+  String get toolChoice => _setting.toolChoice;
+  String get safetyCheck => _setting.safetyCheck;
+  bool get titleEnabled => _setting.titleEnabled;
+  String get userId => _setting.userId;
   bool get logprobs => _setting.logprobs;
   int get topLogprobs => _setting.topLogprobs;
-  String get logitBias => _setting.logitBias;
-  int get n => _setting.n;
   int get contextRounds => _setting.contextRounds;
   bool get webSearch => _setting.webSearch;
   String get baiduApiKey => _setting.baiduApiKey;
@@ -77,12 +78,12 @@ class SettingController extends ChangeNotifier {
   }
 
   void setTemperature(double v) {
-    _setting = _setting.copyWith(temperature: v);
+    _setting = _setting.copyWith(temperature: v.clamp(0.0, 2.0));
     notifyListeners();
   }
 
   void setTopP(double v) {
-    _setting = _setting.copyWith(topP: v);
+    _setting = _setting.copyWith(topP: v.clamp(0.0, 1.0));
     notifyListeners();
   }
 
@@ -103,28 +104,54 @@ class SettingController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void setStreamOptions(String v) {
-    _setting = _setting.copyWith(streamOptions: v);
-    notifyListeners();
-  }
-
-  void setFrequencyPenalty(double v) {
-    _setting = _setting.copyWith(frequencyPenalty: v);
-    notifyListeners();
-  }
-
-  void setPresencePenalty(double v) {
-    _setting = _setting.copyWith(presencePenalty: v);
-    notifyListeners();
-  }
-
   void setResponseFormat(String v) {
     _setting = _setting.copyWith(responseFormat: v);
     notifyListeners();
   }
 
   void setThinking(bool v) {
-    _setting = _setting.copyWith(thinking: v);
+    // thinking 开着但强度为 none 时补回 high，避免界面显示开启、请求实际关闭。
+    final effort = v && _setting.reasoningEffort == 'none'
+        ? 'high'
+        : _setting.reasoningEffort;
+    _setting = _setting.copyWith(thinking: v, reasoningEffort: effort);
+    notifyListeners();
+  }
+
+  void setReasoningEffort(String v) {
+    final effort = const {'none', 'low', 'high', 'max'}.contains(v)
+        ? v
+        : 'high';
+    _setting = _setting.copyWith(
+      reasoningEffort: effort,
+      thinking: effort == 'none' ? false : _setting.thinking,
+    );
+    notifyListeners();
+  }
+
+  void setStreamIncludeUsage(bool v) {
+    _setting = _setting.copyWith(streamIncludeUsage: v);
+    notifyListeners();
+  }
+
+  void setToolChoice(String v) {
+    final choice = const {'auto', 'none', 'required'}.contains(v) ? v : 'auto';
+    _setting = _setting.copyWith(toolChoice: choice);
+    notifyListeners();
+  }
+
+  void setSafetyCheck(String v) {
+    _setting = _setting.copyWith(safetyCheck: v == 'high' ? 'high' : 'low');
+    notifyListeners();
+  }
+
+  void setTitleEnabled(bool v) {
+    _setting = _setting.copyWith(titleEnabled: v);
+    notifyListeners();
+  }
+
+  void setUserId(String v) {
+    _setting = _setting.copyWith(userId: v);
     notifyListeners();
   }
 
@@ -134,17 +161,7 @@ class SettingController extends ChangeNotifier {
   }
 
   void setTopLogprobs(int v) {
-    _setting = _setting.copyWith(topLogprobs: v);
-    notifyListeners();
-  }
-
-  void setLogitBias(String v) {
-    _setting = _setting.copyWith(logitBias: v);
-    notifyListeners();
-  }
-
-  void setN(int v) {
-    _setting = _setting.copyWith(n: v);
+    _setting = _setting.copyWith(topLogprobs: v.clamp(0, 20));
     notifyListeners();
   }
 
@@ -156,7 +173,9 @@ class SettingController extends ChangeNotifier {
   /// 历史遗留入口：联网开关现在由 [setSearchEngine] 统一管理
   /// （search_engine 是唯一事实来源）。这里转调一次，避免两个开关状态脱节。
   void setWebSearch(bool v) {
-    setSearchEngine(v ? UserSetting.searchEngineBaidu : UserSetting.searchEngineOff);
+    setSearchEngine(
+      v ? UserSetting.searchEngineBaidu : UserSetting.searchEngineOff,
+    );
   }
 
   void setBaiduApiKey(String v) {

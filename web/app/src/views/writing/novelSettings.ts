@@ -19,6 +19,9 @@ export interface OutlineAiSettings {
   maxTokens: number;
   systemPrompt: string;
   enableThinking: boolean;
+  pauseAfterSkeleton: boolean;
+  pauseAfterEvents: boolean;
+  pauseAfterMinor: boolean;
 }
 
 export interface ChapterAiSettings {
@@ -50,6 +53,9 @@ export const outlineSettings = reactive<OutlineAiSettings>({
   maxTokens: 4096,
   systemPrompt: DEFAULT_OUTLINE_PROMPT,
   enableThinking: true,
+  pauseAfterSkeleton: true,
+  pauseAfterEvents: true,
+  pauseAfterMinor: true,
 });
 
 export const chapterSettings = reactive<ChapterAiSettings>({
@@ -90,6 +96,9 @@ function applyOutline(row: Row | undefined) {
   outlineSettings.maxTokens = num(row.max_tokens, 4096);
   outlineSettings.systemPrompt = String(row.system_prompt || DEFAULT_OUTLINE_PROMPT);
   outlineSettings.enableThinking = bool(row.enable_thinking, true);
+  outlineSettings.pauseAfterSkeleton = bool(row.pause_after_skeleton, true);
+  outlineSettings.pauseAfterEvents = bool(row.pause_after_events, true);
+  outlineSettings.pauseAfterMinor = bool(row.pause_after_minor, true);
 }
 
 function applyChapter(row: Row | undefined) {
@@ -136,6 +145,9 @@ export async function saveOutlineSettings(): Promise<void> {
     max_tokens: outlineSettings.maxTokens,
     system_prompt: outlineSettings.systemPrompt,
     enable_thinking: outlineSettings.enableThinking ? 1 : 0,
+    pause_after_skeleton: outlineSettings.pauseAfterSkeleton ? 1 : 0,
+    pause_after_events: outlineSettings.pauseAfterEvents ? 1 : 0,
+    pause_after_minor: outlineSettings.pauseAfterMinor ? 1 : 0,
   };
   if (outlineSettings.id) {
     await api.updateRow('deepseek', 'outline_settings', outlineSettings.id, payload);

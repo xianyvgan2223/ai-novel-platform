@@ -44,7 +44,7 @@ public class OutlineGenerationService {
 
     public void generate(Map<String, Object> body, Sink sink) throws IOException {
         writingService.requireConfig();
-        AiSettings settings = AiSettings.from(body);
+        AiSettings settings = AiSettings.jsonOnly(AiSettings.from(body));
 
         String genre = str(body.get("genre"), "都市");
         String theme = str(body.get("theme"), "");

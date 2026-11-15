@@ -37,6 +37,7 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
   int _maxTokens = 4096;
   String _model = 'deepseek-flash';
   bool _enableThinking = true;
+  String _reasoningEffort = 'high';
   bool _pauseAfterSkeleton = false;
   bool _pauseAfterEvents = false;
   bool _pauseAfterMinor = false;
@@ -62,6 +63,7 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
         _maxTokens = setting.maxTokens;
         _model = setting.model;
         _enableThinking = setting.enableThinking;
+        _reasoningEffort = setting.reasoningEffort;
         _pauseAfterSkeleton = setting.pauseAfterSkeleton;
         _pauseAfterEvents = setting.pauseAfterEvents;
         _pauseAfterMinor = setting.pauseAfterMinor;
@@ -88,6 +90,7 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
       maxTokens: _maxTokens,
       model: _model,
       enableThinking: _enableThinking,
+      reasoningEffort: _reasoningEffort,
       pauseAfterSkeleton: _pauseAfterSkeleton,
       pauseAfterEvents: _pauseAfterEvents,
       pauseAfterMinor: _pauseAfterMinor,
@@ -141,9 +144,7 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
           saveEnabled: !_loading,
         ),
         body: _loading
-            ? Center(
-                child: CircularProgressIndicator(color: p.textTertiary),
-              )
+            ? Center(child: CircularProgressIndicator(color: p.textTertiary))
             : ListView(
                 padding: EdgeInsets.only(
                   top: 2,
@@ -213,8 +214,25 @@ class _OutlineSettingPageState extends State<OutlineSettingPage> {
                         // 行副标题必须 ≤14 个汉字（kit 是单行 + 省略号），
                         // 完整旧文案放在本卡下方的 SettingsNote 里，信息不丢。
                         subtitle: '关闭后更快更省',
+                        help: '开启后模型先推理再生成；关闭时请求会显式发送 thinking=disabled。',
                         initialValue: _enableThinking,
                         onChanged: (v) => setState(() => _enableThinking = v),
+                      ),
+                      SettingsSelectRow(
+                        key: const ValueKey('outline_reasoning_effort'),
+                        label: '思考强度',
+                        value: _reasoningEffort,
+                        help: 'none 关闭思考；low 快速；high 默认；max 最深。仅思考模式开启时生效。',
+                        options: const [
+                          SettingsSelectOption('none', 'none · 关闭'),
+                          SettingsSelectOption('low', 'low · 快速'),
+                          SettingsSelectOption('high', 'high · 默认'),
+                          SettingsSelectOption('max', 'max · 最深'),
+                        ],
+                        onChanged: (v) => setState(() {
+                          _reasoningEffort = v;
+                          if (v == 'none') _enableThinking = false;
+                        }),
                       ),
                       SettingsSliderRow(
                         key: const ValueKey('outline_temperature'),

@@ -130,6 +130,9 @@ class _SessionSettingsPageState extends ConsumerState<SessionSettingsPage> {
               SettingsPromptCard(
                 icon: Icons.forum_outlined,
                 title: '系统提示词',
+                help:
+                    '只对当前会话生效，保存后从下一条消息开始生效。'
+                    '可用来设定 AI 的角色、语气、回复风格或必须遵守的规则；留空则不添加额外限制。',
                 controller: _controller,
                 hintText: '设定 AI 的角色、语气、回复风格等，留空则无限制',
                 minLines: 5,
@@ -149,9 +152,7 @@ class _SessionSettingsPageState extends ConsumerState<SessionSettingsPage> {
             icon: Icons.info_outline_rounded,
             title: '说明',
           ),
-          const SettingsNote(
-            text: '系统提示词只对当前会话生效，切换会话不会互相影响；保存后下一条消息即生效。',
-          ),
+          const SettingsNote(text: '系统提示词只对当前会话生效，切换会话不会互相影响；保存后下一条消息即生效。'),
         ],
       ),
     );

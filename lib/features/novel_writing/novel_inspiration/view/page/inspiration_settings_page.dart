@@ -31,6 +31,11 @@ class _InspirationSettingsPageState extends State<InspirationSettingsPage> {
   int _maxTokens = 4096;
   String _model = 'deepseek-flash';
   bool _enableThinking = true;
+  String _reasoningEffort = 'high';
+  String _ttsVoice = 'stella';
+  String _ttsEngineId = 'auto';
+  double _ttsRate = 1.0;
+  bool _showScrollToBottom = true;
   int _concurrency = 3;
   bool _saving = false;
 
@@ -42,6 +47,11 @@ class _InspirationSettingsPageState extends State<InspirationSettingsPage> {
     _maxTokens = s.maxTokens;
     _model = DeepSeekModels.toApiId(s.model);
     _enableThinking = s.enableThinking;
+    _reasoningEffort = s.reasoningEffort;
+    _ttsVoice = s.ttsVoice;
+    _ttsEngineId = s.ttsEngineId;
+    _ttsRate = s.ttsRate.clamp(0.75, 4.0);
+    _showScrollToBottom = s.showScrollToBottom;
     _concurrency = s.concurrency.clamp(1, 10);
     _systemCtrl = TextEditingController(
       text: s.systemPrompt.trim().isEmpty
@@ -66,6 +76,11 @@ class _InspirationSettingsPageState extends State<InspirationSettingsPage> {
         maxTokens: _maxTokens,
         systemPrompt: _systemCtrl.text.trim(),
         enableThinking: _enableThinking,
+        reasoningEffort: _reasoningEffort,
+        ttsVoice: _ttsVoice,
+        ttsEngineId: _ttsEngineId,
+        ttsRate: _ttsRate,
+        showScrollToBottom: _showScrollToBottom,
         concurrency: _concurrency,
       ),
     );
@@ -147,8 +162,25 @@ class _InspirationSettingsPageState extends State<InspirationSettingsPage> {
                     key: const ValueKey('inspiration_enable_thinking'),
                     label: '思考模式',
                     subtitle: '关闭后更快更省',
+                    help: '开启后模型先进行推理，再输出推演正文；关闭时请求会显式发送 thinking=disabled。',
                     initialValue: _enableThinking,
                     onChanged: (v) => setState(() => _enableThinking = v),
+                  ),
+                  SettingsSelectRow(
+                    key: const ValueKey('inspiration_reasoning_effort'),
+                    label: '思考强度',
+                    value: _reasoningEffort,
+                    help: 'none 关闭思考；low 快速；high 默认；max 最深。仅思考模式开启时生效。',
+                    options: const [
+                      SettingsSelectOption('none', 'none · 关闭'),
+                      SettingsSelectOption('low', 'low · 快速'),
+                      SettingsSelectOption('high', 'high · 默认'),
+                      SettingsSelectOption('max', 'max · 最深'),
+                    ],
+                    onChanged: (v) => setState(() {
+                      _reasoningEffort = v;
+                      if (v == 'none') _enableThinking = false;
+                    }),
                   ),
                   SettingsSliderRow(
                     key: const ValueKey('inspiration_temperature'),
@@ -173,6 +205,88 @@ class _InspirationSettingsPageState extends State<InspirationSettingsPage> {
                         setState(() => _maxTokens = n);
                       }
                     },
+                  ),
+                ],
+              ),
+              const SettingsSectionHeader(
+                icon: Icons.volume_up_rounded,
+                title: '朗读引擎',
+                subtitle: '系统 TTS、本地离线语音或 DeepSeek',
+              ),
+              SettingsCard(
+                children: [
+                  SettingsSelectRow(
+                    key: const ValueKey('inspiration_tts_engine'),
+                    label: '朗读引擎',
+                    value: _ttsEngineId,
+                    help:
+                        '跟随系统：优先调用手机 TTS，系统没有可用引擎时自动用 App 内置离线语音；'
+                        '内置离线：强制使用 App 自带模型；DeepSeek：使用官方在线语音。',
+                    options: const [
+                      SettingsSelectOption(
+                        'auto',
+                        '跟随系统（本地兜底）',
+                        shortLabel: '跟随系统',
+                      ),
+                      SettingsSelectOption(
+                        'builtin',
+                        'App 内置离线语音',
+                        shortLabel: '内置离线',
+                      ),
+                      SettingsSelectOption(
+                        'deepseek:stella',
+                        'DeepSeek · 海星女声',
+                        shortLabel: 'DeepSeek 海星',
+                      ),
+                      SettingsSelectOption(
+                        'deepseek:tide',
+                        'DeepSeek · 暗潮男声',
+                        shortLabel: 'DeepSeek 暗潮',
+                      ),
+                    ],
+                    onChanged: (v) => setState(() {
+                      _ttsEngineId = v;
+                      // 兼容旧字段：DeepSeek 音色同时写到 ttsVoice。
+                      if (v == 'deepseek:stella') _ttsVoice = 'stella';
+                      if (v == 'deepseek:tide') _ttsVoice = 'tide';
+                    }),
+                  ),
+                  SettingsSelectRow(
+                    key: const ValueKey('inspiration_tts_rate'),
+                    label: '朗读语速',
+                    value: _ttsRate.toString(),
+                    help:
+                        '0.75x ~ 4.0x。系统 TTS 使用系统语速；DeepSeek WAV 由原生播放层变速。',
+                    options: const [
+                      SettingsSelectOption('0.75', '0.75x'),
+                      SettingsSelectOption('1.0', '1.0x'),
+                      SettingsSelectOption('1.25', '1.25x'),
+                      SettingsSelectOption('1.5', '1.5x'),
+                      SettingsSelectOption('2.0', '2.0x'),
+                      SettingsSelectOption('2.5', '2.5x'),
+                      SettingsSelectOption('3.0', '3.0x'),
+                      SettingsSelectOption('4.0', '4.0x'),
+                    ],
+                    onChanged: (v) => setState(() {
+                      _ttsRate = (double.tryParse(v) ?? 1.0).clamp(0.75, 4.0);
+                    }),
+                  ),
+                ],
+              ),
+              const SettingsSectionHeader(
+                icon: Icons.vertical_align_bottom_rounded,
+                title: '阅读体验',
+                subtitle: '控制长对话里的回到底部按钮',
+              ),
+              SettingsCard(
+                children: [
+                  SettingsSwitchRow(
+                    key: const ValueKey('inspiration_show_scroll_to_bottom'),
+                    label: '显示「回到底部」',
+                    subtitle: '只在没有到底时显示，到底自动隐藏',
+                    initialValue: _showScrollToBottom,
+                    onChanged: (v) =>
+                        setState(() => _showScrollToBottom = v),
                   ),
                 ],
               ),

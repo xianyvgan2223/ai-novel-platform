@@ -13,21 +13,25 @@ import 'tts_engine_io.dart'
 class TtsSpeechRequest {
   final String text;
 
-  /// BCP-47 语言标签（如 `zh-CN`）。设备缺该语言的语音包时由实现方退回默认语言，
-  /// 而不是干脆不读。
+  /// BCP-47 语言标签（如 `zh-CN`）。DeepSeek TTS 会自动识别语种，此字段
+  /// 仅保留给引擎接口兼容；DeepSeek 引擎不会发送语言参数。
   final String language;
 
-  /// 语速，1.0 为正常
+  /// 语速，1.0 为正常（DeepSeek TTS 官方不支持语速，仅保留接口字段）
   final double rate;
 
-  /// 音调，1.0 为正常
+  /// 音调，1.0 为正常（DeepSeek TTS 官方不支持音调，仅保留接口字段）
   final double pitch;
+
+  /// DeepSeek TTS 音色：stella / tide。为空时由引擎选择当前音色。
+  final String? voiceId;
 
   const TtsSpeechRequest({
     required this.text,
     this.language = 'zh-CN',
     this.rate = 1.0,
     this.pitch = 1.0,
+    this.voiceId,
   });
 }
 
@@ -127,6 +131,7 @@ class TtsEngineOption {
 abstract class TtsEngine {
   /// 设备上是否有可用的朗读引擎（Android 上等于「系统 TTS 初始化成功」）
   bool get isAvailable;
+
   /// 是否正在朗读
   bool get isSpeaking;
 
@@ -149,7 +154,10 @@ abstract class TtsEngine {
   Future<void> setBackgroundPlayback(bool enabled);
 
   /// 一段读完后回调；[onError] 仅在异常中断时回调
-  void setCallbacks({required VoidCallback onDone, void Function(String message)? onError});
+  void setCallbacks({
+    required VoidCallback onDone,
+    void Function(String message)? onError,
+  });
 
   /// 最近一次失败的原因（无失败时为空串）。UI 直接展示它，不再自己造文案。
   String get errorMessage;
