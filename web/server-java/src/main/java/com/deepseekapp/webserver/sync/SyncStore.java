@@ -297,7 +297,7 @@ public class SyncStore {
 
     private long countRows(String deviceId, String dbKey, String table) {
         Map<String, Object> row = db.app(deviceId, dbKey, connection ->
-                Db.queryOne(connection, "SELECT COUNT(*) AS c FROM " + table));
+                Db.queryOne(connection, "SELECT COUNT(*) AS c FROM `" + table + "` WHERE device_id = ?", deviceId));
         return row == null ? 0 : longValue(row.get("c"), 0);
     }
 
@@ -317,6 +317,8 @@ public class SyncStore {
                     "SELECT 1 AS x FROM devices WHERE device_id = ?", id) != null;
             Db.update(meta, "DELETE FROM device_cursors WHERE device_id = ?", id);
             Db.update(meta, "DELETE FROM conflicts WHERE device_id = ?", id);
+            Db.update(meta, "DELETE FROM row_meta WHERE device_id = ?", id);
+            Db.update(meta, "DELETE FROM change_log WHERE device_id = ?", id);
             Db.update(meta, "DELETE FROM devices WHERE device_id = ?", id);
             Map<String, Object> out = new LinkedHashMap<>();
             out.put("deviceId", id);
@@ -343,7 +345,7 @@ public class SyncStore {
         db.meta(meta -> {
             Db.update(meta,
                     "INSERT INTO device_cursors (device_id, " + field + ") VALUES (?, ?) " +
-                            "ON CONFLICT(device_id) DO UPDATE SET " + field + " = excluded." + field,
+                            "ON DUPLICATE KEY UPDATE " + field + " = VALUES(" + field + ")",
                     deviceId, ts);
             Db.update(meta, "UPDATE devices SET last_seen_at = ? WHERE device_id = ?", ts, deviceId);
             return null;
@@ -369,8 +371,8 @@ public class SyncStore {
             }
 
             Map<String, Object> prev = Db.queryOne(meta,
-                    "SELECT * FROM row_meta WHERE db = ? AND table_name = ? AND pk = ?",
-                    dbKey, tableName, pk);
+                    "SELECT * FROM row_meta WHERE device_id = ? AND db = ? AND table_name = ? AND pk = ?",
+                    deviceId, dbKey, tableName, pk);
             String hash = hashRow(cols);
             long ts = now();
 
@@ -386,25 +388,29 @@ public class SyncStore {
 
             long rev = (prev == null ? 0 : longValue(prev.get("rev"), 0)) + 1;
             List<String> colNames = new ArrayList<>(cols.keySet());
-            String placeholders = String.join(", ", java.util.Collections.nCopies(colNames.size(), "?"));
+            List<String> insertColumns = new ArrayList<>();
+            insertColumns.add("device_id");
+            insertColumns.addAll(colNames);
+            String placeholders = String.join(", ", java.util.Collections.nCopies(insertColumns.size(), "?"));
             List<String> updates = new ArrayList<>();
             for (String c : colNames) {
                 if (!c.equals(pkCol)) {
-                    updates.add(c + " = excluded." + c);
+                    updates.add("`" + c + "` = VALUES(`" + c + "`)");
                 }
             }
-            String sql = "INSERT INTO " + tableName + " (" + String.join(", ", colNames) + ") VALUES (" +
-                    placeholders + ") ON CONFLICT(" + pkCol + ") DO " +
-                    (updates.isEmpty() ? "NOTHING" : "UPDATE SET " + String.join(", ", updates));
+            String sql = "INSERT INTO `" + tableName + "` (`" + String.join("`, `", insertColumns) + "`) VALUES (" +
+                    placeholders + ") ON DUPLICATE KEY UPDATE " +
+                    (updates.isEmpty() ? "`" + pkCol + "` = `" + pkCol + "`" : String.join(", ", updates));
 
-            Object[] args = new Object[colNames.size()];
+            Object[] args = new Object[insertColumns.size()];
+            args[0] = deviceId;
             for (int i = 0; i < colNames.size(); i++) {
-                args[i] = cols.get(colNames.get(i));
+                args[i + 1] = cols.get(colNames.get(i));
             }
             Db.transaction(appDb, () -> Db.update(appDb, sql, args));
 
-            long seq = appendLog(meta, dbKey, tableName, pk, "upsert", rev, originDevice, ts, cols);
-            upsertRowMeta(meta, dbKey, tableName, pk, rev, originDevice, ts, 0, hash);
+            long seq = appendLog(meta, deviceId, dbKey, tableName, pk, "upsert", rev, originDevice, ts, cols);
+            upsertRowMeta(meta, deviceId, dbKey, tableName, pk, rev, originDevice, ts, 0, hash);
 
             Map<String, Object> out = new LinkedHashMap<>();
             out.put("seq", seq);
@@ -425,17 +431,18 @@ public class SyncStore {
             Connection meta = db.scopeMetaConnection(scope);
             String pkCol = schema.primaryKey(dbKey, tableName);
             Map<String, Object> prev = Db.queryOne(meta,
-                    "SELECT * FROM row_meta WHERE db = ? AND table_name = ? AND pk = ?",
-                    dbKey, tableName, pk);
+                    "SELECT * FROM row_meta WHERE device_id = ? AND db = ? AND table_name = ? AND pk = ?",
+                    deviceId, dbKey, tableName, pk);
             long ts = now();
             long rev = (prev == null ? 0 : longValue(prev.get("rev"), 0)) + 1;
 
             int[] changed = {0};
             Db.transaction(appDb, () -> {
-                changed[0] = Db.update(appDb, "DELETE FROM " + tableName + " WHERE " + pkCol + " = ?", pk);
+                changed[0] = Db.update(appDb,
+                        "DELETE FROM `" + tableName + "` WHERE device_id = ? AND " + pkCol + " = ?", deviceId, pk);
             });
-            long seq = appendLog(meta, dbKey, tableName, pk, "delete", rev, originDevice, ts, null);
-            upsertRowMeta(meta, dbKey, tableName, pk, rev, originDevice, ts, 1, "");
+            long seq = appendLog(meta, deviceId, dbKey, tableName, pk, "delete", rev, originDevice, ts, null);
+            upsertRowMeta(meta, deviceId, dbKey, tableName, pk, rev, originDevice, ts, 1, "");
 
             Map<String, Object> out = new LinkedHashMap<>();
             out.put("seq", seq);
@@ -475,15 +482,16 @@ public class SyncStore {
                                  List<Map<String, Object>> deleted) {
         String pkCol = schema.primaryKey(dbKey, table);
         Boolean exists = db.app(deviceId, dbKey, connection ->
-                Db.queryOne(connection, "SELECT 1 AS x FROM " + table + " WHERE " + pkCol + " = ?", pk) != null);
+                Db.queryOne(connection, "SELECT 1 AS x FROM `" + table + "` WHERE device_id = ? AND " + pkCol + " = ?",
+                        deviceId, pk) != null);
         if (!Boolean.TRUE.equals(exists)) {
             return;
         }
         for (SchemaCatalog.ForeignKey fk : dependentTables.getOrDefault(table, List.of())) {
             List<Map<String, Object>> children = db.app(deviceId, dbKey, connection ->
                     Db.query(connection,
-                            "SELECT " + schema.primaryKey(dbKey, fk.table()) + " AS ck FROM " + fk.table() +
-                                    " WHERE " + fk.column() + " = ?", pk));
+                            "SELECT " + schema.primaryKey(dbKey, fk.table()) + " AS ck FROM `" + fk.table() + "`" +
+                                    " WHERE device_id = ? AND " + fk.column() + " = ?", deviceId, pk));
             for (Map<String, Object> child : children) {
                 long childPk = longValue(child.get("ck"), 0);
                 visitForCascade(deviceId, dbKey, fk.table(), childPk, originDevice, dependentTables, deleted);
@@ -498,30 +506,30 @@ public class SyncStore {
         deleted.add(item);
     }
 
-    private long appendLog(Connection meta, String dbKey, String tableName, long pk, String op,
+    private long appendLog(Connection meta, String deviceId, String dbKey, String tableName, long pk, String op,
                            long rev, String originDevice, long ts, Map<String, Object> payload) {
         return Db.insertReturningId(meta,
-                "INSERT INTO change_log (db, table_name, pk, op, rev, origin_device, server_time, payload) " +
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                dbKey, tableName, pk, op, rev, originDevice, ts,
+                "INSERT INTO change_log (device_id, db, table_name, pk, op, rev, origin_device, server_time, payload) " +
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                deviceId, dbKey, tableName, pk, op, rev, originDevice, ts,
                 payload == null ? null : Json.write(payload));
     }
 
-    private void upsertRowMeta(Connection meta, String dbKey, String tableName, long pk, long rev,
+    private void upsertRowMeta(Connection meta, String deviceId, String dbKey, String tableName, long pk, long rev,
                                String originDevice, long ts, int deleted, String hash) {
         Db.update(meta,
-                "INSERT INTO row_meta (db, table_name, pk, rev, origin_device, updated_at, deleted, content_hash) " +
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?) " +
-                        "ON CONFLICT(db, table_name, pk) DO UPDATE SET " +
-                        "rev = excluded.rev, origin_device = excluded.origin_device, updated_at = excluded.updated_at, " +
-                        "deleted = excluded.deleted, content_hash = excluded.content_hash",
-                dbKey, tableName, pk, rev, originDevice, ts, deleted, hash);
+                "INSERT INTO row_meta (device_id, db, table_name, pk, rev, origin_device, updated_at, deleted, content_hash) " +
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) " +
+                        "ON DUPLICATE KEY UPDATE " +
+                        "rev = VALUES(rev), origin_device = VALUES(origin_device), updated_at = VALUES(updated_at), " +
+                        "deleted = VALUES(deleted), content_hash = VALUES(content_hash)",
+                deviceId, dbKey, tableName, pk, rev, originDevice, ts, deleted, hash);
     }
 
     public long currentSeq(String deviceId) {
         return db.scopeMeta(deviceId, meta -> {
             Map<String, Object> row = Db.queryOne(meta,
-                    "SELECT COALESCE(MAX(seq), 0) AS seq FROM change_log");
+                    "SELECT COALESCE(MAX(seq), 0) AS seq FROM change_log WHERE device_id = ?", deviceId);
             return row == null ? 0 : longValue(row.get("seq"), 0);
         });
     }
@@ -529,8 +537,8 @@ public class SyncStore {
     public long rowRevOf(String deviceId, String dbKey, String tableName, long pk) {
         return db.scopeMeta(deviceId, meta -> {
             Map<String, Object> row = Db.queryOne(meta,
-                    "SELECT rev FROM row_meta WHERE db = ? AND table_name = ? AND pk = ?",
-                    dbKey, tableName, pk);
+                    "SELECT rev FROM row_meta WHERE device_id = ? AND db = ? AND table_name = ? AND pk = ?",
+                    deviceId, dbKey, tableName, pk);
             return row == null ? 0 : longValue(row.get("rev"), 0);
         });
     }
@@ -545,6 +553,8 @@ public class SyncStore {
             Connection meta = db.scopeMetaConnection(scope);
             List<String> where = new ArrayList<>();
             List<Object> args = new ArrayList<>();
+            where.add("device_id = ?");
+            args.add(deviceId);
             where.add("seq > ?");
             args.add(since);
             if (dbKey != null) {
@@ -616,8 +626,8 @@ public class SyncStore {
 
                 if ("delete".equals(op)) {
                     Map<String, Object> prev = Db.queryOne(meta,
-                            "SELECT * FROM row_meta WHERE db = ? AND table_name = ? AND pk = ?",
-                            dbKey, table, pkNum);
+                            "SELECT * FROM row_meta WHERE device_id = ? AND db = ? AND table_name = ? AND pk = ?",
+                            deviceId, dbKey, table, pkNum);
                     long incomingRev = longValue(change.get("rev"), 0);
                     if (prev != null && longValue(prev.get("rev"), 0) > incomingRev) {
                         conflicts++;
@@ -652,8 +662,8 @@ public class SyncStore {
                 }
 
                 Map<String, Object> prev = Db.queryOne(meta,
-                        "SELECT * FROM row_meta WHERE db = ? AND table_name = ? AND pk = ?",
-                        dbKey, table, pkNum);
+                        "SELECT * FROM row_meta WHERE device_id = ? AND db = ? AND table_name = ? AND pk = ?",
+                        deviceId, dbKey, table, pkNum);
                 long incomingRev = longValue(change.get("rev"), 0);
                 Map<String, Object> cols = pickColumns(dbKey, table, row);
                 String incomingHash = hashRow(cols);
@@ -848,8 +858,8 @@ public class SyncStore {
         db.meta(meta -> {
             Db.update(meta,
                     "INSERT INTO sync_progress (request_id, message, current, total, updated_at) VALUES (?, ?, ?, ?, ?) " +
-                            "ON CONFLICT(request_id) DO UPDATE SET message = excluded.message, " +
-                            "current = excluded.current, total = excluded.total, updated_at = excluded.updated_at",
+                            "ON DUPLICATE KEY UPDATE message = VALUES(message), " +
+                            "current = VALUES(current), total = VALUES(total), updated_at = VALUES(updated_at)",
                     id, text, current, total, now());
             return null;
         });
@@ -929,7 +939,8 @@ public class SyncStore {
     public Map<String, Object> readRow(String deviceId, String dbKey, String tableName, long pk) {
         String pkCol = schema.primaryKey(dbKey, tableName);
         return db.app(deviceId, dbKey, connection ->
-                Db.queryOne(connection, "SELECT * FROM " + tableName + " WHERE " + pkCol + " = ?", pk));
+                Db.queryOne(connection,
+                        "SELECT * FROM `" + tableName + "` WHERE device_id = ? AND " + pkCol + " = ?", deviceId, pk));
     }
 
     public Map<String, Object> readRow(String deviceId, String dbKey, String tableName, Object pk) {
@@ -952,11 +963,11 @@ public class SyncStore {
                 long total = 0;
                 for (String tableName : def.tables().keySet()) {
                     Map<String, Object> countRow = Db.queryOne(appDb,
-                            "SELECT COUNT(*) AS c FROM " + tableName);
+                            "SELECT COUNT(*) AS c FROM `" + tableName + "` WHERE device_id = ?", deviceId);
                     long count = countRow == null ? 0 : longValue(countRow.get("c"), 0);
                     Map<String, Object> latest = Db.queryOne(meta,
-                            "SELECT MAX(updated_at) AS t FROM row_meta WHERE db = ? AND table_name = ? AND deleted = 0",
-                            dbKey, tableName);
+                            "SELECT MAX(updated_at) AS t FROM row_meta WHERE device_id = ? AND db = ? AND table_name = ? AND deleted = 0",
+                            deviceId, dbKey, tableName);
                     Map<String, Object> item = new LinkedHashMap<>();
                     item.put("count", count);
                     item.put("updatedAt", latest == null ? null : latest.get("t"));
@@ -987,7 +998,7 @@ public class SyncStore {
                 out.put("upTo", 0L);
                 return out;
             }
-            int pruned = Db.update(meta, "DELETE FROM change_log WHERE seq <= ?", seq);
+            int pruned = Db.update(meta, "DELETE FROM change_log WHERE device_id = ? AND seq <= ?", deviceId, seq);
             out.put("pruned", (long) pruned);
             out.put("upTo", seq);
             return out;
@@ -1000,10 +1011,10 @@ public class SyncStore {
         long base = schema.webIdBase();
         return db.scope(deviceId, scope -> {
             Map<String, Object> appMax = Db.queryOne(scope.db(dbKey),
-                    "SELECT COALESCE(MAX(" + pkCol + "), 0) AS m FROM " + tableName);
+                    "SELECT COALESCE(MAX(" + pkCol + "), 0) AS m FROM `" + tableName + "` WHERE device_id = ?", deviceId);
             Map<String, Object> metaMax = Db.queryOne(db.scopeMetaConnection(scope),
-                    "SELECT COALESCE(MAX(pk), 0) AS m FROM row_meta WHERE db = ? AND table_name = ?",
-                    dbKey, tableName);
+                    "SELECT COALESCE(MAX(pk), 0) AS m FROM row_meta WHERE device_id = ? AND db = ? AND table_name = ?",
+                    deviceId, dbKey, tableName);
             long maxSeen = Math.max(
                     appMax == null ? 0 : longValue(appMax.get("m"), 0),
                     metaMax == null ? 0 : longValue(metaMax.get("m"), 0));

@@ -8,6 +8,17 @@ server:
 spring:
   application:
     name: deepseekapp-web-sync
+  # 主存储：本机 MySQL（单库 + device_id 列做多设备隔离）
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:deepseekapp}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true&createDatabaseIfNotExist=true
+    username: ${MYSQL_USER:root}
+    # 密码不写在仓库文件里：放 web/server/.env 的 MYSQL_PASSWORD，或设置同名环境变量
+    password: ${MYSQL_PASSWORD:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 10000
   servlet:
     multipart:
       max-file-size: ${RAG_MAX_UPLOAD:64MB}
@@ -27,6 +38,12 @@ spring:
       # APK 有 100MB+，慢速局域网下下载可能超过 Servlet 默认的 30s 异步超时；
       # 这里放宽到 30 分钟，避免下载到一半被容器切断。
       request-timeout: 30m
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    banner: false
 
 logging:
   charset:
@@ -48,6 +65,8 @@ app:
   max-page-size: ${MAX_PAGE_SIZE:500}
   web-device-id: ${WEB_DEVICE_ID:web-console}
   web-id-base: ${WEB_ID_BASE:1000000000}
+  # 首次启动时把 data/devices 下的旧 SQLite 数据导入 MySQL，完成后写 app_meta 标记，不会重复执行
+  migrate-sqlite: ${MIGRATE_SQLITE:true}
   # ── AI 写作 ──
   # 密钥优先读这里（环境变量）；留空时会自动读取 web/server/.env 里的 DEEPSEEK_API_KEY
   deepseek-api-key: ${DEEPSEEK_API_KEY:}

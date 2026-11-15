@@ -20,6 +20,9 @@ public class AppProperties {
     private String webDeviceId = "web-console";
     private long webIdBase = 1_000_000_000L;
 
+    /** 启动时是否把 data/devices 下的旧 SQLite 数据迁移到 MySQL（只跑一次） */
+    private boolean migrateSqlite = true;
+
     /** AI 写作：密钥可来自环境变量、application.yml，或 web/server/.env（见 WritingService） */
     private String deepseekApiKey = "";
     private String deepseekBaseUrl = "https://api.deepseek.com";
@@ -180,6 +183,14 @@ public class AppProperties {
 
     public long getWebIdBase() {
         return webIdBase;
+    }
+
+    public boolean isMigrateSqlite() {
+        return migrateSqlite;
+    }
+
+    public void setMigrateSqlite(boolean migrateSqlite) {
+        this.migrateSqlite = migrateSqlite;
     }
 
     public void setWebIdBase(long webIdBase) {

@@ -5,10 +5,13 @@ import { ElMessage, ElMessageBox } from 'element-plus';
 import { ChatDotRound, Collection, DataLine, Delete, Expand, Fold, Grid, Iphone, MagicStick, Monitor, Moon, Refresh, RefreshRight, Sunny, VideoPlay } from '@element-plus/icons-vue';
 import { api, formatTime } from '@/api';
 import { useServerStore } from '@/stores/server';
+import { useAgentStore } from '@/stores/agent';
 import { isDark, toggleTheme } from '@/stores/theme';
 import { activeDeviceId, deviceEpoch, setActiveDevice } from '@/stores/device';
+import AgentPanel from '@/components/agent/AgentPanel.vue';
 
 const store = useServerStore();
+const agent = useAgentStore();
 const route = useRoute();
 
 // ── 侧栏宽度 / 收起状态 ──
@@ -470,6 +473,9 @@ onMounted(() => {
           <el-tooltip content="重新拉取服务状态与表结构" placement="bottom-end">
             <el-button :loading="store.loading" :icon="Refresh" circle @click="store.bootstrap()" />
           </el-tooltip>
+          <el-tooltip content="AI 助手：查数据、找素材、生成大纲" placement="bottom-end">
+            <el-button :icon="ChatDotRound" circle @click="agent.togglePanel()" />
+          </el-tooltip>
           <el-tooltip :content="isDark ? '切换到日间模式' : '切换到夜间模式'" placement="bottom-end">
             <el-button
               :icon="isDark ? Sunny : Moon"
@@ -498,6 +504,8 @@ onMounted(() => {
         </router-view>
       </main>
     </div>
+
+    <AgentPanel />
   </div>
 </template>
 

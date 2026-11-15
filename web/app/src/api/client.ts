@@ -80,6 +80,18 @@ export async function post<T>(path: string, body?: unknown): Promise<T> {
   return (await parse<T>(res, url)).data;
 }
 
+/**
+ * 只发请求、不等响应的 POST：用于页面关闭或中断时把「取消」送达服务端。
+ * keepalive 让浏览器在页面卸载后仍把请求发完。
+ */
+export function postKeepalive(path: string): void {
+  try {
+    void fetch(BASE + path, { method: 'POST', headers: headers(), keepalive: true });
+  } catch {
+    /* 取消失败不影响前端停止 */
+  }
+}
+
 export async function put<T>(path: string, body?: unknown): Promise<T> {
   const url = BASE + path;
   const res = await fetch(url, {
@@ -146,6 +158,8 @@ export async function download(path: string, fallbackName: string): Promise<void
 }
 
 export interface StreamHandlers {
+  /** 任一事件都会先经过这里，Agent 面板据此分发 tool_call / tool_result 等自定义类型 */
+  onEvent?: (event: Record<string, unknown>) => void;
   onDelta?: (text: string) => void;
   onStage?: (stage: { index: number; total: number; label: string }) => void;
   /** 下载/转写等进度；percent 可能缺省（总大小未知），只有文本 */
@@ -214,6 +228,8 @@ export async function postStream(
     } catch {
       return;
     }
+
+    handlers.onEvent?.(event as Record<string, unknown>);
 
     if (event.type === 'delta' && event.text) {
       handlers.onDelta?.(event.text);
