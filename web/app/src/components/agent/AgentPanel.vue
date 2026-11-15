@@ -110,6 +110,7 @@ watch(
     if (open) {
       void agent.loadTools();
       void agent.loadSessions();
+      void agent.resumeActive();
       scrollToBottom();
     }
   },
@@ -237,6 +238,7 @@ onMounted(() => {
   if (agent.panelOpen) {
     void agent.loadTools();
     void agent.loadSessions();
+    void agent.resumeActive();
   }
 });
 
@@ -372,6 +374,9 @@ onUnmounted(() => {
                 正在思考…
               </div>
               <div v-if="message.status === 'cancelled'" class="msg-note">已停止生成</div>
+              <div v-if="message.status === 'interrupted'" class="msg-note">
+                任务因服务重启中断，发送「继续」可以接着做
+              </div>
               <div v-if="message.status === 'error'" class="msg-note error">{{ message.error }}</div>
             </div>
           </template>

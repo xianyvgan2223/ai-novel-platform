@@ -186,7 +186,25 @@ export async function postStream(
     body: JSON.stringify(body),
     signal,
   });
+  await consumeSse(res, url, handlers);
+}
 
+/** GET 方式读取 SSE：Agent 断线重连时从 after 之后重放事件 */
+export async function getStream(
+  path: string,
+  handlers: StreamHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
+  const url = BASE + path;
+  const res = await fetch(url, {
+    method: 'GET',
+    headers: headers({ Accept: 'text/event-stream' }),
+    signal,
+  });
+  await consumeSse(res, url, handlers);
+}
+
+async function consumeSse(res: Response, url: string, handlers: StreamHandlers): Promise<void> {
   if (!res.ok) {
     const text = await res.text();
     let message = '请求失败：HTTP ' + res.status;

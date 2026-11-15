@@ -52,8 +52,8 @@ public interface AgentStore {
 
     // ── 消息 ──
 
-    @Insert("INSERT INTO agent_messages (session_id, device_id, role, content, parts, status, error, elapsed_ms, created_at) " +
-            "VALUES (#{sessionId}, #{deviceId}, #{role}, #{content}, #{parts}, #{status}, #{error}, #{elapsedMs}, #{now})")
+    @Insert("INSERT INTO agent_messages (session_id, device_id, role, content, parts, status, error, elapsed_ms, run_id, created_at) " +
+            "VALUES (#{sessionId}, #{deviceId}, #{role}, #{content}, #{parts}, #{status}, #{error}, #{elapsedMs}, #{runId}, #{now})")
     @Options(useGeneratedKeys = true, keyProperty = "id")
     int insertMessage(Map<String, Object> row);
 
@@ -94,4 +94,33 @@ public interface AgentStore {
 
     @Select("SELECT * FROM agent_tasks WHERE session_id = #{sessionId} ORDER BY id ASC")
     List<Map<String, Object>> listTasks(@Param("sessionId") long sessionId);
+
+    // ── 运行日志（断联/重启恢复）──
+
+    @Insert("INSERT INTO agent_runs (run_id, device_id, session_id, status, last_seq, started_at) " +
+            "VALUES (#{runId}, #{deviceId}, #{sessionId}, 'running', 0, #{now})")
+    int insertRun(Map<String, Object> row);
+
+    @Update("UPDATE agent_runs SET last_seq = #{lastSeq}, text_so_far = #{text}, parts_json = #{parts}, " +
+            "status = #{status} WHERE run_id = #{runId}")
+    int checkpointRun(@Param("runId") String runId, @Param("lastSeq") long lastSeq,
+                      @Param("text") String text, @Param("parts") String parts,
+                      @Param("status") String status);
+
+    @Update("UPDATE agent_runs SET last_seq = #{lastSeq}, text_so_far = #{text}, parts_json = #{parts}, " +
+            "status = #{status}, error = #{error}, finished_at = #{now} WHERE run_id = #{runId}")
+    int finishRun(@Param("runId") String runId, @Param("lastSeq") long lastSeq,
+                  @Param("text") String text, @Param("parts") String parts,
+                  @Param("status") String status, @Param("error") String error,
+                  @Param("now") long now);
+
+    /** 进程启动时上一轮没来得及结束的运行。 */
+    @Select("SELECT * FROM agent_runs WHERE status = 'running'")
+    List<Map<String, Object>> runningRuns();
+
+    @Update("UPDATE agent_runs SET status = 'interrupted', finished_at = #{now} WHERE status = 'running'")
+    int markInterrupted(@Param("now") long now);
+
+    @Select("SELECT COUNT(*) AS c FROM agent_messages WHERE run_id = #{runId}")
+    long countMessagesByRun(@Param("runId") String runId);
 }

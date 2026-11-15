@@ -113,9 +113,10 @@ public class AgentConversationService {
     }
 
     public void appendAssistant(String deviceId, long sessionId, String content, String partsJson,
-                                String status, String error, Long elapsedMs) {
+                                String status, String error, Long elapsedMs, String runId) {
         Map<String, Object> row = messageRow(deviceId, sessionId, "assistant", content, status, error, elapsedMs);
         row.put("parts", partsJson == null || partsJson.isBlank() ? "[]" : partsJson);
+        row.put("runId", runId);
         store.insertMessage(row);
         store.touchSession(sessionId, deviceId, System.currentTimeMillis());
     }
@@ -144,6 +145,7 @@ public class AgentConversationService {
         row.put("status", status);
         row.put("error", error);
         row.put("elapsedMs", elapsedMs);
+        row.put("runId", null);
         row.put("now", System.currentTimeMillis());
         return row;
     }

@@ -1,7 +1,7 @@
 package com.deepseekapp.webserver.feature.agent.tool;
 
-import com.deepseekapp.webserver.feature.agent.service.AgentEvent;
-import com.deepseekapp.webserver.feature.agent.service.AgentRun;
+import com.deepseekapp.webserver.feature.agent.runtime.AgentEvent;
+import com.deepseekapp.webserver.feature.agent.runtime.AgentRun;
 import com.deepseekapp.webserver.feature.agent.service.AgentTaskService;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.Tool;

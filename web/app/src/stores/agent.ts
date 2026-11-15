@@ -43,7 +43,7 @@ export interface AgentMessage {
   role: 'user' | 'assistant';
   parts: AgentPart[];
   createdAt: number;
-  status: 'idle' | 'streaming' | 'done' | 'cancelled' | 'error';
+  status: 'idle' | 'streaming' | 'done' | 'cancelled' | 'interrupted' | 'error';
   error?: string;
 }
 
@@ -90,7 +90,14 @@ function toMessage(dto: AgentMessageDto): AgentMessage {
     role: dto.role,
     parts: parts.length ? parts : dto.content ? [{ kind: 'text', text: dto.content }] : [],
     createdAt: dto.createdAt ?? Date.now(),
-    status: dto.status === 'cancelled' ? 'cancelled' : dto.status === 'error' ? 'error' : 'done',
+    status:
+      dto.status === 'cancelled'
+        ? 'cancelled'
+        : dto.status === 'interrupted'
+          ? 'interrupted'
+          : dto.status === 'error'
+            ? 'error'
+            : 'done',
     error: dto.error || undefined,
   };
 }
@@ -109,6 +116,7 @@ export const useAgentStore = defineStore('agent', () => {
   const currentTitle = ref('');
   const tasks = ref<AgentTask[]>([]);
   const settings = ref<AgentSettings | null>(null);
+  const lastSeq = ref(0);
 
   let controller: AbortController | null = null;
   let seq = 0;
@@ -175,6 +183,8 @@ export const useAgentStore = defineStore('agent', () => {
     messages.value = (detail.messages ?? []).map(toMessage);
     tasks.value = detail.tasks ?? [];
     lastError.value = '';
+    // 如果这个会话还有没结束的运行，自动接管
+    void resumeActive();
   }
 
   async function deleteSession(id: number): Promise<void> {
@@ -238,6 +248,7 @@ export const useAgentStore = defineStore('agent', () => {
     streaming.value = true;
     lastError.value = '';
     runId.value = '';
+    lastSeq.value = 0;
     controller = new AbortController();
 
     try {
@@ -254,10 +265,15 @@ export const useAgentStore = defineStore('agent', () => {
       );
     } catch (error) {
       const aborted = error instanceof DOMException && error.name === 'AbortError';
-      assistant.status = aborted ? 'cancelled' : 'error';
-      if (!aborted) {
-        assistant.error = error instanceof Error ? error.message : String(error);
-        lastError.value = assistant.error;
+      if (!aborted && runId.value) {
+        // 网络抖动/连接被掐断：后台仍在跑，自动接回去
+        await resume(assistant);
+      } else {
+        assistant.status = aborted ? 'cancelled' : 'error';
+        if (!aborted) {
+          assistant.error = error instanceof Error ? error.message : String(error);
+          lastError.value = assistant.error;
+        }
       }
     } finally {
       if (assistant.status === 'streaming') assistant.status = 'done';
@@ -280,7 +296,67 @@ export const useAgentStore = defineStore('agent', () => {
     streaming.value = false;
   }
 
+  /** 接回一个正在后台运行的对话。existing 为空时新建气泡并从 0 重放。 */
+  async function resume(existing?: AgentMessage): Promise<void> {
+    if (!runId.value) return;
+    let bubble = existing;
+    if (!bubble || bubble.status !== 'streaming') {
+      bubble = {
+        id: nextId('a'),
+        role: 'assistant',
+        parts: [],
+        createdAt: Date.now(),
+        status: 'streaming',
+      };
+      messages.value.push(bubble);
+      lastSeq.value = 0;
+    }
+    const target = bubble;
+    streaming.value = true;
+    controller = new AbortController();
+    try {
+      await agentApi.attachRun(
+        runId.value,
+        lastSeq.value,
+        {
+          onEvent: (event) => handleEvent(target, event),
+          onDone: () => {
+            if (target.status === 'streaming') target.status = 'done';
+            streaming.value = false;
+          },
+        },
+        controller.signal,
+      );
+    } catch {
+      /* 重连失败就保留已经收到的内容 */
+    } finally {
+      if (target.status === 'streaming') target.status = 'done';
+      streaming.value = false;
+      controller = null;
+      void loadSessions();
+    }
+  }
+
+  /** 页面刷新或切换会话后，检查是否有未结束的运行并接管。 */
+  async function resumeActive(): Promise<void> {
+    if (streaming.value) return;
+    try {
+      const result = await agentApi.activeRuns(currentSessionId.value);
+      const run = result.runs?.[0];
+      if (!run) return;
+      runId.value = run.runId;
+      if (!currentSessionId.value) currentSessionId.value = run.sessionId;
+      lastSeq.value = 0;
+      await resume();
+    } catch {
+      /* 没有可接管的运行 */
+    }
+  }
+
   function handleEvent(assistant: AgentMessage, event: Record<string, unknown>): void {
+    if (typeof event.seq === 'number') {
+      lastSeq.value = event.seq;
+    }
     const type = String(event.type ?? '');
     switch (type) {
       case 'start':
@@ -443,5 +519,6 @@ export const useAgentStore = defineStore('agent', () => {
     send,
     stop,
     answerAsk,
+    resumeActive,
   };
 });

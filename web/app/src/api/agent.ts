@@ -1,5 +1,5 @@
 /** api/agent.ts —— 右侧 Agent 面板接口（SSE + 会话 + 设置） */
-import { del, get, post, postKeepalive, postStream, put } from './client';
+import { del, get, getStream, post, postKeepalive, postStream, put } from './client';
 import type { StreamHandlers } from './client';
 
 export interface AgentHistoryItem {
@@ -110,5 +110,20 @@ export const agentApi = {
     post<{ id: string; accepted: boolean }>(
       '/api/agent/asks/' + encodeURIComponent(id) + '/answer',
       { answer },
+    ),
+
+  /** 重连到正在运行的对话：从 after 之后重放事件并继续跟随 */
+  attachRun: (runId: string, after: number, handlers: StreamHandlers, signal?: AbortSignal) =>
+    getStream(
+      '/api/agent/runs/' + encodeURIComponent(runId) + '/stream?after=' + Math.max(0, after),
+      handlers,
+      signal,
+    ),
+
+  /** 当前设备（可选会话）还没结束的运行 */
+  activeRuns: (sessionId?: number | null) =>
+    get<{ runs: { runId: string; sessionId: number; lastSeq: number; startedAt: number }[] }>(
+      '/api/agent/runs/active',
+      sessionId ? { sessionId } : {},
     ),
 };

@@ -1,10 +1,10 @@
 package com.deepseekapp.webserver.feature.agent.api;
 
 import com.deepseekapp.webserver.config.AppProperties;
-import com.deepseekapp.webserver.feature.agent.service.AgentAskRegistry;
+import com.deepseekapp.webserver.feature.agent.runtime.AgentAskRegistry;
 import com.deepseekapp.webserver.feature.agent.service.AgentConversationService;
-import com.deepseekapp.webserver.feature.agent.service.AgentEvent;
-import com.deepseekapp.webserver.feature.agent.service.AgentRunRegistry;
+import com.deepseekapp.webserver.feature.agent.runtime.AgentEvent;
+import com.deepseekapp.webserver.feature.agent.runtime.AgentRunRegistry;
 import com.deepseekapp.webserver.feature.agent.service.AgentService;
 import com.deepseekapp.webserver.feature.agent.service.AgentSettingsService;
 import com.deepseekapp.webserver.feature.agent.service.AgentTaskService;
@@ -21,13 +21,17 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import com.deepseekapp.webserver.feature.agent.runtime.AgentRun;
 
 /**
  * 网页端右侧 Agent 面板接口。
@@ -85,7 +89,44 @@ public class AgentController {
         }
 
         String deviceId = RequestDevice.deviceId(request, props);
-        agentService.chat(deviceId, longOrNull(payload.get("sessionId")), message, out);
+        Long sessionId = longOrNull(payload.get("sessionId"));
+        AgentRun run = agentService.start(deviceId, sessionId, message);
+        run.attach(out, 0);
+    }
+
+    /** 重连：从 after 之后重放事件，并继续跟随运行。 */
+    @GetMapping("/runs/{id}/stream")
+    public void streamRun(@PathVariable("id") String id,
+                          @RequestParam(value = "after", defaultValue = "0") long after,
+                          HttpServletRequest request,
+                          HttpServletResponse response) throws IOException {
+        OutputStream out = startSse(response);
+        String deviceId = RequestDevice.deviceId(request, props);
+        AgentRun run = registry.get(id);
+        if (run == null || !run.deviceId().equals(deviceId)) {
+            writeEvent(out, AgentEvent.of("error", "error", "运行不存在或已过期"));
+            return;
+        }
+        run.attach(out, after);
+    }
+
+    /** 当前设备（可选某个会话）还没结束的运行，供页面刷新后接管。 */
+    @GetMapping("/runs/active")
+    public Map<String, Object> activeRuns(@RequestParam(value = "sessionId", required = false) Long sessionId,
+                                          HttpServletRequest request) {
+        String deviceId = RequestDevice.deviceId(request, props);
+        List<Map<String, Object>> runs = new ArrayList<>();
+        for (AgentRun run : registry.activeFor(deviceId, sessionId == null ? 0 : sessionId)) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("runId", run.id());
+            item.put("sessionId", run.sessionId());
+            item.put("lastSeq", run.lastSeq());
+            item.put("startedAt", run.startedAt());
+            runs.add(item);
+        }
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("runs", runs);
+        return Api.ok(data);
     }
 
     @PostMapping("/runs/{id}/cancel")

@@ -333,6 +333,24 @@ public class MySqlSchemaInitializer implements ApplicationRunner {
                   KEY `idx_agent_tasks_session` (`session_id`, `id`)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """);
+        execute(connection, """
+                CREATE TABLE IF NOT EXISTS `agent_runs` (
+                  `run_id` VARCHAR(64) NOT NULL,
+                  `device_id` VARCHAR(64) NOT NULL DEFAULT '',
+                  `session_id` BIGINT NOT NULL DEFAULT 0,
+                  `status` VARCHAR(16) NOT NULL DEFAULT 'running',
+                  `last_seq` BIGINT NOT NULL DEFAULT 0,
+                  `text_so_far` LONGTEXT NULL,
+                  `parts_json` LONGTEXT NULL,
+                  `error` VARCHAR(500) NULL,
+                  `started_at` BIGINT NOT NULL DEFAULT 0,
+                  `finished_at` BIGINT NOT NULL DEFAULT 0,
+                  PRIMARY KEY (`run_id`),
+                  KEY `idx_agent_runs_session` (`device_id`, `session_id`, `started_at`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """);
+        ensureColumn(connection, "agent_messages", "run_id", "VARCHAR(64) NULL");
+        ensureIndex(connection, "agent_messages", "idx_agent_messages_run", "`run_id`");
     }
 
     // ───────────────────────────── 工具 ─────────────────────────────
@@ -354,6 +372,22 @@ public class MySqlSchemaInitializer implements ApplicationRunner {
         if (!columnExists(connection, table, column)) {
             execute(connection, "ALTER TABLE `" + table + "` ADD COLUMN `" + column + "` " + definition);
         }
+    }
+
+    private void ensureIndex(Connection connection, String table, String indexName, String columns)
+            throws SQLException {
+        String sql = "SELECT 1 FROM information_schema.statistics WHERE table_schema = DATABASE() " +
+                "AND table_name = ? AND index_name = ?";
+        try (var ps = connection.prepareStatement(sql)) {
+            ps.setString(1, table);
+            ps.setString(2, indexName);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    return;
+                }
+            }
+        }
+        execute(connection, "ALTER TABLE `" + table + "` ADD INDEX `" + indexName + "` (" + columns + ")");
     }
 
     private void execute(Connection connection, String sql) throws SQLException {

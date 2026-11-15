@@ -1,7 +1,7 @@
 package com.deepseekapp.webserver.feature.agent.tool;
 
 import com.deepseekapp.webserver.feature.agent.service.AgentOptions;
-import com.deepseekapp.webserver.feature.agent.service.AgentRun;
+import com.deepseekapp.webserver.feature.agent.runtime.AgentRun;
 import com.deepseekapp.webserver.feature.agent.service.AgentSettingsService;
 import com.deepseekapp.webserver.feature.agent.service.AgentWebSearchService;
 import com.deepseekapp.webserver.web.ApiException;

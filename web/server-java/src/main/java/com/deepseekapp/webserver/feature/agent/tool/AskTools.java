@@ -1,9 +1,9 @@
 package com.deepseekapp.webserver.feature.agent.tool;
 
-import com.deepseekapp.webserver.feature.agent.service.AgentAskRegistry;
-import com.deepseekapp.webserver.feature.agent.service.AgentCancelledException;
-import com.deepseekapp.webserver.feature.agent.service.AgentEvent;
-import com.deepseekapp.webserver.feature.agent.service.AgentRun;
+import com.deepseekapp.webserver.feature.agent.runtime.AgentAskRegistry;
+import com.deepseekapp.webserver.feature.agent.runtime.AgentCancelledException;
+import com.deepseekapp.webserver.feature.agent.runtime.AgentEvent;
+import com.deepseekapp.webserver.feature.agent.runtime.AgentRun;
 import com.deepseekapp.webserver.web.ApiException;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.Tool;

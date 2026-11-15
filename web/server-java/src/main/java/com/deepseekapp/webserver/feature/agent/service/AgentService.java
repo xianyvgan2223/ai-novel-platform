@@ -1,34 +1,32 @@
 package com.deepseekapp.webserver.feature.agent.service;
 
+import com.deepseekapp.webserver.feature.agent.runtime.AgentCancelledException;
+import com.deepseekapp.webserver.feature.agent.runtime.AgentEvent;
+import com.deepseekapp.webserver.feature.agent.runtime.AgentRun;
+import com.deepseekapp.webserver.feature.agent.runtime.AgentRunRegistry;
 import com.deepseekapp.webserver.feature.agent.tool.AgentToolCatalog;
 import com.deepseekapp.webserver.feature.agent.tool.AgentToolSupport;
 import com.deepseekapp.webserver.web.ApiException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
-import org.springframework.ai.chat.messages.UserMessage;
-import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.stereotype.Service;
 
-import java.io.OutputStream;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Agent 对话编排：会话持久化、面板设置、工具调用、取消与心跳。
+ * Agent 对话编排。
  *
- * <p>每轮对话都会把用户消息与助手消息（含工具卡片部件）落到 MySQL，
- * 因此刷新页面后仍能查看历史。模型参数按设备设置动态构建 ChatClient。</p>
+ * <p>执行模型：{@link #start} 同步创建会话与运行、登记用户消息，然后把模型调用
+ * 提交到后台线程；控制器的请求线程只负责 {@link AgentRun#attach} 把事件写给浏览器。
+ * 因此浏览器断开不会中断生成，重连后可以从任意 seq 继续接收。</p>
  */
 @Service
 public class AgentService {
@@ -36,31 +34,12 @@ public class AgentService {
     private static final Logger log = LoggerFactory.getLogger(AgentService.class);
 
     private static final int MAX_HISTORY = 20;
-    private static final long HEARTBEAT_SECONDS = 15;
 
-    private static final String BASE_PROMPT = """
-            你是 deepseekapp 网页创作工作台的助手，可以直接调用工具读取用户的小说数据、检索情节素材、生成大纲与正文。
-
-            规则：
-            1. 需要数据时必须调用工具，不要凭印象编造书名、章节、素材或统计数字。
-            2. 工具返回为空就如实说明「库里没有找到」，不要编一个结果。
-            3. 生成大纲或正文前，先确认题材、主题、主角等关键信息；用户没说时使用合理默认值，并在回答里说明用了什么默认值。
-            4. 生成结果不会自动保存，回答结尾提醒用户可以在页面上确认后保存。
-            5. 你是只读的：不要声称已经修改、覆盖或删除任何数据。
-            6. 用中文回答，简洁直接；不要整段复述工具返回的原始 JSON，挑关键信息讲。
-            7. 任务需要 3 步以上时（分析整本书、批量检查章节、生成后校对等），先调用 plan_task 列出步骤，
-               再逐步执行，每完成一步调用 update_task_step 回写状态，最后给出总结。
-            8. 关键信息缺失或存在多种合理方案时，调用 ask_user 给用户几个选项，用户可以选也可以自己输入；
-               能从工具或上文推断出来时不要滥用。
-            9. 联网搜索状态：%s
-            """;
-
-    private static final ScheduledExecutorService HEARTBEAT =
-            Executors.newScheduledThreadPool(2, runnable -> {
-                Thread thread = new Thread(runnable, "agent-heartbeat");
-                thread.setDaemon(true);
-                return thread;
-            });
+    private static final ExecutorService EXECUTOR = Executors.newFixedThreadPool(4, runnable -> {
+        Thread thread = new Thread(runnable, "agent-run");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     private final AgentToolCatalog toolCatalog;
     private final AgentRunRegistry registry;
@@ -81,48 +60,48 @@ public class AgentService {
     }
 
     /**
-     * 执行一次对话，事件直接写入 SSE 输出流。方法返回时流已结束。
-     *
-     * @param deviceId  当前设备
-     * @param sessionId 会话 id；为空时自动新建
-     * @param message   本轮用户输入
+     * 创建并启动一次运行。返回后调用方应立即 {@link AgentRun#attach} 接管当前客户端；
+     * 即使没有客户端接入，运行也会继续到结束。
      */
-    public void chat(String deviceId, Long sessionId, String message, OutputStream out) {
-        AgentRun run = registry.create(deviceId, out);
-        ScheduledFuture<?> heartbeat = startHeartbeat(run);
+    public AgentRun start(String deviceId, Long sessionId, String message) {
+        long resolved = resolveSession(deviceId, sessionId, message);
+        AgentRun run = registry.create(deviceId, resolved);
+
+        Map<String, Object> start = new LinkedHashMap<>();
+        start.put("type", "start");
+        start.put("runId", run.id());
+        start.put("sessionId", resolved);
+        start.put("title", conversations.titleOf(deviceId, resolved));
+        run.emit(start);
+
+        List<Map<String, String>> history = conversations.history(resolved, MAX_HISTORY);
+        conversations.appendUser(deviceId, resolved, message);
+
+        EXECUTOR.submit(() -> execute(run, deviceId, resolved, message, history));
+        return run;
+    }
+
+    private void execute(AgentRun run, String deviceId, long sessionId, String message,
+                         List<Map<String, String>> history) {
         long startedAt = System.currentTimeMillis();
         AtomicBoolean failed = new AtomicBoolean(false);
         AtomicReference<String> failure = new AtomicReference<>("");
-        AtomicReference<Long> activeSession = new AtomicReference<>(0L);
-
         try {
-            long resolved = resolveSession(deviceId, sessionId, message);
-            activeSession.set(resolved);
             AgentOptions options = settings.resolve(deviceId);
-
-            Map<String, Object> start = new LinkedHashMap<>();
-            start.put("type", "start");
-            start.put("runId", run.id());
-            start.put("sessionId", resolved);
-            start.put("title", conversations.titleOf(deviceId, resolved));
-            run.emit(start);
-
-            List<Map<String, String>> history = conversations.history(resolved, MAX_HISTORY);
-            conversations.appendUser(deviceId, resolved, message);
-            List<Message> messages = buildMessages(history, message);
-
+            List<Message> messages = AgentPromptFactory.buildMessages(history, message);
             ChatClient client = clientFactory.clientFor(options);
+
             Map<String, Object> toolContext = new LinkedHashMap<>();
             toolContext.put(AgentToolSupport.RUN_ID_KEY, run.id());
-            toolContext.put(AgentToolSupport.SESSION_ID_KEY, resolved);
+            toolContext.put(AgentToolSupport.SESSION_ID_KEY, sessionId);
             toolContext.put(AgentToolSupport.DEVICE_ID_KEY, deviceId);
 
             client.prompt()
-                    .system(systemPrompt(options, deviceId))
+                    .system(AgentPromptFactory.systemPrompt(options, deviceId))
                     .messages(messages)
                     .tools(toolCatalog.toolObjects(options.webSearch()))
                     .toolContext(toolContext)
-                    .options(requestOptions(options))
+                    .options(AgentPromptFactory.requestOptions(options))
                     .stream()
                     .content()
                     .takeWhile(delta -> !run.cancelled())
@@ -155,24 +134,18 @@ public class AgentService {
                 run.emit(AgentEvent.of("error", "error", friendly(e.getMessage())));
             }
         } finally {
-            if (heartbeat != null) {
-                heartbeat.cancel(false);
-            }
-            persistAssistant(deviceId, activeSession.get(), run, failed.get(), failure.get(), startedAt);
-            registry.remove(run.id());
-            run.close();
+            String status = run.cancelled() ? "cancelled" : (failed.get() ? "error" : "done");
+            persistAssistant(deviceId, sessionId, run, failed.get(), failure.get(), startedAt);
+            run.markFinished(status);
         }
     }
 
     private void persistAssistant(String deviceId, long sessionId, AgentRun run,
                                   boolean failed, String failure, long startedAt) {
-        if (sessionId <= 0) {
-            return;
-        }
         try {
             String status = run.cancelled() ? "cancelled" : (failed ? "error" : "done");
             conversations.appendAssistant(deviceId, sessionId, run.text(), run.partsJson(),
-                    status, failed ? friendly(failure) : null, elapsed(startedAt));
+                    status, failed ? friendly(failure) : null, elapsed(startedAt), run.id());
         } catch (RuntimeException e) {
             log.warn("保存 Agent 助手消息失败：{}", e.getMessage());
         }
@@ -189,69 +162,6 @@ public class AgentService {
         }
         Map<String, Object> created = conversations.create(deviceId, message);
         return ((Number) created.get("id")).longValue();
-    }
-
-    private static List<Message> buildMessages(List<Map<String, String>> history, String message) {
-        List<Message> out = new ArrayList<>();
-        for (Map<String, String> item : history) {
-            String content = item.getOrDefault("content", "");
-            if (content == null || content.isBlank()) {
-                continue;
-            }
-            out.add("assistant".equals(item.get("role"))
-                    ? new AssistantMessage(content)
-                    : new UserMessage(content));
-        }
-        out.add(new UserMessage(message));
-        return out;
-    }
-
-    private static String systemPrompt(AgentOptions options, String deviceId) {
-        String searchState = options.webSearch()
-                ? "已开启。需要新闻、实时数据或外部资料时调用 web_search。"
-                : "未开启。不要尝试搜索网页；如果确实需要实时信息，告诉用户可以在设置里打开联网搜索。";
-        StringBuilder prompt = new StringBuilder(String.format(BASE_PROMPT, searchState));
-        prompt.append("\n当前设备：").append(deviceId);
-        if (options.systemPrompt() != null && !options.systemPrompt().isBlank()) {
-            prompt.append("\n\n").append(options.systemPrompt().trim());
-        }
-        return prompt.toString();
-    }
-
-    private static OpenAiChatOptions requestOptions(AgentOptions options) {
-        OpenAiChatOptions.Builder builder = OpenAiChatOptions.builder();
-        if (options.model() != null && !options.model().isBlank()) {
-            builder.model(options.model());
-        }
-        if (options.temperature() != null) {
-            builder.temperature(Math.min(Math.max(options.temperature(), 0.0), 2.0));
-        }
-        if (options.maxTokens() != null) {
-            builder.maxTokens(Math.min(Math.max(options.maxTokens(), 256), 32768));
-        }
-        if (options.topP() != null) {
-            builder.topP(Math.min(Math.max(options.topP(), 0.0), 1.0));
-        }
-        if (options.frequencyPenalty() != null) {
-            builder.frequencyPenalty(Math.min(Math.max(options.frequencyPenalty(), -2.0), 2.0));
-        }
-        if (options.presencePenalty() != null) {
-            builder.presencePenalty(Math.min(Math.max(options.presencePenalty(), -2.0), 2.0));
-        }
-        return builder.build();
-    }
-
-    private static ScheduledFuture<?> startHeartbeat(AgentRun run) {
-        try {
-            return HEARTBEAT.scheduleAtFixedRate(() -> {
-                if (run.cancelled() || run.closed()) {
-                    return;
-                }
-                run.ping();
-            }, HEARTBEAT_SECONDS, HEARTBEAT_SECONDS, TimeUnit.SECONDS);
-        } catch (RuntimeException e) {
-            return null;
-        }
     }
 
     private static String friendly(String message) {
