@@ -263,6 +263,76 @@ public class MySqlSchemaInitializer implements ApplicationRunner {
                   PRIMARY KEY (`k`)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """);
+        ensureAgentTables(connection);
+    }
+
+    /** 右侧 Agent 面板：会话、消息、设置、任务计划。 */
+    private void ensureAgentTables(Connection connection) throws SQLException {
+        execute(connection, """
+                CREATE TABLE IF NOT EXISTS `agent_sessions` (
+                  `id` BIGINT NOT NULL AUTO_INCREMENT,
+                  `device_id` VARCHAR(64) NOT NULL DEFAULT '',
+                  `title` VARCHAR(191) NOT NULL DEFAULT '',
+                  `message_count` INT NOT NULL DEFAULT 0,
+                  `created_at` BIGINT NOT NULL DEFAULT 0,
+                  `updated_at` BIGINT NOT NULL DEFAULT 0,
+                  PRIMARY KEY (`id`),
+                  KEY `idx_agent_sessions_device` (`device_id`, `updated_at`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """);
+        execute(connection, """
+                CREATE TABLE IF NOT EXISTS `agent_messages` (
+                  `id` BIGINT NOT NULL AUTO_INCREMENT,
+                  `session_id` BIGINT NOT NULL DEFAULT 0,
+                  `device_id` VARCHAR(64) NOT NULL DEFAULT '',
+                  `role` VARCHAR(16) NOT NULL DEFAULT 'user',
+                  `content` LONGTEXT NULL,
+                  `parts` LONGTEXT NULL,
+                  `status` VARCHAR(16) NOT NULL DEFAULT 'done',
+                  `error` VARCHAR(500) NULL,
+                  `elapsed_ms` BIGINT NULL,
+                  `created_at` BIGINT NOT NULL DEFAULT 0,
+                  PRIMARY KEY (`id`),
+                  KEY `idx_agent_messages_session` (`session_id`, `id`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """);
+        execute(connection, """
+                CREATE TABLE IF NOT EXISTS `agent_settings` (
+                  `device_id` VARCHAR(64) NOT NULL,
+                  `api_key` VARCHAR(255) NOT NULL DEFAULT '',
+                  `base_url` VARCHAR(255) NOT NULL DEFAULT '',
+                  `model` VARCHAR(64) NOT NULL DEFAULT '',
+                  `temperature` DOUBLE NULL,
+                  `max_tokens` INT NULL,
+                  `top_p` DOUBLE NULL,
+                  `frequency_penalty` DOUBLE NULL,
+                  `presence_penalty` DOUBLE NULL,
+                  `system_prompt` LONGTEXT NULL,
+                  `web_search` TINYINT NOT NULL DEFAULT 0,
+                  `search_count` INT NOT NULL DEFAULT 5,
+                  `search_need_content` TINYINT NOT NULL DEFAULT 0,
+                  `updated_at` BIGINT NOT NULL DEFAULT 0,
+                  PRIMARY KEY (`device_id`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """);
+        ensureColumn(connection, "agent_settings", "web_search", "TINYINT NOT NULL DEFAULT 0");
+        ensureColumn(connection, "agent_settings", "search_count", "INT NOT NULL DEFAULT 5");
+        ensureColumn(connection, "agent_settings", "search_need_content", "TINYINT NOT NULL DEFAULT 0");
+        execute(connection, """
+                CREATE TABLE IF NOT EXISTS `agent_tasks` (
+                  `id` BIGINT NOT NULL AUTO_INCREMENT,
+                  `session_id` BIGINT NOT NULL DEFAULT 0,
+                  `device_id` VARCHAR(64) NOT NULL DEFAULT '',
+                  `run_id` VARCHAR(64) NOT NULL DEFAULT '',
+                  `title` VARCHAR(191) NOT NULL DEFAULT '',
+                  `steps` LONGTEXT NULL,
+                  `status` VARCHAR(16) NOT NULL DEFAULT 'running',
+                  `created_at` BIGINT NOT NULL DEFAULT 0,
+                  `updated_at` BIGINT NOT NULL DEFAULT 0,
+                  PRIMARY KEY (`id`),
+                  KEY `idx_agent_tasks_session` (`session_id`, `id`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """);
     }
 
     // ───────────────────────────── 工具 ─────────────────────────────
@@ -276,6 +346,13 @@ public class MySqlSchemaInitializer implements ApplicationRunner {
             try (ResultSet rs = ps.executeQuery()) {
                 return rs.next();
             }
+        }
+    }
+
+    private void ensureColumn(Connection connection, String table, String column, String definition)
+            throws SQLException {
+        if (!columnExists(connection, table, column)) {
+            execute(connection, "ALTER TABLE `" + table + "` ADD COLUMN `" + column + "` " + definition);
         }
     }
 

@@ -22,17 +22,24 @@ public class AgentToolCatalog {
     private record ToolBean(Object instance, Class<?> type) {
     }
 
-    public AgentToolCatalog(DataTools dataTools, RagTools ragTools, WritingTools writingTools) {
+    public AgentToolCatalog(DataTools dataTools, RagTools ragTools, WritingTools writingTools,
+                           TaskTools taskTools, AskTools askTools, WebSearchTools webSearchTools) {
         this.beans = List.of(
                 new ToolBean(dataTools, DataTools.class),
                 new ToolBean(ragTools, RagTools.class),
-                new ToolBean(writingTools, WritingTools.class)
+                new ToolBean(writingTools, WritingTools.class),
+                new ToolBean(taskTools, TaskTools.class),
+                new ToolBean(askTools, AskTools.class),
+                new ToolBean(webSearchTools, WebSearchTools.class)
         );
     }
 
-    /** 传给 {@code ChatClient.prompt().tools(...)} 的工具实例。 */
-    public Object[] toolObjects() {
-        return beans.stream().map(ToolBean::instance).toArray();
+    /** 传给 {@code ChatClient.prompt().tools(...)} 的工具实例；联网搜索关闭时不注册。 */
+    public Object[] toolObjects(boolean webSearchEnabled) {
+        return beans.stream()
+                .filter(bean -> webSearchEnabled || !(bean.instance() instanceof WebSearchTools))
+                .map(ToolBean::instance)
+                .toArray();
     }
 
     /** 面板空状态展示的工具清单。 */

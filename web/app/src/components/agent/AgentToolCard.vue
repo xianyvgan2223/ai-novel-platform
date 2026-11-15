@@ -88,14 +88,15 @@ const resultText = computed(() => pretty(props.part.data));
 
 <style scoped>
 .tool-card {
-  border: 1px solid var(--line);
+  border: none;
   border-radius: 8px;
   background: var(--bg-soft);
+  box-shadow: var(--shadow-control);
   overflow: hidden;
 }
 
 .tool-card.error {
-  border-color: var(--danger);
+  box-shadow: var(--shadow-card);
 }
 
 .tool-head {
@@ -208,7 +209,7 @@ const resultText = computed(() => pretty(props.part.data));
   padding: 8px;
   border-radius: 6px;
   background: var(--bg-soft);
-  border: 1px solid var(--line);
+  box-shadow: var(--shadow-control);
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 11px;
   line-height: 1.55;

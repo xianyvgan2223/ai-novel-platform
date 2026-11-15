@@ -28,6 +28,8 @@ public class AgentToolSupport {
 
     /** 与 AgentService 约定：ToolContext 里存放当前 runId 的 key。 */
     public static final String RUN_ID_KEY = "runId";
+    public static final String SESSION_ID_KEY = "sessionId";
+    public static final String DEVICE_ID_KEY = "deviceId";
 
     public static final int MAX_PAGE_SIZE = 50;
 
@@ -59,6 +61,31 @@ public class AgentToolSupport {
     public void requireRun(AgentRun run) {
         if (run == null) {
             throw new ApiException(400, "当前对话没有绑定设备，无法读取数据");
+        }
+    }
+
+    /** 当前会话 id；没有会话时返回 0（工具可自行决定是否报错）。 */
+    public long sessionOf(ToolContext context) {
+        Object value = contextValue(context, SESSION_ID_KEY);
+        if (value instanceof Number n) {
+            return n.longValue();
+        }
+        return number(value);
+    }
+
+    public String deviceOf(ToolContext context) {
+        Object value = contextValue(context, DEVICE_ID_KEY);
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    private static Object contextValue(ToolContext context, String key) {
+        if (context == null) {
+            return null;
+        }
+        try {
+            return context.getContext().get(key);
+        } catch (RuntimeException e) {
+            return null;
         }
     }
 

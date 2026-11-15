@@ -1,18 +1,24 @@
 package com.deepseekapp.webserver.feature.agent.api;
 
 import com.deepseekapp.webserver.config.AppProperties;
+import com.deepseekapp.webserver.feature.agent.service.AgentAskRegistry;
+import com.deepseekapp.webserver.feature.agent.service.AgentConversationService;
 import com.deepseekapp.webserver.feature.agent.service.AgentEvent;
 import com.deepseekapp.webserver.feature.agent.service.AgentRunRegistry;
 import com.deepseekapp.webserver.feature.agent.service.AgentService;
+import com.deepseekapp.webserver.feature.agent.service.AgentSettingsService;
+import com.deepseekapp.webserver.feature.agent.service.AgentTaskService;
 import com.deepseekapp.webserver.feature.agent.tool.AgentToolCatalog;
 import com.deepseekapp.webserver.util.Json;
 import com.deepseekapp.webserver.web.Api;
 import com.deepseekapp.webserver.web.RequestDevice;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -20,18 +26,22 @@ import org.springframework.web.bind.annotation.RestController;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 
 /**
  * 网页端右侧 Agent 面板接口。
  *
  * <pre>
- * POST /api/agent/chat                  SSE：文本增量 + 工具调用/结果 + 阶段进度
- * POST /api/agent/runs/{id}/cancel      中止一次运行（真正停掉 LLM 流与工具）
- * GET  /api/agent/tools                 可用工具清单（面板空状态展示）
+ * POST   /api/agent/chat                  SSE：文本增量 + 工具调用/结果 + 任务计划
+ * POST   /api/agent/runs/{id}/cancel      中止一次运行
+ * GET    /api/agent/tools                 可用工具清单
+ * GET    /api/agent/sessions              会话列表
+ * POST   /api/agent/sessions              新建会话
+ * GET    /api/agent/sessions/{id}         会话详情（消息 + 任务）
+ * DELETE /api/agent/sessions/{id}         删除会话
+ * GET    /api/agent/settings              模型设置（Key 脱敏）
+ * PUT    /api/agent/settings              保存模型设置
  * </pre>
  */
 @RestController
@@ -41,13 +51,23 @@ public class AgentController {
     private final AgentService agentService;
     private final AgentRunRegistry registry;
     private final AgentToolCatalog toolCatalog;
+    private final AgentConversationService conversations;
+    private final AgentSettingsService settings;
+    private final AgentTaskService tasks;
+    private final AgentAskRegistry askRegistry;
     private final AppProperties props;
 
     public AgentController(AgentService agentService, AgentRunRegistry registry,
-                           AgentToolCatalog toolCatalog, AppProperties props) {
+                           AgentToolCatalog toolCatalog, AgentConversationService conversations,
+                           AgentSettingsService settings, AgentTaskService tasks,
+                           AgentAskRegistry askRegistry, AppProperties props) {
         this.agentService = agentService;
         this.registry = registry;
         this.toolCatalog = toolCatalog;
+        this.conversations = conversations;
+        this.settings = settings;
+        this.tasks = tasks;
+        this.askRegistry = askRegistry;
         this.props = props;
     }
 
@@ -57,7 +77,6 @@ public class AgentController {
                      HttpServletResponse response) throws IOException {
         Map<String, Object> payload = body == null ? Map.of() : body;
         String message = str(payload.get("message"));
-        List<Map<String, String>> history = history(payload.get("history"));
 
         OutputStream out = startSse(response);
         if (message.isBlank()) {
@@ -66,7 +85,7 @@ public class AgentController {
         }
 
         String deviceId = RequestDevice.deviceId(request, props);
-        agentService.chat(deviceId, history, message, out);
+        agentService.chat(deviceId, longOrNull(payload.get("sessionId")), message, out);
     }
 
     @PostMapping("/runs/{id}/cancel")
@@ -83,6 +102,68 @@ public class AgentController {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("tools", toolCatalog.describe());
         return Api.ok(data);
+    }
+
+    /** 回答 Agent 的提问：唤醒等待中的 ask_user 工具，对话继续。 */
+    @PostMapping("/asks/{id}/answer")
+    public Map<String, Object> answerAsk(@PathVariable("id") String id,
+                                         @RequestBody(required = false) Map<String, Object> body) {
+        String answer = body == null ? "" : str(body.get("answer"));
+        boolean accepted = askRegistry.answer(id, answer);
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("id", id);
+        data.put("accepted", accepted);
+        return Api.ok(data);
+    }
+
+    // ── 会话 ──
+
+    @GetMapping("/sessions")
+    public Map<String, Object> sessions(HttpServletRequest request) {
+        String deviceId = RequestDevice.deviceId(request, props);
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("sessions", conversations.list(deviceId, 50));
+        return Api.ok(data);
+    }
+
+    @PostMapping("/sessions")
+    public Map<String, Object> createSession(@RequestBody(required = false) Map<String, Object> body,
+                                             HttpServletRequest request) {
+        String deviceId = RequestDevice.deviceId(request, props);
+        String title = body == null ? "新对话" : str(body.get("title"));
+        return Api.ok(conversations.create(deviceId, title.isBlank() ? "新对话" : title));
+    }
+
+    @GetMapping("/sessions/{id}")
+    public Map<String, Object> sessionDetail(@PathVariable("id") long id, HttpServletRequest request) {
+        String deviceId = RequestDevice.deviceId(request, props);
+        Map<String, Object> detail = conversations.detail(deviceId, id);
+        detail.put("tasks", tasks.list(id));
+        return Api.ok(detail);
+    }
+
+    @DeleteMapping("/sessions/{id}")
+    public Map<String, Object> deleteSession(@PathVariable("id") long id, HttpServletRequest request) {
+        String deviceId = RequestDevice.deviceId(request, props);
+        conversations.delete(deviceId, id);
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("id", id);
+        data.put("deleted", true);
+        return Api.ok(data);
+    }
+
+    // ── 设置 ──
+
+    @GetMapping("/settings")
+    public Map<String, Object> settings(HttpServletRequest request) {
+        return Api.ok(settings.view(RequestDevice.deviceId(request, props)));
+    }
+
+    @PutMapping("/settings")
+    public Map<String, Object> saveSettings(@RequestBody(required = false) Map<String, Object> body,
+                                            HttpServletRequest request) {
+        Map<String, Object> payload = body == null ? Map.of() : body;
+        return Api.ok(settings.save(RequestDevice.deviceId(request, props), payload));
     }
 
     // ── SSE / 参数解析 ──
@@ -105,27 +186,15 @@ public class AgentController {
         return value == null ? "" : String.valueOf(value).trim();
     }
 
-    @SuppressWarnings("unchecked")
-    private static List<Map<String, String>> history(Object value) {
-        if (!(value instanceof List<?> list)) {
-            return List.of();
+    private static Long longOrNull(Object value) {
+        if (value instanceof Number number) {
+            return number.longValue();
         }
-        List<Map<String, String>> out = new ArrayList<>();
-        for (Object item : list) {
-            if (!(item instanceof Map<?, ?> map)) {
-                continue;
-            }
-            Map<?, ?> raw = map;
-            String content = raw.get("content") == null ? "" : String.valueOf(raw.get("content"));
-            if (content.isBlank()) {
-                continue;
-            }
-            String role = raw.get("role") == null ? "user" : String.valueOf(raw.get("role"));
-            Map<String, String> entry = new LinkedHashMap<>();
-            entry.put("role", "assistant".equals(role) ? "assistant" : "user");
-            entry.put("content", content);
-            out.add(entry);
+        try {
+            String text = str(value);
+            return text.isEmpty() ? null : Long.parseLong(text);
+        } catch (NumberFormatException e) {
+            return null;
         }
-        return out;
     }
 }

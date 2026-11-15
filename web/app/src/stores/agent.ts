@@ -1,13 +1,13 @@
 /**
  * stores/agent.ts —— 右侧 Agent 面板状态
  *
- * 消息按「部件」组织：一段文本 + 若干工具卡片，顺序与后端事件到达顺序一致，
- * 这样界面上就是「说了什么 → 调了什么工具 → 拿到什么」的真实时间线。
+ * 消息按「部件」组织：一段文本 + 若干工具卡片，顺序与后端事件到达顺序一致。
+ * 会话与消息由后端持久化，这里负责当前会话、历史列表、设置和任务计划。
  */
 import { computed, ref } from 'vue';
 import { defineStore } from 'pinia';
 import { agentApi } from '@/api/agent';
-import type { AgentHistoryItem, AgentToolInfo } from '@/api/agent';
+import type { AgentMessageDto, AgentSession, AgentSettings, AgentTask, AgentToolInfo } from '@/api/agent';
 
 export interface AgentTextPart {
   kind: 'text';
@@ -26,7 +26,17 @@ export interface AgentToolPart {
   elapsedMs?: number;
 }
 
-export type AgentPart = AgentTextPart | AgentToolPart;
+export type AgentPart = AgentTextPart | AgentToolPart | AgentAskPart;
+
+/** Agent 向用户提问：等待选择、已选择、超时未选。 */
+export interface AgentAskPart {
+  kind: 'ask';
+  id: string;
+  question: string;
+  options: string[];
+  status: 'waiting' | 'answered' | 'timeout';
+  answer?: string;
+}
 
 export interface AgentMessage {
   id: string;
@@ -73,6 +83,18 @@ function asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function toMessage(dto: AgentMessageDto): AgentMessage {
+  const parts = Array.isArray(dto.parts) ? (dto.parts as AgentPart[]) : [];
+  return {
+    id: 'h' + dto.id,
+    role: dto.role,
+    parts: parts.length ? parts : dto.content ? [{ kind: 'text', text: dto.content }] : [],
+    createdAt: dto.createdAt ?? Date.now(),
+    status: dto.status === 'cancelled' ? 'cancelled' : dto.status === 'error' ? 'error' : 'done',
+    error: dto.error || undefined,
+  };
+}
+
 export const useAgentStore = defineStore('agent', () => {
   const messages = ref<AgentMessage[]>([]);
   const streaming = ref(false);
@@ -82,11 +104,23 @@ export const useAgentStore = defineStore('agent', () => {
   const tools = ref<AgentToolInfo[]>([]);
   const lastError = ref('');
 
+  const sessions = ref<AgentSession[]>([]);
+  const currentSessionId = ref<number | null>(null);
+  const currentTitle = ref('');
+  const tasks = ref<AgentTask[]>([]);
+  const settings = ref<AgentSettings | null>(null);
+
   let controller: AbortController | null = null;
   let seq = 0;
 
   const canSend = computed(() => !streaming.value);
   const hasMessages = computed(() => messages.value.length > 0);
+  const activeTask = computed<AgentTask | null>(() => {
+    const list = tasks.value;
+    if (!list.length) return null;
+    const running = [...list].reverse().find((task) => task.status !== 'done');
+    return running ?? list[list.length - 1];
+  });
 
   function nextId(prefix: string): string {
     seq += 1;
@@ -112,25 +146,61 @@ export const useAgentStore = defineStore('agent', () => {
     persistPanel();
   }
 
-  function clear(): void {
+  // ── 会话 ──
+
+  async function loadSessions(): Promise<void> {
+    try {
+      const result = await agentApi.sessions();
+      sessions.value = result.sessions ?? [];
+    } catch {
+      /* 历史列表失败不影响当前对话 */
+    }
+  }
+
+  /** 新对话：只清空本地状态，会话在后端由第一条消息创建。 */
+  function newSession(): void {
+    if (streaming.value) return;
+    currentSessionId.value = null;
+    currentTitle.value = '';
     messages.value = [];
+    tasks.value = [];
     lastError.value = '';
   }
 
-  /** 只把「已经结束」的消息作为上下文，避免把半截回复再喂回去 */
-  function historyOf(): AgentHistoryItem[] {
-    const out: AgentHistoryItem[] = [];
-    for (const message of messages.value) {
-      if (message.status === 'streaming') continue;
-      const content = message.parts
-        .filter((part): part is AgentTextPart => part.kind === 'text')
-        .map((part) => part.text)
-        .join('\n')
-        .trim();
-      if (content) out.push({ role: message.role, content });
-    }
-    return out;
+  async function openSession(id: number): Promise<void> {
+    if (streaming.value) return;
+    const detail = await agentApi.session(id);
+    currentSessionId.value = detail.session.id;
+    currentTitle.value = detail.session.title;
+    messages.value = (detail.messages ?? []).map(toMessage);
+    tasks.value = detail.tasks ?? [];
+    lastError.value = '';
   }
+
+  async function deleteSession(id: number): Promise<void> {
+    if (streaming.value) return;
+    await agentApi.deleteSession(id);
+    if (currentSessionId.value === id) {
+      newSession();
+    }
+    await loadSessions();
+  }
+
+  // ── 设置 ──
+
+  async function loadSettings(): Promise<void> {
+    try {
+      settings.value = await agentApi.settings();
+    } catch {
+      /* 设置加载失败时保留默认行为 */
+    }
+  }
+
+  async function saveSettings(payload: Partial<AgentSettings>): Promise<void> {
+    settings.value = await agentApi.saveSettings(payload);
+  }
+
+  // ── 工具清单 ──
 
   async function loadTools(): Promise<void> {
     if (tools.value.length) return;
@@ -142,11 +212,12 @@ export const useAgentStore = defineStore('agent', () => {
     }
   }
 
+  // ── 对话 ──
+
   async function send(text: string): Promise<void> {
     const content = text.trim();
     if (!content || streaming.value) return;
 
-    const past = historyOf();
     messages.value.push({
       id: nextId('u'),
       role: 'user',
@@ -171,7 +242,7 @@ export const useAgentStore = defineStore('agent', () => {
 
     try {
       await agentApi.chat(
-        { message: content, history: past },
+        { message: content, sessionId: currentSessionId.value },
         {
           onEvent: (event) => handleEvent(assistant, event),
           onDone: () => {
@@ -192,6 +263,7 @@ export const useAgentStore = defineStore('agent', () => {
       if (assistant.status === 'streaming') assistant.status = 'done';
       streaming.value = false;
       controller = null;
+      void loadSessions();
     }
   }
 
@@ -213,6 +285,12 @@ export const useAgentStore = defineStore('agent', () => {
     switch (type) {
       case 'start':
         runId.value = String(event.runId ?? '');
+        if (event.sessionId != null) {
+          currentSessionId.value = Number(event.sessionId) || null;
+        }
+        if (event.title) {
+          currentTitle.value = String(event.title);
+        }
         break;
       case 'delta':
         appendText(assistant, String(event.text ?? ''));
@@ -245,6 +323,32 @@ export const useAgentStore = defineStore('agent', () => {
         }
         break;
       }
+      case 'task': {
+        const task = event.task as AgentTask | undefined;
+        if (task && task.id != null) {
+          upsertTask(task);
+        }
+        break;
+      }
+      case 'ask': {
+        const options = Array.isArray(event.options) ? (event.options as string[]) : [];
+        assistant.parts.push({
+          kind: 'ask',
+          id: String(event.id ?? ''),
+          question: String(event.question ?? ''),
+          options,
+          status: 'waiting',
+        });
+        break;
+      }
+      case 'ask_answer': {
+        const part = findAsk(assistant, String(event.id ?? ''));
+        if (part) {
+          part.status = event.timeout ? 'timeout' : 'answered';
+          part.answer = String(event.answer ?? '');
+        }
+        break;
+      }
       case 'error':
         assistant.status = 'error';
         assistant.error = String(event.error ?? '生成失败');
@@ -260,8 +364,16 @@ export const useAgentStore = defineStore('agent', () => {
         streaming.value = false;
         break;
       default:
-        // stage 等进度事件由卡片内部展示，这里不需要额外状态
         break;
+    }
+  }
+
+  function upsertTask(task: AgentTask): void {
+    const index = tasks.value.findIndex((item) => item.id === task.id);
+    if (index >= 0) {
+      tasks.value.splice(index, 1, task);
+    } else {
+      tasks.value.push(task);
     }
   }
 
@@ -283,6 +395,26 @@ export const useAgentStore = defineStore('agent', () => {
     return null;
   }
 
+  function findAsk(assistant: AgentMessage, id: string): AgentAskPart | null {
+    for (let i = assistant.parts.length - 1; i >= 0; i -= 1) {
+      const part = assistant.parts[i];
+      if (part.kind === 'ask' && part.id === id) return part;
+    }
+    return null;
+  }
+
+  /** 提交用户选择：服务端唤醒等待中的 ask_user 工具，对话继续。 */
+  async function answerAsk(part: AgentAskPart, answer: string): Promise<void> {
+    if (part.status !== 'waiting') return;
+    const result = await agentApi.answerAsk(part.id, answer);
+    if (result.accepted) {
+      part.status = 'answered';
+      part.answer = answer;
+    } else {
+      part.status = 'timeout';
+    }
+  }
+
   return {
     messages,
     streaming,
@@ -291,13 +423,25 @@ export const useAgentStore = defineStore('agent', () => {
     panelWidth,
     tools,
     lastError,
+    sessions,
+    currentSessionId,
+    currentTitle,
+    tasks,
+    settings,
+    activeTask,
     canSend,
     hasMessages,
     togglePanel,
     setWidth,
-    clear,
+    loadSessions,
+    newSession,
+    openSession,
+    deleteSession,
+    loadSettings,
+    saveSettings,
     loadTools,
     send,
     stop,
+    answerAsk,
   };
 });

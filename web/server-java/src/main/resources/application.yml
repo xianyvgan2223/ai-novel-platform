@@ -42,6 +42,8 @@ spring:
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true
+    # Map 参数里的 null 需要明确 jdbcType，否则 MySQL 驱动会报 JdbcType OTHER
+    jdbc-type-for-null: 'NULL'
   global-config:
     banner: false
 

@@ -1,15 +1,20 @@
 <!--
   AgentPanel.vue —— 右侧常驻 Agent 面板
-  与左侧导航对称：可拖宽、可收起。对话里能看到每次工具调用的参数与返回，
-  生成过程中可以点「停止」真正中断（前端 abort + 服务端取消）。
+  支持：新对话、历史会话、模型设置（仅影响本面板）、多步任务清单、
+  工具调用可见、生成中途真正中断。
 -->
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { ArrowRight, ChatDotRound, Delete, Promotion, VideoPause } from '@element-plus/icons-vue';
+import { ElMessage, ElMessageBox } from 'element-plus';
+import { ArrowRight, ChatDotRound, Delete, Plus, Promotion, Setting, VideoPause } from '@element-plus/icons-vue';
 import RichText from '@/components/RichText.vue';
 import AgentToolCard from '@/components/agent/AgentToolCard.vue';
+import AgentTaskCard from '@/components/agent/AgentTaskCard.vue';
+import AgentAskCard from '@/components/agent/AgentAskCard.vue';
+import { formatTime } from '@/api';
 import { useAgentStore } from '@/stores/agent';
-import type { AgentMessage, AgentTextPart } from '@/stores/agent';
+import type { AgentAskPart, AgentMessage, AgentTextPart } from '@/stores/agent';
+import type { AgentSettings } from '@/api/agent';
 
 const agent = useAgentStore();
 
@@ -20,6 +25,9 @@ const input = ref('');
 const bodyRef = ref<HTMLElement | null>(null);
 const resizing = ref(false);
 const draftWidth = ref(agent.panelWidth);
+const historyOpen = ref(false);
+const settingsOpen = ref(false);
+const saving = ref(false);
 
 let startX = 0;
 let startWidth = 0;
@@ -28,14 +36,33 @@ const suggestions = [
   '现在库里有哪些数据？',
   '找几个适合做开篇的剧情素材',
   '按仙侠题材一键生成大纲',
-  '列出我已有的大纲',
+  '帮我检查已有大纲有没有设定冲突，分步骤做',
 ];
+
+const form = ref({
+  apiKey: '',
+  baseUrl: '',
+  model: '',
+  temperature: undefined as number | undefined,
+  maxTokens: undefined as number | undefined,
+  topP: undefined as number | undefined,
+  frequencyPenalty: undefined as number | undefined,
+  presencePenalty: undefined as number | undefined,
+  systemPrompt: '',
+  webSearch: false,
+  searchCount: 5,
+  searchNeedContent: false,
+});
 
 const shellStyle = computed(() => ({
   '--agent-width': draftWidth.value + 'px',
 }));
 
 const canSubmit = computed(() => agent.canSend && input.value.trim().length > 0);
+const hasApiKey = computed(() => Boolean(agent.settings?.hasApiKey));
+const maskedKey = computed(() => agent.settings?.apiKey || '');
+const defaultBaseUrl = computed(() => agent.settings?.defaults?.baseUrl || 'https://api.deepseek.com');
+const defaultModel = computed(() => agent.settings?.defaults?.model || 'deepseek-chat');
 
 function textOf(message: AgentMessage): string {
   return message.parts
@@ -82,10 +109,96 @@ watch(
   (open) => {
     if (open) {
       void agent.loadTools();
+      void agent.loadSessions();
       scrollToBottom();
     }
   },
 );
+
+// ── 会话 ──
+async function openSession(id: number): Promise<void> {
+  historyOpen.value = false;
+  try {
+    await agent.openSession(id);
+    scrollToBottom();
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : String(error));
+  }
+}
+
+async function removeSession(id: number): Promise<void> {
+  try {
+    await ElMessageBox.confirm('删除这个对话及其消息？该操作不可撤销。', '删除对话', {
+      type: 'warning',
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+    });
+  } catch {
+    return;
+  }
+  try {
+    await agent.deleteSession(id);
+    ElMessage.success('已删除');
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : String(error));
+  }
+}
+
+// ── 设置 ──
+async function openSettings(): Promise<void> {
+  await agent.loadSettings();
+  const settings = agent.settings;
+  const target = form.value;
+  target.apiKey = '';
+  target.baseUrl = settings?.baseUrl || settings?.defaults?.baseUrl || '';
+  target.model = settings?.model || settings?.defaults?.model || '';
+  target.temperature = settings?.temperature ?? undefined;
+  target.maxTokens = settings?.maxTokens ?? undefined;
+  target.topP = settings?.topP ?? undefined;
+  target.frequencyPenalty = settings?.frequencyPenalty ?? undefined;
+  target.presencePenalty = settings?.presencePenalty ?? undefined;
+  target.systemPrompt = settings?.systemPrompt ?? '';
+  target.webSearch = Boolean(settings?.webSearch);
+  target.searchCount = settings?.searchCount ?? 5;
+  target.searchNeedContent = Boolean(settings?.searchNeedContent);
+  settingsOpen.value = true;
+}
+
+async function saveSettings(): Promise<void> {
+  saving.value = true;
+  try {
+    const target = form.value;
+    const payload: Partial<AgentSettings> = {
+      apiKey: target.apiKey,
+      baseUrl: target.baseUrl,
+      model: target.model,
+      temperature: target.temperature ?? null,
+      maxTokens: target.maxTokens ?? null,
+      topP: target.topP ?? null,
+      frequencyPenalty: target.frequencyPenalty ?? null,
+      presencePenalty: target.presencePenalty ?? null,
+      systemPrompt: target.systemPrompt,
+      webSearch: target.webSearch,
+      searchCount: target.searchCount,
+      searchNeedContent: target.searchNeedContent,
+    };
+    await agent.saveSettings(payload);
+    settingsOpen.value = false;
+    ElMessage.success('设置已保存');
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : String(error));
+  } finally {
+    saving.value = false;
+  }
+}
+
+async function answerAsk(part: AgentAskPart, value: string): Promise<void> {
+  try {
+    await agent.answerAsk(part, value);
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : String(error));
+  }
+}
 
 // ── 拖拽调宽（左侧边缘）──
 function startResize(event: PointerEvent): void {
@@ -121,7 +234,10 @@ watch(
 );
 
 onMounted(() => {
-  if (agent.panelOpen) void agent.loadTools();
+  if (agent.panelOpen) {
+    void agent.loadTools();
+    void agent.loadSessions();
+  }
 });
 
 onUnmounted(() => {
@@ -153,14 +269,53 @@ onUnmounted(() => {
       />
 
       <header class="agent-head">
-        <div class="agent-title">
-          <span class="agent-dot" :class="{ busy: agent.streaming }" />
-          <span class="agent-name">AI 助手</span>
-          <span v-if="agent.streaming" class="agent-state">执行中</span>
-        </div>
+        <el-popover
+          v-model:visible="historyOpen"
+          placement="bottom-start"
+          :width="300"
+          trigger="click"
+          :teleported="false"
+        >
+          <template #reference>
+            <button class="session-btn" type="button" :disabled="agent.streaming">
+              <span class="agent-dot" :class="{ busy: agent.streaming }" />
+              <span class="session-title">{{ agent.currentTitle || '新对话' }}</span>
+              <span class="session-caret">▾</span>
+            </button>
+          </template>
+
+          <div class="history">
+            <div class="history-head">
+              <span class="history-head-title">历史对话</span>
+              <button class="history-refresh" type="button" @click="agent.loadSessions()">刷新</button>
+            </div>
+            <div class="history-list">
+              <button
+                v-for="item in agent.sessions"
+                :key="item.id"
+                class="history-item"
+                :class="{ on: item.id === agent.currentSessionId }"
+                type="button"
+                @click="openSession(item.id)"
+              >
+                <span class="history-title">{{ item.title || '新对话' }}</span>
+                <span class="history-meta">{{ item.messageCount }} 条 · {{ formatTime(item.updatedAt) }}</span>
+                <el-icon class="history-del" title="删除对话" @click.stop="removeSession(item.id)">
+                  <Delete />
+                </el-icon>
+              </button>
+              <div v-if="!agent.sessions.length" class="history-empty">还没有历史对话</div>
+            </div>
+          </div>
+        </el-popover>
+
         <div class="agent-actions">
-          <el-tooltip content="清空对话" placement="bottom">
-            <el-button text circle :icon="Delete" @click="agent.clear()" />
+          <span v-if="agent.streaming" class="agent-state">执行中</span>
+          <el-tooltip content="新对话" placement="bottom">
+            <el-button text circle :icon="Plus" :disabled="agent.streaming" @click="agent.newSession()" />
+          </el-tooltip>
+          <el-tooltip content="模型设置（只影响本面板）" placement="bottom">
+            <el-button text circle :icon="Setting" @click="openSettings" />
           </el-tooltip>
           <el-tooltip content="收起面板" placement="bottom">
             <el-button text circle :icon="ArrowRight" @click="agent.togglePanel()" />
@@ -205,6 +360,11 @@ onUnmounted(() => {
             <div class="bubble assistant">
               <template v-for="(part, index) in message.parts" :key="index">
                 <RichText v-if="part.kind === 'text'" :text="part.text" />
+                <AgentAskCard
+                  v-else-if="part.kind === 'ask'"
+                  :part="part"
+                  @answer="(value) => answerAsk(part, value)"
+                />
                 <AgentToolCard v-else :part="part" />
               </template>
 
@@ -217,6 +377,8 @@ onUnmounted(() => {
           </template>
         </div>
       </div>
+
+      <AgentTaskCard v-if="agent.activeTask" :task="agent.activeTask" />
 
       <footer class="agent-foot">
         <textarea
@@ -251,6 +413,83 @@ onUnmounted(() => {
         </div>
       </footer>
     </template>
+
+    <el-dialog v-model="settingsOpen" title="Agent 设置" width="460px" :teleported="false">
+      <el-form label-width="92px" size="small" class="settings-form">
+        <el-form-item label="API Key">
+          <el-input
+            v-model="form.apiKey"
+            show-password
+            :placeholder="hasApiKey ? '已配置，留空则不修改' : 'sk-...'"
+          />
+          <div v-if="hasApiKey" class="form-hint mono">当前：{{ maskedKey }}</div>
+        </el-form-item>
+        <el-form-item label="Base URL">
+          <el-input v-model="form.baseUrl" :placeholder="defaultBaseUrl" />
+        </el-form-item>
+        <el-form-item label="模型">
+          <el-input v-model="form.model" :placeholder="defaultModel" />
+        </el-form-item>
+        <el-form-item label="Temperature">
+          <el-input-number v-model="form.temperature" :min="0" :max="2" :step="0.1" controls-position="right" />
+        </el-form-item>
+        <el-form-item label="Max Tokens">
+          <el-input-number v-model="form.maxTokens" :min="256" :max="32768" :step="256" controls-position="right" />
+        </el-form-item>
+        <el-form-item label="Top P">
+          <el-input-number v-model="form.topP" :min="0" :max="1" :step="0.05" controls-position="right" />
+        </el-form-item>
+        <el-form-item label="频率惩罚">
+          <el-input-number
+            v-model="form.frequencyPenalty"
+            :min="-2"
+            :max="2"
+            :step="0.1"
+            controls-position="right"
+          />
+        </el-form-item>
+        <el-form-item label="存在惩罚">
+          <el-input-number
+            v-model="form.presencePenalty"
+            :min="-2"
+            :max="2"
+            :step="0.1"
+            controls-position="right"
+          />
+        </el-form-item>
+        <el-form-item label="追加提示词">
+          <el-input
+            v-model="form.systemPrompt"
+            type="textarea"
+            :rows="3"
+            placeholder="会追加到系统提示词后面，例如「回答尽量简短」"
+          />
+        </el-form-item>
+        <el-form-item label="联网搜索">
+          <el-switch v-model="form.webSearch" />
+          <span class="form-hint inline">开启后 Agent 可调用 web_search</span>
+        </el-form-item>
+        <template v-if="form.webSearch">
+          <el-form-item label="搜索条数">
+            <el-input-number
+              v-model="form.searchCount"
+              :min="1"
+              :max="20"
+              :step="1"
+              controls-position="right"
+            />
+          </el-form-item>
+          <el-form-item label="抓取正文">
+            <el-switch v-model="form.searchNeedContent" />
+            <span class="form-hint inline">开启后返回网页正文，上下文消耗更大</span>
+          </el-form-item>
+        </template>
+      </el-form>
+      <template #footer>
+        <el-button @click="settingsOpen = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="saveSettings">保存</el-button>
+      </template>
+    </el-dialog>
   </aside>
 </template>
 
@@ -328,15 +567,45 @@ onUnmounted(() => {
   gap: 8px;
   height: 48px;
   flex: 0 0 48px;
-  padding: 0 8px 0 14px;
+  padding: 0 8px 0 10px;
   border-bottom: 1px solid var(--line);
 }
 
-.agent-title {
+.session-btn {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink-1);
+  cursor: pointer;
+}
+
+.session-btn:hover {
+  background: var(--bg-soft);
+  box-shadow: var(--shadow-control);
+}
+
+.session-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.session-title {
+  max-width: 170px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.session-caret {
+  font-size: 10px;
+  color: var(--ink-4);
 }
 
 .agent-dot {
@@ -358,23 +627,112 @@ onUnmounted(() => {
   }
 }
 
-.agent-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--ink-1);
-}
-
 .agent-state {
   font-size: 10.5px;
   color: var(--ink-3);
+  margin-right: 2px;
 }
 
 .agent-actions {
   display: flex;
   align-items: center;
   gap: 2px;
+  flex: 0 0 auto;
 }
 
+/* ── 历史会话弹层 ── */
+.history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+.history-head-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-1);
+}
+
+.history-refresh {
+  border: none;
+  background: transparent;
+  color: var(--ink-3);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.history-refresh:hover {
+  color: var(--ink-1);
+}
+
+.history-list {
+  max-height: 320px;
+  overflow-y: auto;
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.history-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 7px 26px 7px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.history-item:hover {
+  background: var(--bg-soft);
+}
+
+.history-item.on {
+  background: var(--bg-soft);
+  box-shadow: var(--shadow-control);
+}
+
+.history-title {
+  font-size: 12px;
+  color: var(--ink-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-meta {
+  font-size: 10.5px;
+  color: var(--ink-4);
+}
+
+.history-del {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 12px;
+  color: var(--ink-4);
+}
+
+.history-del:hover {
+  color: var(--danger);
+}
+
+.history-empty {
+  padding: 18px 8px;
+  text-align: center;
+  font-size: 11.5px;
+  color: var(--ink-4);
+}
+
+/* ── 消息区 ── */
 .agent-body {
   flex: 1;
   min-height: 0;
@@ -413,19 +771,20 @@ onUnmounted(() => {
 .suggestion {
   width: 100%;
   padding: 8px 10px;
-  border: 1px solid var(--line);
+  border: none;
   border-radius: 7px;
   background: var(--bg-soft);
   color: var(--ink-2);
   font-size: 11.5px;
   text-align: left;
   cursor: pointer;
-  transition: border-color 0.15s ease, color 0.15s ease;
+  box-shadow: var(--shadow-control);
+  transition: box-shadow 0.15s ease, color 0.15s ease;
 }
 
 .suggestion:hover {
-  border-color: var(--control-border);
   color: var(--ink-1);
+  box-shadow: var(--shadow-card);
 }
 
 .empty-tools {
@@ -463,7 +822,7 @@ onUnmounted(() => {
   padding: 8px 11px;
   border-radius: 10px 10px 2px 10px;
   background: var(--bg-soft);
-  border: 1px solid var(--line);
+  box-shadow: var(--shadow-control);
   font-size: 12.5px;
   line-height: 1.6;
   color: var(--ink-1);
@@ -495,6 +854,7 @@ onUnmounted(() => {
   color: var(--danger);
 }
 
+/* ── 输入区 ── */
 .agent-foot {
   flex: 0 0 auto;
   padding: 10px 12px 12px;
@@ -506,7 +866,7 @@ onUnmounted(() => {
   box-sizing: border-box;
   resize: none;
   padding: 8px 10px;
-  border: 1px solid var(--control-border);
+  border: none;
   border-radius: 7px;
   background: var(--bg-soft);
   color: var(--ink-1);
@@ -514,10 +874,12 @@ onUnmounted(() => {
   font-size: 12.5px;
   line-height: 1.6;
   outline: none;
+  box-shadow: var(--shadow-control);
+  transition: box-shadow 0.15s ease;
 }
 
 .agent-input:focus {
-  border-color: var(--ink-3);
+  box-shadow: var(--shadow-card);
 }
 
 .agent-foot-row {
@@ -531,6 +893,24 @@ onUnmounted(() => {
 .agent-hint {
   font-size: 10px;
   color: var(--ink-4);
+}
+
+/* ── 设置弹窗 ── */
+.settings-form {
+  padding-right: 6px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.form-hint {
+  margin-top: 2px;
+  font-size: 10.5px;
+  color: var(--ink-4);
+}
+
+.form-hint.inline {
+  margin: 0 0 0 8px;
+  line-height: 1.4;
 }
 
 @media (max-width: 960px) {
