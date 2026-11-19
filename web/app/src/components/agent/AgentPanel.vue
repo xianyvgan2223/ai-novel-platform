@@ -16,7 +16,7 @@ import AgentDownloadList from '@/components/agent/AgentDownloadList.vue';
 import SettingLabel from '@/components/agent/SettingLabel.vue';
 import { formatTime } from '@/api';
 import { useAgentStore } from '@/stores/agent';
-import type { AgentAskPart, AgentMessage, AgentTextPart } from '@/stores/agent';
+import type { AgentAskPart, AgentMessage, AgentTextPart, AgentToolPart } from '@/stores/agent';
 import type { AgentSettings } from '@/api/agent';
 
 const agent = useAgentStore();
@@ -215,6 +215,44 @@ function submit(): void {
 function useSuggestion(text: string): void {
   if (agent.streaming) return;
   input.value = text;
+  submit();
+}
+
+/**
+ * 中断恢复：
+ * 1. 如果只是浏览器断线、服务端还在跑，先接管原来的运行（工具与输出会继续）；
+ * 2. 服务端已重启 / 运行已结束，则带着已完成工具摘要发一条「继续」，让模型从断点接着做。
+ */
+async function continueInterrupted(message: AgentMessage): Promise<void> {
+  if (agent.streaming) return;
+  try {
+    if (await agent.resumeActive()) return;
+  } catch {
+    /* 接不回原来的运行，退回「继续」 */
+  }
+
+  const tools = message.parts.filter((part): part is AgentToolPart => part.kind === 'tool');
+  const completed = tools.filter((tool) => tool.status === 'ok');
+  const pending = tools.filter((tool) => tool.status !== 'ok');
+  const lines = [
+    '继续刚才被中断的任务。',
+    '中断前已经输出的内容和工具结果都在上下文里；不要重复已经完成的操作。',
+  ];
+  if (completed.length) {
+    lines.push('', '已经完成并拿到结果的工具：');
+    for (const tool of completed.slice(-10)) {
+      const summary = String(tool.summary ?? '').replace(/\s+/g, ' ').trim().slice(0, 160);
+      lines.push(`- ${tool.name}${summary ? '：' + summary : ''}`);
+    }
+  }
+  if (pending.length) {
+    lines.push('', '中断时尚未完成的工具（请重新调用，或换一种方式获取同样的信息）：');
+    for (const tool of pending.slice(-10)) {
+      lines.push(`- ${tool.name}`);
+    }
+  }
+  lines.push('', '从断点继续完成剩余步骤；需要时重新调用工具。');
+  input.value = lines.join('\n');
   submit();
 }
 
@@ -586,8 +624,11 @@ onUnmounted(() => {
                 正在思考…
               </div>
               <div v-if="message.status === 'cancelled'" class="msg-note">已停止生成</div>
-              <div v-if="message.status === 'interrupted'" class="msg-note">
-                {{ message.error || '任务因服务重启中断，发送「继续」可以接着做' }}
+              <div v-if="message.status === 'interrupted'" class="msg-note interrupted-note">
+                <span>{{ message.error || '任务已中断，内容可能不完整' }}</span>
+                <el-button size="small" text type="primary" @click="continueInterrupted(message)">
+                  继续任务
+                </el-button>
               </div>
               <!-- 当前运行的错误详情统一在顶部错误条展示，避免同一条错误出现两次；历史消息的错误跟随气泡 -->
               <div v-if="message.status === 'error'" class="msg-note error">
@@ -1271,6 +1312,19 @@ onUnmounted(() => {
 
 .msg-note.error {
   color: var(--danger);
+}
+
+.interrupted-note {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.interrupted-note :deep(.el-button) {
+  height: 22px;
+  padding: 0 5px;
+  font-size: 10.5px;
 }
 
 /* 单条回答的缓存命中（会话累计在底部 ctx-cache 里） */

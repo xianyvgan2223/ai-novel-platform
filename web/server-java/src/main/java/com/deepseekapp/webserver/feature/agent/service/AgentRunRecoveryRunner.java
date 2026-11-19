@@ -1,6 +1,8 @@
 package com.deepseekapp.webserver.feature.agent.service;
 
 import com.deepseekapp.webserver.feature.agent.data.AgentStore;
+import com.deepseekapp.webserver.util.Json;
+import com.fasterxml.jackson.core.type.TypeReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
@@ -50,8 +52,8 @@ public class AgentRunRecoveryRunner implements ApplicationRunner {
             }
             try {
                 conversations.appendAssistant(deviceId, sessionId, content,
-                        parts.isBlank() ? "[]" : parts,
-                        "interrupted", "服务重启，任务已中断；发送「继续」可以接着做", null, runId);
+                        finalizeParts(parts),
+                        "interrupted", "服务重启，任务已中断；可以点「继续任务」接着做", null, runId);
             } catch (RuntimeException e) {
                 log.warn("恢复中断消息失败（run {}）：{}", runId, e.getMessage());
             }
@@ -59,6 +61,36 @@ public class AgentRunRecoveryRunner implements ApplicationRunner {
         store.markInterrupted(System.currentTimeMillis());
         store.markTasksInterrupted(System.currentTimeMillis());
         log.info("Agent 运行恢复：{} 个未完成的运行已标记为 interrupted", running.size());
+    }
+
+    /**
+     * 进程重启时运行中的工具 / 提问不会再收到返回：在恢复的消息里直接收尾，
+     * 避免历史中的工具卡永远显示「执行中」。
+     */
+    private static String finalizeParts(String raw) {
+        String text = raw == null ? "" : raw.trim();
+        if (text.isEmpty()) {
+            return "[]";
+        }
+        try {
+            List<Map<String, Object>> parts = Json.MAPPER.readValue(
+                    text, new TypeReference<List<Map<String, Object>>>() {
+                    });
+            for (Map<String, Object> part : parts) {
+                Object kind = part.get("kind");
+                Object status = part.get("status");
+                if ("tool".equals(kind) && "running".equals(status)) {
+                    part.put("status", "error");
+                    part.put("error", "服务重启，工具调用已中断，未收到返回");
+                } else if ("ask".equals(kind) && "waiting".equals(status)) {
+                    part.put("status", "timeout");
+                }
+            }
+            return Json.write(parts);
+        } catch (Exception e) {
+            log.warn("解析中断运行的 parts 失败，保留原始内容：{}", e.getMessage());
+            return text;
+        }
     }
 
     private static String text(Object value) {

@@ -121,19 +121,31 @@ function asRecord(value: unknown): Record<string, unknown> {
 function toMessage(dto: AgentMessageDto): AgentMessage {
   const parts = Array.isArray(dto.parts) ? (dto.parts as AgentPart[]) : [];
   const promptTokens = Number(dto.promptTokens ?? 0) || 0;
+  const status: AgentMessage['status'] =
+    dto.status === 'cancelled'
+      ? 'cancelled'
+      : dto.status === 'interrupted'
+        ? 'interrupted'
+        : dto.status === 'error'
+          ? 'error'
+          : 'done';
+  // 历史里的运行已经结束：没收到结果的工具 / 提问在这里收尾，不能永远显示「执行中」
+  if (dto.status !== 'streaming') {
+    for (const part of parts) {
+      if (part.kind === 'tool' && part.status === 'running') {
+        part.status = 'error';
+        if (!part.error) part.error = '任务已中断，未收到工具返回';
+      } else if (part.kind === 'ask' && part.status === 'waiting') {
+        part.status = 'timeout';
+      }
+    }
+  }
   return {
     id: 'h' + dto.id,
     role: dto.role,
     parts: parts.length ? parts : dto.content ? [{ kind: 'text', text: dto.content }] : [],
     createdAt: dto.createdAt ?? Date.now(),
-    status:
-      dto.status === 'cancelled'
-        ? 'cancelled'
-        : dto.status === 'interrupted'
-          ? 'interrupted'
-          : dto.status === 'error'
-            ? 'error'
-            : 'done',
+    status,
     error: dto.error || undefined,
     // 旧消息没有 usage：不展示缓存命中，避免显示成 0%
     usage: promptTokens > 0
@@ -516,17 +528,17 @@ export const useAgentStore = defineStore('agent', () => {
     }
   }
 
-  /** 页面刷新或切换会话后，检查是否有未结束的运行并接管。 */
-  async function resumeActive(): Promise<void> {
-    if (streaming.value) return;
+  /** 页面刷新或切换会话后，检查是否有未结束的运行并接管。返回是否真的有运行被接管。 */
+  async function resumeActive(): Promise<boolean> {
+    if (streaming.value) return true;
     let run: { runId: string; sessionId: number } | undefined;
     try {
       const result = await agentApi.activeRuns(currentSessionId.value);
       run = result.runs?.[0];
     } catch {
-      return; // 没有可接管的运行
+      return false; // 没有可接管的运行
     }
-    if (!run) return;
+    if (!run) return false;
     // 接管前先补齐运行所属会话的历史，否则只能看到运行中的半条回复。
     // 当前会话没变且已有消息时不重复加载；openSession 内部再调 resumeActive 会递归，传 false。
     if (currentSessionId.value !== run.sessionId || !messages.value.length) {
@@ -539,6 +551,7 @@ export const useAgentStore = defineStore('agent', () => {
     runId.value = run.runId;
     lastSeq.value = 0;
     await resume();
+    return true;
   }
 
   /** 收到这些事件才算运行正常收尾，否则视为连接中断 */
