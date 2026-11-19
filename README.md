@@ -46,26 +46,25 @@ Agent 面板支持流式回答、思考过程、工具调用卡片（可展开�
 多步任务清单，以及上下文占用与缓存命中展示。下图为一次真实会话：Agent 先反问题材方向，
 再用 `plan_task` 拆出三步计划、用 `search_rag` 检索参考桥段，最后汇总建议。
 
-![Agent 面板：提问、工具调用与任务清单](docs/screenshots/web-agent-conversation.png)
-
+<img src="docs/screenshots/web-agent-conversation.png" width="880" alt="Agent 面板：提问、工具调用与任务清单"/>
 <table>
   <tr>
-    <td align="center" width="50%">
-      <img src="docs/screenshots/web-agent-ask.png"/><br/>
+    <td align="center" valign="top" width="50%">
+      <img src="docs/screenshots/web-agent-ask.png" width="430"/><br/>
       <sub>提问卡 · 给出候选题材方向，也可以自己输入</sub>
     </td>
-    <td align="center" width="50%">
-      <img src="docs/screenshots/web-agent-task.png"/><br/>
+    <td align="center" valign="top" width="50%">
+      <img src="docs/screenshots/web-agent-task.png" width="430"/><br/>
       <sub>任务清单 · 步骤状态实时更新，3/3 完成</sub>
     </td>
   </tr>
   <tr>
-    <td align="center" width="50%">
-      <img src="docs/screenshots/web-agent-tool-detail.png"/><br/>
+    <td align="center" valign="top" width="50%">
+      <img src="docs/screenshots/web-agent-tool-detail.png" width="430"/><br/>
       <sub>工具调用 · 展开可见 query / tags 与返回结果</sub>
     </td>
-    <td align="center" width="50%">
-      <img src="docs/screenshots/web-agent-panel.png"/><br/>
+    <td align="center" valign="top" width="50%">
+      <img src="docs/screenshots/web-agent-panel.png" width="430"/><br/>
       <sub>Agent 面板 · 建议指令与 14 个可用工具</sub>
     </td>
   </tr>
@@ -78,12 +77,12 @@ DeepSeek 并行提炼可复用情节，跨窗口去重后由百炼 embedding 写
 
 <table>
   <tr>
-    <td align="center" width="50%">
-      <img src="docs/screenshots/web-rag.png"/><br/>
+    <td align="center" valign="top" width="50%">
+      <img src="docs/screenshots/web-rag.png" width="430"/><br/>
       <sub>素材库 · 已入库 774 条情节，导入与检索入口</sub>
     </td>
-    <td align="center" width="50%">
-      <img src="docs/screenshots/web-rag-search.png"/><br/>
+    <td align="center" valign="top" width="50%">
+      <img src="docs/screenshots/web-rag-search.png" width="430"/><br/>
       <sub>语义检索 · 按相似度排序，带标签与摘要</sub>
     </td>
   </tr>
@@ -95,23 +94,23 @@ DeepSeek 并行提炼可复用情节，跨窗口去重后由百炼 embedding 写
 
 <table>
   <tr>
-    <td align="center" width="20%">
+    <td align="center" valign="top" width="20%">
       <img src="docs/screenshots/app-chat.png" width="150"/><br/>
       <sub>对话 · 流式 / 思考 / 来源 / 缓存</sub>
     </td>
-    <td align="center" width="20%">
+    <td align="center" valign="top" width="20%">
       <img src="docs/screenshots/app-writing-home.png" width="150"/><br/>
       <sub>写小说 · 9 个功能入口</sub>
     </td>
-    <td align="center" width="20%">
+    <td align="center" valign="top" width="20%">
       <img src="docs/screenshots/app-outline-generate.png" width="150"/><br/>
       <sub>一键生成大纲</sub>
     </td>
-    <td align="center" width="20%">
+    <td align="center" valign="top" width="20%">
       <img src="docs/screenshots/app-inspiration.png" width="150"/><br/>
       <sub>小说灵感 · 并行推演</sub>
     </td>
-    <td align="center" width="20%">
+    <td align="center" valign="top" width="20%">
       <img src="docs/screenshots/app-battle.png" width="150"/><br/>
       <sub>AI 写战斗</sub>
     </td>
@@ -122,12 +121,12 @@ DeepSeek 并行提炼可复用情节，跨窗口去重后由百炼 embedding 写
 
 <table>
   <tr>
-    <td align="center" width="50%">
-      <img src="docs/screenshots/web-agent-settings.png"/><br/>
+    <td align="center" valign="top" width="50%">
+      <img src="docs/screenshots/web-agent-settings.png" width="430"/><br/>
       <sub>Agent 设置 · 模型 / 思考深度 / 联网搜索 / 上下文窗口</sub>
     </td>
-    <td align="center" width="50%">
-      <img src="docs/screenshots/web-downloads.png"/><br/>
+    <td align="center" valign="top" width="50%">
+      <img src="docs/screenshots/web-downloads.png" width="430"/><br/>
       <sub>下载库 · Agent 通过工具保存的文件</sub>
     </td>
   </tr>
