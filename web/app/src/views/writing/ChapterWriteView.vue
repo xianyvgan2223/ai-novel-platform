@@ -195,6 +195,7 @@ async function runOptimize() {
         style: aiStyle.value,
         strength: aiStrength.value,
         extra: aiExtra.value.trim() || undefined,
+        settings: chapterRequestSettings(),
       },
       {
         onDelta: (delta) => { aiResult.value += delta; },
@@ -264,6 +265,7 @@ async function continueModify() {
         style: aiStyle.value,
         strength: aiStrength.value,
         extra: instruction,
+        settings: chapterRequestSettings(),
       },
       {
         onDelta: (delta) => { aiResult.value += delta; },

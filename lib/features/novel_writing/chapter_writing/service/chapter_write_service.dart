@@ -106,6 +106,8 @@ class ChapterWritePromptTemplate {
     final characterLookupRule = enableCharacterLookup
         ? '- 剧情中涉及主角以外的其他人物时，先调用 get_character_profiles 工具查询其人物档案，再结合档案写作；未查询到的人物不要凭空设定其外貌、能力或性格'
         : '- 剧情中涉及主角以外的人物时，其外貌、能力与性格等设定细节尽量从简或保持模糊，不要展开设定';
+    // 顺序：固定角色说明 + 本作设定 + 固定写作要求在前，本章的事件 / 前文 /
+    // 人物 / 伏笔等变化数据在后 —— 连续写多章时前面字节完全一致，命中缓存
     return '''
 你是一位小说作家。请根据以下大纲设定，完整写出指定事件的详细正文。
 
@@ -114,17 +116,6 @@ class ChapterWritePromptTemplate {
 主题：${outline.theme}
 主角：${outline.protagonist}
 世界观：${outline.worldview}
-
-【大纲结构（所属大事件部分）】
-$outlineExcerpt
-
-【当前事件】${ch.eventTitle}
-【事件概要】${ch.eventSummary}
-$parentSection
-$prevSection
-$nextSection
-
-【前文内容】$prevContent$prevEndingSection$storyStateSection$charactersSection$foreshadowsSection
 
 要求：
 - 本小事件开头必须承接【上一个小事件小结】中的场景、时间与人物状态，禁止突兀跳转；如需切换时间/地点，先用一小段过渡衔接
@@ -136,6 +127,17 @@ $roleInstruction
 $characterLookupRule
 - 只写当前事件的内容，不要超出范围
 - 直接输出正文，不要添加注释说明
+
+【大纲结构（所属大事件部分）】
+$outlineExcerpt
+
+【当前事件】${ch.eventTitle}
+【事件概要】${ch.eventSummary}
+$parentSection
+$prevSection
+$nextSection
+
+【前文内容】$prevContent$prevEndingSection$storyStateSection$charactersSection$foreshadowsSection
 ''';
   }
 }

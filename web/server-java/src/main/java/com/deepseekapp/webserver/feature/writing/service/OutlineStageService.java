@@ -51,6 +51,118 @@ public class OutlineStageService {
             请始终使用纯文本格式输出，禁止使用 markdown、表格、json、加粗符号或任何标记语言。
             不要添加多余的解释性文字。""";
 
+    /**
+     * 各阶段的固定规则都放系统提示：同一阶段会按批/按块调用多次，系统提示逐字节不变，
+     * 后续批次可以整段命中上下文缓存；用户消息里只留本次请求的设定、骨架与批次数据。
+     */
+    private static final String CONCEPT_RULES = """
+            根据用户消息里的小说设定，生成书名和核心概念简介，输出严格 JSON（不要任何额外文字、解释或 markdown 代码块）。
+            书名务必贴合类型、主题、主角核心宿命，简洁有记忆点。
+            输出 JSON 格式：{"title": "书名", "concept": "核心概念简介"}""";
+
+    private static final String SKELETON_RULES = """
+            根据用户消息里的小说设定、书名与核心概念，规划全篇三幕结构的粗骨架，输出严格 JSON。
+            三幕分配规则：第一幕开端占总主事件约 30%，第二幕发展约占 50%，第三幕高潮结局约占 20%，无法整除时第二幕多分配余量。
+            粗骨架要求：
+            1. 只规划全局轨迹，每个大事件只写「标题 + 一句话定位」，不要展开细节
+            2. 定位需写清：本事件的核心冲突、在故事弧线中的位置（铺垫/升级/转折/高潮/结局）
+            3. 每 5 个大事件之间要有递进关系：铺垫→冲突升级→危机加剧→高潮→收束，或 危机→冲突→怎么解决→反转→剧情展开
+            4. 人物成长：每一幕结尾主角有阶段性性格变化，全篇完成「缺陷暴露→挣扎蜕变→闭环」
+            5. 只做短线伏笔：每条伏笔必须能在 5 个大事件之内埋设并回收，不要写长线伏笔
+            6. 第三幕需覆盖前文主要伏笔的回收点
+            7. 定位里严禁写章节 / 事件编号：不要出现「第54章」「第54个事件」「大事件54」这类引用；
+               伏笔提示直接写内容本身（人物、物件、原话、场景），不要写「第几章埋的伏笔」
+            输出 JSON 格式：
+            {"acts": [{"act": "第一幕：开端", "events": [{"title": "事件标题", "position": "一句话定位（含在故事中的位置与伏笔提示）"}]}]}
+            要求：
+            - 必须输出 3 个 act，act 依次为「第一幕：开端」「第二幕：发展」「第三幕：高潮&结局」
+            - 每个 act 至少包含 1 个事件
+            - 全部 events 数量必须严格等于用户消息给出的主事件总数""";
+
+    private static final String REFINE_RULES = """
+            根据用户消息里的全局设定、粗骨架和伏笔账本，精写本批大事件的完整概述，输出严格 JSON（不要任何额外文字、解释或 markdown 代码块）。
+
+            大事件粒度定义（严格遵守）：
+            - 大事件 = 改变故事走向的重大阶段节点（如身份揭露、势力决裂、觉醒/蜕变、终局大战），应跨越时间与场景，可独立成章
+            - 禁止把单个场景、单次对话、单一动作步骤当作大事件
+            - 大事件数量多代表故事铺陈规模大，不代表粒度变细
+
+            写作要求：
+            1. 每个大事件包含外部矛盾，呼应本批定位中的伏笔提示
+            2. 相邻大事件有递进关系，事件之间需有时间/场景跳跃，独立成章
+            3. 延续伏笔账本：已埋伏笔按计划回收；本批新埋伏笔要在描述中点明，并且必须能在 5 个大事件之内回收；不要写长线伏笔，已回收的伏笔不要再写
+            4. 承接上一批：本批首个大事件须延续上一批最后大事件的结局状态（人物处境、关系变化、已获得的信息、在场角色），已发生的情节与已出现的冲突不得重复（若未提供「上一批已精写的大事件」则忽略此条）
+            5. 篇幅由你根据该事件在全局中的重要程度自行把握，写透核心冲突，宁实勿空
+            6. 避免逻辑漏洞、人物动机割裂、强行降智
+            7. 严禁编号引用（硬性要求）：概述正文里不得出现任何章节号 / 事件编号，包括
+               「第54章」「第54个事件」「大事件54」「小事件12」「54与70埋的」「第3幕」……
+               伏笔照应必须直接写出内容本身（人物、旧物件、原话、场景），让只读这一段的人也能看懂指的是什么；
+               不要写「第几章埋的伏笔」。
+               - 反例（禁止）：54与70埋的"只学会一种接受方式"在此第一次被真正掰开
+               - 正例（照此写）：他从前只学会一种接受方式——被人护着；这一次他第一次学着自己
+                 接下别人的好意，也第一次肯让一个人替他挡在门前
+               编号只允许出现在输出 JSON 的 title 字段所对应的骨架定位里，summary 正文一律不带编号
+
+            输出 JSON 格式为：
+            {"events": [{"title": "与粗骨架完全一致的事件标题", "summary": "完整概述"}]}
+            要求：
+            - events 数量必须严格等于用户消息里本批大事件的数量
+            - title 必须与粗骨架中的标题完全一致，保持顺序""";
+
+    private static final String LEDGER_RULES = """
+            阅读用户消息里本批已精写的大事件，结合之前的伏笔账本，抽取并合并出最新的伏笔账本，输出严格 JSON
+            （不要任何额外文字、解释或 markdown 代码块）。
+
+            要求：
+            1. 账本只保留未回收的短线伏笔：每条伏笔必须能在 5 个大事件之内回收，不要写长线伏笔；
+               已经跨过 5 个大事件仍未回收的伏笔直接删除，不要保留
+            2. 更新各主要角色的当前处境与变化
+            3. 列出尚未解决的悬念
+            4. 本批内已经回收/兑现的伏笔直接删除，不要写进账本（账本里不再保留已实现的伏笔）；
+               计划回收时机只写「第一幕 / 第二幕 / 第三幕 / 终章」这类叙事阶段
+            5. 严禁编号引用：foreshadows / character_states / unresolved 的文本里不得出现章节号或事件编号
+               （「第54章」「第54个事件」「大事件54」「54与70埋的」等）；伏笔内容直接写情节本身
+               （人物/物件/原话/场景），不要写「第几章埋的伏笔」
+
+            输出 JSON 格式为：
+            {"foreshadows": [{"content": "伏笔内容", "status": "已埋/已回收", "plan": "计划回收时机"}], "character_states": ["角色状态1"], "unresolved": ["悬念1"]}""";
+
+    private static final String STEP3_RULES = """
+            请为用户消息里给出的那一幕、那一块大事件展开配套的小事件，严格遵循以下格式（纯文本，禁止任何 markdown 标记）。
+
+            格式硬性要求（违反会直接导致大纲解析失败）：
+            - 大事件标题行必须写成「══ 大事件N：标题 ══」，N 用本块框架里的具体数字，禁止写成「大事件X」或省略编号
+            - 大事件概述必须原样完整保留「当前幕已有的大事件框架」里给出的该大事件概述：
+              只允许微调标点使语句通顺，不得删减信息、不得压缩、不得重写——你的任务只是为它补写小事件
+            - 小事件标题行必须写成「○ 小事件N：标题」，N 在每个大事件内部从 1 开始连续编号
+            - 禁止使用 markdown 标题（#、##、###）、加粗（**）、分隔线（---、===）和任何列表符号
+            - 事件标题必须独立成行，标题内不得再嵌套「大事件N：」这类前缀
+
+            ⚠️ 小事件写作核心要求：
+            1. 每个小事件必须是独立完整的情节单元，不是大事件的一个执行步骤
+            2. 禁止将单个事件拆成时序步骤（例如“前往→发现→战斗→撤退”这种只算 1 个小事件）
+            3. 每个小事件应引入新的角色、地点、冲突或转折，而不是单纯推进上一个事件
+            4. 好小事件 = 场景 + 冲突 + 变化，差小事件 = 下一个动作步骤
+            5. 小事件组合起来必须完整覆盖该大事件概述里的全部关键情节、转折、场面、人物与伏笔，
+               不得跳过或省略概述中明确写到的事；不能只写概述的开头几段就收尾
+            6. 伏笔只做短线：本块涉及的伏笔必须能在 5 个大事件之内回收，不要设计长线伏笔；已经回收的伏笔不要再写
+
+            注意：
+            - 只输出当前这一幕的内容，不要输出其他幕
+            - 编号只允许出现在标题行：大事件概述、小事件概要等正文里严禁出现任何章节号 /
+              事件编号引用（「第54章」「第54个事件」「大事件54」「小事件12」「54与70埋的」等）。
+              写伏笔照应时直接写出内容本身（人物、旧物件、原话、场景），不要写「第几章埋的伏笔」；
+              只读这一段的人也应当看得懂指的是什么
+            - 严禁重复或回显任何已出现的大事件（包括全局框架中其他事件、前一块已展开的详细内容）
+            - 保持大事件标题和概述与已有框架完全一致，不得自行改写、压缩或合并大事件
+            - 小事件要有递进关系，禁止平铺流水账
+            - 参照全局框架中其他幕的人物状态与伏笔，避免前后矛盾
+            - 承接前文：若提供了「前一块已展开的详细内容」，本块开头必须紧接其最后一场戏的结尾状态
+            - 铺垫后文：若提供了「紧接着的下一块大事件」，本块结尾要为其埋下伏笔、做好状态过渡""";
+
+    private record Prompt(String system, String user) {
+    }
+
     private static final int MAX_EVENTS_PER_CHUNK = 3;
     private static final int LEDGER_INTERVAL = 2;
     private static final int MAX_CONTINUATIONS = 3;
@@ -84,19 +196,14 @@ public class OutlineStageService {
 
     public Map<String, Object> concept(Map<String, Object> body, Sink sink) throws IOException {
         AiSettings settings = AiSettings.from(body);
-        String system = JSON_SYSTEM;
+        String system = JSON_SYSTEM + "\n\n" + CONCEPT_RULES;
         String user = """
-                根据以下小说设定，生成书名和核心概念简介，并以严格的 JSON 格式输出（不要输出任何额外文字、解释或 markdown 代码块）。
-
                 小说类型：%s
                 核心主题：%s
                 主角完整人设：%s
                 完整世界观：%s
 
-                %s要求：
-                - 书名务必贴合类型、主题、主角核心宿命，简洁有记忆点
-                - 输出 JSON 格式为：{"title": "书名", "concept": "核心概念简介"}
-                """.formatted(
+                %s""".formatted(
                 str(body, "genre"),
                 str(body, "theme"),
                 str(body, "protagonist"),
@@ -133,9 +240,8 @@ public class OutlineStageService {
                 ? str(body, "conceptText")
                 : "书名：" + title + "\n核心概念：" + concept;
 
+        String system = JSON_SYSTEM + "\n\n" + SKELETON_RULES;
         String user = """
-                请根据以下小说设定，规划全篇三幕结构的粗骨架，并以严格的 JSON 格式输出（不要输出任何额外文字、解释或 markdown 代码块）。
-
                 小说类型：%s
                 核心主题：%s
                 主角完整人设：%s
@@ -146,30 +252,11 @@ public class OutlineStageService {
 
                 全篇主事件总数量：%d（三个 act 中 events 事件总数必须严格等于 %d）
                 单个主事件配套小事件固定数量：%d
-
-                三幕分配规则：第一幕开端占总主事件约30%%，第二幕发展约占50%%，第三幕高潮结局约占20%%，无法整除时第二幕多分配余量。
-
-                粗骨架要求：
-                1. 这一步只规划全局轨迹，每个大事件只写「标题 + 一句话定位」，不要展开细节
-                2. 定位需写清：本事件的核心冲突、在故事弧线中的位置（铺垫/升级/转折/高潮/结局）
-                3. 每5个大事件之间要有递进关系：铺垫→冲突升级→危机加剧→高潮→收束或者危机→冲突→怎么解决→反转→剧情展开
-                4. 人物成长：每一幕结尾主角有阶段性性格变化，全篇完成「缺陷暴露→挣扎蜕变→闭环」
-                5. 只做短线伏笔：每条伏笔必须能在 5 个大事件之内埋设并回收，不要写长线伏笔
-                6. 第三幕需覆盖前文主要伏笔的回收点
-                7. 定位里严禁写章节 / 事件编号：不要出现「第54章」「第54个事件」「大事件54」这类引用；
-                   伏笔提示直接写内容本身（人物、物件、原话、场景），不要写「第几章埋的伏笔」
-
-                输出 JSON 格式为：
-                {"acts": [{"act": "第一幕：开端", "events": [{"title": "事件标题", "position": "一句话定位（含在故事中的位置与伏笔提示）"}]}]}
-                要求：
-                - 必须输出 3 个 act，act 依次为「第一幕：开端」「第二幕：发展」「第三幕：高潮&结局」
-                - 每个 act 至少包含 1 个事件
-                - 全部 events 数量必须严格等于 %d
                 """.formatted(
                 str(body, "genre"), str(body, "theme"), str(body, "protagonist"), str(body, "worldview"),
-                extraSection(body), titleAndConcept, majorCount, majorCount, minorCount, majorCount
+                extraSection(body), titleAndConcept, majorCount, majorCount, minorCount
         );
-        String raw = streamText(JSON_SYSTEM, user, sink, jsonSettings(settings, 0.3));
+        String raw = streamText(system, user, sink, jsonSettings(settings, 0.3));
         JsonNode root = readObject(raw, "粗骨架生成失败：三幕结构或事件数量与设定不一致");
         List<Act> acts = parseActs(root.path("acts"));
         if (acts.isEmpty()) {
@@ -215,13 +302,13 @@ public class OutlineStageService {
             if (b > 0) sleepQuietly(1200L);
             step++;
             sink.stage(step, totalSteps, "精写大事件 (" + (b + 1) + "/" + batches.size() + ")");
-            String user = refinePrompt(body, title, concept, coarseSkeleton,
+            Prompt refine = refinePrompt(body, title, concept, coarseSkeleton,
                     renderBatch(batch, acts, false), ledger.render(), previousRefined, extra);
             JsonNode events = null;
             String raw = "";
             for (int attempt = 0; attempt < 3; attempt++) {
                 if (attempt > 0) sleepQuietly(1500L * attempt);
-                raw = streamText(JSON_SYSTEM, user, sink,
+                raw = streamText(refine.system(), refine.user(), sink,
                         jsonSettings(settings, settings == null || settings.temperature() == null ? 0.8 : settings.temperature()));
                 JsonNode root;
                 try {
@@ -246,8 +333,8 @@ public class OutlineStageService {
                 if (b > 0) sleepQuietly(1000L);
                 step++;
                 sink.stage(step, totalSteps, "抽取伏笔账本 (" + (b + 1) + "/" + batches.size() + ")");
-                String ledgerPrompt = ledgerPrompt(previousRefined, ledger.render());
-                String ledgerRaw = streamText(JSON_SYSTEM, ledgerPrompt, sink,
+                Prompt ledgerPrompt = ledgerPrompt(previousRefined, ledger.render());
+                String ledgerRaw = streamText(ledgerPrompt.system(), ledgerPrompt.user(), sink,
                         jsonSettings(settings, 0.3));
                 JsonNode ledgerRoot = readObject(ledgerRaw, "伏笔账本提取失败");
                 ledger.merge(ledgerRoot);
@@ -268,7 +355,7 @@ public class OutlineStageService {
         return result;
     }
 
-    private String refinePrompt(Map<String, Object> body, String title, String concept,
+    private Prompt refinePrompt(Map<String, Object> body, String title, String concept,
                                 String coarseSkeleton, String batchContent,
                                 String ledgerText, String prevRefined, String extra) {
         String prevSection = prevRefined.isBlank() ? "" : """
@@ -276,9 +363,7 @@ public class OutlineStageService {
                 %s
 
                 """.formatted(prevRefined);
-        return """
-                请根据以下全局设定、粗骨架和伏笔账本，精写本批大事件的完整概述，并以严格的 JSON 格式输出（不要输出任何额外文字、解释或 markdown 代码块）。
-
+        String user = """
                 小说类型：%s
                 核心主题：%s
                 主角完整人设：%s
@@ -295,62 +380,22 @@ public class OutlineStageService {
                 === 已积累的伏笔账本（来自此前各批，必须延续与照应） ===
                 %s
 
-                %s大事件粒度定义（严格遵守）：
-                - 大事件 = 改变故事走向的重大阶段节点（如身份揭露、势力决裂、觉醒/蜕变、终局大战），应跨越时间与场景，可独立成章
-                - 禁止把单个场景、单次对话、单一动作步骤当作大事件
-                - 大事件数量多代表故事铺陈规模大，不代表粒度变细
-
-                写作要求：
-                1. 每个大事件包含外部矛盾，呼应本批定位中的伏笔提示
-                2. 相邻大事件有递进关系，事件之间需有时间/场景跳跃，独立成章
-                3. 延续伏笔账本：已埋伏笔按计划回收；本批新埋伏笔要在描述中点明，并且必须能在 5 个大事件之内回收；不要写长线伏笔，已回收的伏笔不要再写
-                4. 承接上一批：本批首个大事件须延续上一批最后大事件的结局状态（人物处境、关系变化、已获得的信息、在场角色），已发生的情节与已出现的冲突不得重复（若未提供「上一批已精写的大事件」则忽略此条）
-                5. 篇幅由你根据该事件在全局中的重要程度自行把握，写透核心冲突，宁实勿空
-                6. 避免逻辑漏洞、人物动机割裂、强行降智
-                7. 严禁编号引用（硬性要求）：概述正文里不得出现任何章节号 / 事件编号，包括
-                   「第54章」「第54个事件」「大事件54」「小事件12」「54与70埋的」「第3幕」……
-                   伏笔照应必须直接写出内容本身（人物、旧物件、原话、场景），让只读这一段的人
-                   也能看懂指的是什么；不要写「第几章埋的伏笔」。
-                   - 反例（禁止）：54与70埋的"只学会一种接受方式"在此第一次被真正掰开
-                   - 正例（照此写）：他从前只学会一种接受方式——被人护着；这一次他第一次学着自己
-                     接下别人的好意，也第一次肯让一个人替他挡在门前
-                   编号只允许出现在输出 JSON 的 title 字段所对应的骨架定位里，summary 正文一律不带编号
-
-                输出 JSON 格式为：
-                {"events": [{"title": "与粗骨架完全一致的事件标题", "summary": "完整概述"}]}
-                要求：
-                - events 数量必须严格等于本批大事件数量
-                - title 必须与粗骨架中的标题完全一致，保持顺序
-                """.formatted(
+                %s""".formatted(
                 str(body, "genre"), str(body, "theme"), str(body, "protagonist"), str(body, "worldview"),
                 title, concept, extraSection(body), coarseSkeleton, batchContent, ledgerText, prevSection
         );
+        return new Prompt(JSON_SYSTEM + "\n\n" + REFINE_RULES, user);
     }
 
-    private String ledgerPrompt(String batchContent, String prevLedger) {
-        return """
-                请阅读以下本批已精写的大事件，结合之前的伏笔账本，抽取并合并出最新的伏笔账本，以严格的 JSON 格式输出（不要输出任何额外文字、解释或 markdown 代码块）。
-
+    private Prompt ledgerPrompt(String batchContent, String prevLedger) {
+        String user = """
                 === 本批已精写的大事件 ===
                 %s
 
                 === 之前已积累的伏笔账本（需保留未回收项，标注本批是否有进展） ===
                 %s
-
-                要求：
-                1. 账本只保留未回收的短线伏笔：每条伏笔必须能在 5 个大事件之内回收，不要写长线伏笔；
-                   已经跨过 5 个大事件仍未回收的伏笔直接删除，不要保留
-                2. 更新各主要角色的当前处境与变化
-                3. 列出尚未解决的悬念
-                4. 本批内已经回收/兑现的伏笔直接删除，不要写进账本（账本里不再保留已实现的伏笔）
-                   计划回收时机只写「第一幕 / 第二幕 / 第三幕 / 终章」这类叙事阶段
-                5. 严禁编号引用：foreshadows / character_states / unresolved 的文本里不得出现
-                   章节号或事件编号（「第54章」「第54个事件」「大事件54」「54与70埋的」等）；
-                   伏笔内容直接写情节本身（人物/物件/原话/场景），不要写「第几章埋的伏笔」
-
-                输出 JSON 格式为：
-                {"foreshadows": [{"content": "伏笔内容", "status": "已埋/已回收", "plan": "计划回收时机"}], "character_states": ["角色状态1"], "unresolved": ["悬念1"]}
                 """.formatted(batchContent, prevLedger);
+        return new Prompt(JSON_SYSTEM + "\n\n" + LEDGER_RULES, user);
     }
 
     // ───────────────────────────── 阶段 3：展开小事件 ─────────────────────────────
@@ -374,7 +419,6 @@ public class OutlineStageService {
         List<Chunk> chunks = buildChunks(acts);
         StringBuilder output = new StringBuilder();
         String previousContent = "";
-        String system = textSystem(settings);
 
         for (int i = 0; i < chunks.size(); i++) {
             Chunk chunk = chunks.get(i);
@@ -382,12 +426,12 @@ public class OutlineStageService {
             sink.stage(i + 1, chunks.size(), "展开" + chunk.actName() + "小事件 (" + (i + 1) + "/" + chunks.size() + ")");
             Chunk next = i + 1 < chunks.size() ? chunks.get(i + 1) : null;
             String laterContent = next == null ? "" : renderNextSkeleton(acts, next);
-            String prompt = step3Prompt(body, title, concept, acts, chunk, globalSummary,
+            Prompt step3 = step3Prompt(settings, body, title, concept, acts, chunk, globalSummary,
                     previousContent, laterContent, minorCount, extra);
             String chunkText = "";
             for (int attempt = 0; attempt < 3 && chunkText.isBlank(); attempt++) {
                 if (attempt > 0) sleepQuietly(1800L * attempt);
-                chunkText = streamText(system, prompt, sink, textSettings(settings), true).trim();
+                chunkText = streamText(step3.system(), step3.user(), sink, textSettings(settings), true).trim();
             }
             if (chunkText.isBlank()) {
                 // 极端情况下模型返回空流：保留本块框架，避免整份大纲失败
@@ -397,7 +441,8 @@ public class OutlineStageService {
             int continuation = 0;
             while (!chunkText.contains("○ 小事件") && continuation < MAX_CONTINUATIONS) {
                 String continuePrompt = "请接着刚才的内容继续输出，不要重复已经生成的部分，不要添加解释性文字。";
-                String more = streamText(system, prompt + "\n\n已生成内容：\n" + chunkText + "\n\n" + continuePrompt,
+                String more = streamText(step3.system(),
+                        step3.user() + "\n\n已生成内容：\n" + chunkText + "\n\n" + continuePrompt,
                         sink, textSettings(settings), true);
                 chunkText = (chunkText + "\n" + more.trim()).trim();
                 continuation++;
@@ -423,7 +468,7 @@ public class OutlineStageService {
         return result;
     }
 
-    private String step3Prompt(Map<String, Object> body, String title, String concept,
+    private Prompt step3Prompt(AiSettings settings, Map<String, Object> body, String title, String concept,
                                List<Act> acts, Chunk chunk, String globalSummary,
                                String previousContent, String laterContent,
                                int minorCount, String extra) {
@@ -447,7 +492,7 @@ public class OutlineStageService {
                 ○ 小事件3：小标题
                 小事件概要
                 ……（循环至%d个小事件）""".formatted(chunk.startIndex(), minorCount);
-        return """
+        String user = """
                 请展开第%d幕（%s）的详细内容。
 
                 小说类型：%s
@@ -462,47 +507,18 @@ public class OutlineStageService {
                 %s%s=== 当前幕已有的大事件框架 ===
                 %s
 
-                请为上述每个大事件展开配套的小事件（共%d个小事件每个），严格遵循以下格式（纯文本，禁止任何 markdown 标记）：
+                请为上述每个大事件展开配套的小事件（共%d个小事件每个）。格式示例：
 
                 %s
 
-                格式硬性要求（违反会直接导致大纲解析失败）：
-                - 大事件标题行必须写成「══ 大事件N：标题 ══」，N 用本块框架里的具体数字，禁止写成「大事件X」或省略编号
-                - 大事件概述必须原样完整保留「当前幕已有的大事件框架」里给出的该大事件概述：
-                  只允许微调标点使语句通顺，不得删减信息、不得压缩、不得重写——你的任务只是为它补写小事件
-                - 小事件标题行必须写成「○ 小事件N：标题」，N 在每个大事件内部从 1 开始连续编号
-                - 禁止使用 markdown 标题（#、##、###）、加粗（**）、分隔线（---、===）和任何列表符号
-                - 事件标题必须独立成行，标题内不得再嵌套「大事件N：」这类前缀
-
-                ⚠️ 小事件写作核心要求：
-                1. 每个小事件必须是独立完整的情节单元，不是大事件的一个执行步骤
-                2. 禁止将单个事件拆成时序步骤（例如“前往→发现→战斗→撤退”这种只算1个小事件）
-                3. 每个小事件应引入新的角色、地点、冲突或转折，而不是单纯推进上一个事件
-                4. 好小事件 = 场景 + 冲突 + 变化，差小事件 = 下一个动作步骤
-                5. 小事件组合起来必须完整覆盖该大事件概述里的全部关键情节、转折、场面、人物与伏笔，
-                   不得跳过或省略概述中明确写到的事；不能只写概述的开头几段就收尾
-                6. 伏笔只做短线：本块涉及的伏笔必须能在 5 个大事件之内回收，不要设计长线伏笔；
-                   已经回收的伏笔不要再写
-
-                注意：
-                - 只输出当前这一幕的内容，不要输出其他幕
-                - 本块需按顺序输出编号为「大事件%d」至「大事件%d」的大事件，每个大事件只允许输出一次
-                - 编号只允许出现在标题行：大事件概述、小事件概要等正文里严禁出现任何章节号 /
-                  事件编号引用（「第54章」「第54个事件」「大事件54」「小事件12」「54与70埋的」等）。
-                  写伏笔照应时直接写出内容本身（人物、旧物件、原话、场景），不要写「第几章埋的伏笔」；
-                  只读这一段的人也应当看得懂指的是什么
-                - 严禁重复或回显任何已出现的大事件（包括全局框架中其他事件、前一块已展开的详细内容）
-                - 保持大事件标题和概述与已有框架完全一致，不得自行改写、压缩或合并大事件
-                - 小事件要有递进关系，禁止平铺流水账
-                - 参照全局框架中其他幕的人物状态与伏笔，避免前后矛盾
-                - 承接前文：若提供了「前一块已展开的详细内容」，本块开头必须紧接其最后一场戏的结尾状态
-                - 铺垫后文：若提供了「紧接着的下一块大事件」，本块结尾要为其埋下伏笔、做好状态过渡
+                本块需按顺序输出编号为「大事件%d」至「大事件%d」的大事件，每个大事件只允许输出一次。
                 """.formatted(
                 chunk.actIndex() + 1, chunk.actName(),
                 str(body, "genre"), str(body, "theme"), str(body, "protagonist"), str(body, "worldview"),
                 title, extraSection(body), globalSummary, previousSection, laterSection, chunk.content(),
                 minorCount, formatExample, chunk.startIndex(), chunk.endIndex()
         );
+        return new Prompt(textSystem(settings) + "\n\n" + STEP3_RULES, user);
     }
 
     // ───────────────────────────── 批处理 / 渲染 ─────────────────────────────

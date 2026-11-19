@@ -46,12 +46,10 @@ class CopyAiService {
       styleHint += '\n背景设定：$background';
     }
 
+    // 顺序：固定任务说明 + 固定输出格式要求在前，本次变化的副本 / 角色信息在后
     final prompt =
         '''
 请根据以下角色信息，为副本"$copyName"生成一个完整的故事大纲。$styleHint
-
-角色信息：
-$charInfos
 
 请以JSON格式返回，包含以下字段：
 1. total_story: 故事总纲（字符串）
@@ -59,6 +57,9 @@ $charInfos
 3. intersections: 角色交集列表（数组, 每个元素包含char_a_name, char_b_name, desc字段）
 
 请只返回JSON格式数据，不要包含其他内容。
+
+角色信息：
+$charInfos
 ''';
 
     final settings = await UserSettingService.getSettings();
@@ -109,15 +110,11 @@ $charInfos
     String characterInfo,
     String totalStory,
   ) async {
+    // 顺序：固定任务说明 + 固定输出格式要求 + 全角色共用的故事总纲在前，
+    // 本角色信息在后 —— 循环为每个角色生成时前面字节完全一致
     final prompt =
         '''
 根据以下故事总纲和角色信息，生成该角色的个人故事线。
-
-故事总纲：
-$totalStory
-
-角色信息：
-$characterInfo
 
 请以JSON格式返回，包含以下字段：
 1. single_story: 该角色的个人故事（字符串）
@@ -125,6 +122,12 @@ $characterInfo
 3. equipment: 该角色获得的装备列表（数组, 每个元素包含name和attr字段）
 
 请只返回JSON格式数据，不要包含其他内容。
+
+故事总纲：
+$totalStory
+
+角色信息：
+$characterInfo
 ''';
 
     final settings = await UserSettingService.getSettings();

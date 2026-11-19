@@ -47,6 +47,60 @@ export async function saveChapterContent(id: number, content: string): Promise<v
   });
 }
 
+/** 一个事件在界面上的规范编号：大事件全篇连续，小事件在每个大事件内部重新计数 */
+export interface EventNumber {
+  kind: 'major' | 'minor';
+  number: number;
+}
+
+/**
+ * 按列表顺序算出每个事件的显示编号（与大纲正文里的「大事件N / 小事件N」一致）。
+ * 不能用 event_index：它是所有事件的连续序号，大事件也占号，直接显示会跳号。
+ */
+export function eventNumbers(chapters: Row[]): Map<number, EventNumber> {
+  const map = new Map<number, EventNumber>();
+  let majorSeq = 0;
+  let minorSeq = 0;
+  for (const row of chapters) {
+    if (isMajor(row)) {
+      majorSeq += 1;
+      minorSeq = 0;
+      map.set(Number(row.id), { kind: 'major', number: majorSeq });
+    } else {
+      minorSeq += 1;
+      map.set(Number(row.id), { kind: 'minor', number: minorSeq });
+    }
+  }
+  return map;
+}
+
+/** 这一篇正文是否已经有内容（与 statsOf 的「已写」口径一致） */
+export function hasContent(row: Row | null | undefined): boolean {
+  return String(row?.content ?? '').trim().length > 0;
+}
+
+/** 正文 / 概要的字数：去掉首尾空白后统计字符数 */
+export function charsOf(value: unknown): number {
+  return String(value ?? '').trim().length;
+}
+
+/**
+ * 列表接口会把超过上限的文本截成「前 N 字…（共 X 字，打开详情查看全文）」。
+ * 查看类页面据此拆出预览正文与真实字数：预览用于列表，完整内容再按 id 单独取。
+ */
+export function splitTruncatedText(value: unknown): { text: string; length: number; truncated: boolean } {
+  const raw = String(value ?? '');
+  const match = raw.match(/…（共 (\d+) 字，打开详情查看全文）$/);
+  if (!match) return { text: raw, length: raw.length, truncated: false };
+  const preview = raw.slice(0, raw.length - match[0].length);
+  return { text: preview, length: Number(match[1]) || raw.length, truncated: true };
+}
+
+/** 列表行里的真实字数（被截断时取「共 X 字」里的 X） */
+export function trueLengthOf(value: unknown): number {
+  return splitTruncatedText(value).length;
+}
+
 export interface OutlineStats {
   total: number;
   minor: number;

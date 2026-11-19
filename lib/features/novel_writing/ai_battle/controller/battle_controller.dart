@@ -144,6 +144,9 @@ class BattleController extends ChangeNotifier {
       'temperature': battleSettings.temperature,
       'max_tokens': battleSettings.maxTokens,
       'stream': true,
+      // 关闭思考模式时显式禁用；开启时不传，沿用模型默认（思考开启）。
+      if (!battleSettings.enableThinking)
+        'thinking': {'type': 'disabled'},
     };
 
     final messages = [

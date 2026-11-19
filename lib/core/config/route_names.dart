@@ -23,6 +23,8 @@ const String kChapterSettingsRouteName = '/chapter_settings';
 
 /// 战斗设置页（「AI 写战斗」页右上齿轮进入）。
 const String kBattleSettingsRouteName = '/battle_settings';
+/// 大纲编辑 AI 生成设置页（大纲编辑 → AI 生成面板右上齿轮进入）。
+const String kOutlineEditAiSettingsRouteName = '/outline_edit_ai_settings';
 
 /// 这些「整页设置」路由上不显示全局悬浮聊天球。
 ///
@@ -36,4 +38,5 @@ const Set<String> kHideBallRouteNames = {
   kOutlineSettingsRouteName,
   kChapterSettingsRouteName,
   kBattleSettingsRouteName,
+  kOutlineEditAiSettingsRouteName,
 };

@@ -26,10 +26,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public final class AgentRun {
 
-    /** 断开后等待重连的时间；超过则取消运行。 */
-    private static final long DETACH_GRACE_SECONDS = 120;
-    /** 单次运行最多保留的事件数，防止超长对话占满内存。 */
-    private static final int MAX_EVENTS = 2000;
     private static final long PING_INTERVAL_MS = 15_000;
 
     private static final ScheduledExecutorService TIMER = Executors.newScheduledThreadPool(1, runnable -> {
@@ -47,19 +43,27 @@ public final class AgentRun {
     private final List<Map<String, Object>> events = new ArrayList<>();
     private final List<Map<String, Object>> parts = Collections.synchronizedList(new ArrayList<>());
     private final Object lock = new Object();
+    /** 断开后等待重连的时间；超过则取消运行。 */
+    private final long detachGraceSeconds;
+    /** 单次运行最多保留的事件数，防止超长对话占满内存。 */
+    private final int maxEvents;
 
     private long seq;
     private boolean finished;
     private String finishedStatus = "done";
+    private String finishedError;
     private boolean attached;
     private long detachedAt;
     private long finishedAt;
 
-    AgentRun(String id, String deviceId, long sessionId, AgentRunListener listener) {
+    AgentRun(String id, String deviceId, long sessionId, AgentRunListener listener,
+             long detachGraceSeconds, int maxEvents) {
         this.id = id;
         this.deviceId = deviceId;
         this.sessionId = sessionId;
         this.listener = listener;
+        this.detachGraceSeconds = Math.max(10, detachGraceSeconds);
+        this.maxEvents = Math.max(100, maxEvents);
     }
 
     public String id() {
@@ -113,7 +117,7 @@ public final class AgentRun {
             seq++;
             event.put("seq", seq);
             events.add(event);
-            if (events.size() > MAX_EVENTS) {
+            if (events.size() > maxEvents) {
                 events.remove(0);
             }
             record(event);
@@ -198,26 +202,55 @@ public final class AgentRun {
             boolean shouldCancel;
             synchronized (lock) {
                 shouldCancel = !finished && !attached && detachedAt == stamp
-                        && System.currentTimeMillis() - detachedAt >= DETACH_GRACE_SECONDS * 1000;
+                        && System.currentTimeMillis() - detachedAt >= detachGraceSeconds * 1000;
             }
             if (shouldCancel) {
                 cancel();
             }
-        }, DETACH_GRACE_SECONDS, TimeUnit.SECONDS);
+        }, detachGraceSeconds, TimeUnit.SECONDS);
     }
 
-    /** 运行结束：唤醒所有 attach 循环，并把最终状态交给监听器落库。 */
-    public void markFinished(String status) {
+    /**
+     * 运行结束：唤醒所有 attach 循环，并把最终状态交给监听器落库。
+     *
+     * <p>结束前把仍在「执行中/等待中」的部件收敛掉：取消或异常时工具卡如果没有
+     * 收到结果，历史消息里会永远转圈，与真实结束状态不一致。</p>
+     */
+    public void markFinished(String status, String error) {
         boolean first;
+        String normalized = status == null ? "done" : status;
         synchronized (lock) {
             first = !finished;
             finished = true;
-            finishedStatus = status == null ? "done" : status;
+            finishedStatus = normalized;
+            finishedError = error;
             finishedAt = System.currentTimeMillis();
             lock.notifyAll();
         }
+        if (first) {
+            finalizeParts();
+        }
         if (first && listener != null) {
-            listener.onFinish(this, finishedStatus);
+            listener.onFinish(this, finishedStatus, finishedError);
+        }
+    }
+
+    public void markFinished(String status) {
+        markFinished(status, null);
+    }
+
+    private void finalizeParts() {
+        synchronized (parts) {
+            for (Map<String, Object> part : parts) {
+                Object kind = part.get("kind");
+                Object status = part.get("status");
+                if ("tool".equals(kind) && "running".equals(status)) {
+                    part.put("status", "error");
+                    part.put("error", "运行已结束，未收到工具返回");
+                } else if ("ask".equals(kind) && "waiting".equals(status)) {
+                    part.put("status", "timeout");
+                }
+            }
         }
     }
 
@@ -237,7 +270,17 @@ public final class AgentRun {
 
     // ── 消息部件时间线 ──
 
+    /**
+     * 记录部件。与 {@link #partsJson()} 的遍历串行化：journal 在写线程里取快照，
+     * 这里在模型线程里改部件，不加锁会出现读到半更新映射的风险。
+     */
     private void record(Map<String, Object> event) {
+        synchronized (parts) {
+            recordLocked(event);
+        }
+    }
+
+    private void recordLocked(Map<String, Object> event) {
         String type = String.valueOf(event.get("type"));
         switch (type) {
             case "delta" -> {
@@ -251,6 +294,21 @@ public final class AgentRun {
                 } else {
                     Map<String, Object> part = new LinkedHashMap<>();
                     part.put("kind", "text");
+                    part.put("text", text);
+                    parts.add(part);
+                }
+            }
+            case "thinking" -> {
+                String text = String.valueOf(event.getOrDefault("text", ""));
+                if (text.isEmpty()) {
+                    return;
+                }
+                Map<String, Object> last = parts.isEmpty() ? null : parts.get(parts.size() - 1);
+                if (last != null && "thinking".equals(last.get("kind"))) {
+                    last.put("text", String.valueOf(last.get("text")) + text);
+                } else {
+                    Map<String, Object> part = new LinkedHashMap<>();
+                    part.put("kind", "thinking");
                     part.put("text", text);
                     parts.add(part);
                 }

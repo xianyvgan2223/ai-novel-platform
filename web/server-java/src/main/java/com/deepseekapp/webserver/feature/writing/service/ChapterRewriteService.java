@@ -70,7 +70,7 @@ public class ChapterRewriteService {
         }
 
         StringBuilder user = new StringBuilder();
-        user.append("请按用户的修改指令，改写下面每个条目的标题与概要。\n");
+        user.append("请按用户消息末尾的修改指令，改写下面每个条目的标题与概要。\n");
         user.append("""
                 要求：
                 - 条目的数量和顺序必须保持不变，index 原样返回；
@@ -78,13 +78,13 @@ public class ChapterRewriteService {
                 - 不要新增或删除剧情，不要跨条目合并；
                 - 严格 JSON：{"chapters":[{"index":1,"title":"标题","summary":"概要"}]}
 
-                修改指令：
                 """);
-        user.append(instruction).append('\n');
         if (!context.isEmpty()) {
-            user.append("\n大纲上下文（仅供理解，不要照抄）：\n").append(context).append('\n');
+            user.append("大纲上下文（仅供理解，不要照抄）：\n").append(context).append('\n');
         }
         user.append("\n待改写条目：\n").append(Json.write(items));
+        // 修改指令每次都可能变，放到最后：前面的静态要求与大纲上下文仍能命中前缀缓存
+        user.append("\n\n修改指令：\n").append(instruction).append('\n');
 
         String raw = ai.complete(JSON_SYSTEM, user.toString(), AiSettings.from(body));
         JsonNode root = readObject(raw);

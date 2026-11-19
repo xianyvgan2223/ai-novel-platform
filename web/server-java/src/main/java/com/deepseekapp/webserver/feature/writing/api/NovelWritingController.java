@@ -8,6 +8,7 @@ import com.deepseekapp.webserver.feature.writing.service.OutlineChatService;
 import com.deepseekapp.webserver.feature.writing.service.OutlineFormatService;
 import com.deepseekapp.webserver.feature.writing.service.OutlineGenerationService;
 import com.deepseekapp.webserver.feature.writing.service.OutlineSplitService;
+import com.deepseekapp.webserver.feature.writing.service.InspirationAiService;
 import com.deepseekapp.webserver.feature.writing.service.WritingService;
 import com.deepseekapp.webserver.util.Json;
 import com.deepseekapp.webserver.web.Api;
@@ -47,6 +48,7 @@ public class NovelWritingController {
     private final OutlineFormatService outlineFormatService;
     private final BattleGenerationService battleService;
     private final OutlineChatService outlineChatService;
+    private final InspirationAiService inspirationAiService;
 
     public NovelWritingController(WritingService writingService,
                                   OutlineGenerationService outlineService,
@@ -56,7 +58,8 @@ public class NovelWritingController {
                                   ChapterRewriteService chapterRewriteService,
                                   OutlineFormatService outlineFormatService,
                                   BattleGenerationService battleService,
-                                  OutlineChatService outlineChatService) {
+                                  OutlineChatService outlineChatService,
+                                  InspirationAiService inspirationAiService) {
         this.writingService = writingService;
         this.outlineService = outlineService;
         this.chapterService = chapterService;
@@ -66,6 +69,7 @@ public class NovelWritingController {
         this.outlineFormatService = outlineFormatService;
         this.battleService = battleService;
         this.outlineChatService = outlineChatService;
+        this.inspirationAiService = inspirationAiService;
     }
 
     @PostMapping("/outline/generate")
@@ -202,6 +206,37 @@ public class NovelWritingController {
             // 浏览器中途断开
         } catch (Exception e) {
             safeError(out, e.getMessage() == null ? "AI 对话失败" : e.getMessage());
+        }
+    }
+
+    /** 小说灵感：前端拼好 system + 多轮消息后统一走这里流式返回（SSE） */
+    @PostMapping("/inspiration/stream")
+    public void streamInspiration(@RequestBody(required = false) Map<String, Object> body,
+                                  HttpServletResponse response) throws IOException {
+        Map<String, Object> payload = body == null ? Map.of() : body;
+        writingService.requireConfig();
+
+        OutputStream out = startSse(response);
+        long startedAt = System.currentTimeMillis();
+        StringBuilder produced = new StringBuilder();
+        try {
+            inspirationAiService.stream(payload, delta -> {
+                produced.append(delta);
+                Map<String, Object> event = new LinkedHashMap<>();
+                event.put("type", "delta");
+                event.put("text", delta);
+                writeEvent(out, event);
+            });
+
+            Map<String, Object> done = new LinkedHashMap<>();
+            done.put("type", "done");
+            done.put("chars", produced.length());
+            done.put("elapsedMs", System.currentTimeMillis() - startedAt);
+            writeEvent(out, done);
+        } catch (IOException ignored) {
+            // 浏览器中途断开
+        } catch (Exception e) {
+            safeError(out, e.getMessage() == null ? "灵感生成失败" : e.getMessage());
         }
     }
 

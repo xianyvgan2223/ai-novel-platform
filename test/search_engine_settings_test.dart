@@ -161,16 +161,16 @@ void main() {
   });
 
   group('多路查询结果合并', () {
-    Map<String, dynamic> r(String title, String url) => {'name': title, 'url': url};
+    Map<String, dynamic> r(String title, String url) => {
+      'name': title,
+      'url': url,
+    };
 
     test('按链接去重，轮流取以保证每一路都有代表', () {
-      final merged = ChatController.mergeSearchResults(
-        [
-          [r('a1', 'https://a/1'), r('a2', 'https://a/2')],
-          [r('b1', 'https://b/1'), r('a2重复', 'https://a/2')],
-        ],
-        maxTotal: 10,
-      );
+      final merged = ChatController.mergeSearchResults([
+        [r('a1', 'https://a/1'), r('a2', 'https://a/2')],
+        [r('b1', 'https://b/1'), r('a2重复', 'https://a/2')],
+      ], maxTotal: 10);
       expect(merged.map((e) => e['url']).toList(), [
         'https://a/1',
         'https://b/1',
@@ -179,34 +179,25 @@ void main() {
     });
 
     test('总条数受 maxTotal 限制', () {
-      final merged = ChatController.mergeSearchResults(
-        [
-          List.generate(5, (i) => r('a$i', 'https://a/$i')),
-          List.generate(5, (i) => r('b$i', 'https://b/$i')),
-        ],
-        maxTotal: 3,
-      );
+      final merged = ChatController.mergeSearchResults([
+        List.generate(5, (i) => r('a$i', 'https://a/$i')),
+        List.generate(5, (i) => r('b$i', 'https://b/$i')),
+      ], maxTotal: 3);
       expect(merged, hasLength(3));
     });
 
     test('链接为空时用标题+序号做键，不会把不同结果误判成重复', () {
-      final merged = ChatController.mergeSearchResults(
-        [
-          [r('无链接1', ''), r('无链接2', '')],
-        ],
-        maxTotal: 10,
-      );
+      final merged = ChatController.mergeSearchResults([
+        [r('无链接1', ''), r('无链接2', '')],
+      ], maxTotal: 10);
       expect(merged, hasLength(2));
     });
 
     test('某一路为空时只返回另一路的结果', () {
-      final merged = ChatController.mergeSearchResults(
-        [
-          [r('a1', 'https://a/1')],
-          [],
-        ],
-        maxTotal: 10,
-      );
+      final merged = ChatController.mergeSearchResults([
+        [r('a1', 'https://a/1')],
+        [],
+      ], maxTotal: 10);
       expect(merged, hasLength(1));
     });
   });
@@ -216,31 +207,37 @@ void main() {
         ChatController.buildWebSearchTool(s, engine)['function']
             as Map<String, dynamic>;
 
-    final today = DateTime.now();
-    final todayText =
-        '${today.year.toString().padLeft(4, '0')}-'
-        '${today.month.toString().padLeft(2, '0')}-'
-        '${today.day.toString().padLeft(2, '0')}';
-
-    test('描述里带当前日期（模型会用错年份去搜旧闻）', () {
-      final desc = fn(const UserSetting(), UserSetting.searchEngineDeepseek)['description'] as String;
-      expect(desc, contains(todayText));
+    test('描述里不带当前日期，日期统一由运行环境注记提供', () {
+      final desc =
+          fn(
+                const UserSetting(),
+                UserSetting.searchEngineDeepseek,
+              )['description']
+              as String;
       expect(desc, contains('正确的年份'));
+      expect(desc, contains('运行环境注记'));
+      expect(desc, isNot(contains('当前日期是')));
     });
 
     test('DeepSeek 来源额外给出 site:/after: 等查询语法', () {
-      final desc = fn(
-        const UserSetting(searchEngine: UserSetting.searchEngineDeepseek),
-        UserSetting.searchEngineDeepseek,
-      )['description'] as String;
+      final desc =
+          fn(
+                const UserSetting(
+                  searchEngine: UserSetting.searchEngineDeepseek,
+                ),
+                UserSetting.searchEngineDeepseek,
+              )['description']
+              as String;
       expect(desc, contains('site:'));
       expect(desc, contains('after:'));
       expect(desc, contains('lang:'));
     });
 
-    test('百度来源不带 DeepSeek 专有语法，但同样带日期', () {
-      final desc = fn(const UserSetting(), UserSetting.searchEngineBaidu)['description'] as String;
-      expect(desc, contains(todayText));
+    test('百度来源不带 DeepSeek 专有语法，也不带固定日期', () {
+      final desc =
+          fn(const UserSetting(), UserSetting.searchEngineBaidu)['description']
+              as String;
+      expect(desc, isNot(contains(RegExp(r'20\d\d-\d\d-\d\d'))));
       expect(desc, isNot(contains('site:')));
     });
 
@@ -257,7 +254,8 @@ void main() {
         UserSetting.searchEngineBaidu,
       );
       String topKDesc(Map<String, dynamic> f) =>
-          ((f['parameters'] as Map)['properties'] as Map)['top_k']['description']
+          ((f['parameters'] as Map)['properties']
+                  as Map)['top_k']['description']
               as String;
       expect(topKDesc(deep), contains('范围1-50'));
       expect(topKDesc(baidu), contains('范围1-999'));

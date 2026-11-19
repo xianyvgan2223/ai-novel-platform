@@ -37,6 +37,7 @@ class _BattleSettingPageState extends State<BattleSettingPage> {
   double _temperature = 0.8;
   int _maxTokens = 4096;
   String _model = 'deepseek-flash';
+  bool _enableThinking = true;
   final TextEditingController _systemCtrl = TextEditingController();
   bool _loading = true;
 
@@ -54,6 +55,7 @@ class _BattleSettingPageState extends State<BattleSettingPage> {
         _temperature = setting.temperature;
         _maxTokens = setting.maxTokens;
         _model = setting.model;
+        _enableThinking = setting.enableThinking;
         _systemCtrl.text = setting.systemPrompt;
       }
     } catch (_) {}
@@ -70,6 +72,7 @@ class _BattleSettingPageState extends State<BattleSettingPage> {
       maxTokens: _maxTokens,
       model: _model,
       systemPrompt: _systemCtrl.text,
+      enableThinking: _enableThinking,
     );
     await BattleDbHelper().saveSettings(setting.toMap());
     if (mounted) {
@@ -172,6 +175,12 @@ class _BattleSettingPageState extends State<BattleSettingPage> {
                 ),
                 SettingsCard(
                   children: [
+                    SettingsSwitchRow(
+                      label: '思考模式',
+                      subtitle: '关闭后更快更省',
+                      initialValue: _enableThinking,
+                      onChanged: (v) => setState(() => _enableThinking = v),
+                    ),
                     SettingsSliderRow(
                       label: '温度',
                       // 旧版副标题「数值越高，输出越有创造性（0.0 ~ 2.0）」：
@@ -197,6 +206,10 @@ class _BattleSettingPageState extends State<BattleSettingPage> {
                           setState(() => _maxTokens = v.round()),
                     ),
                   ],
+                ),
+                const SettingsNote(
+                  text: '思考模式开启后，生成前会进行深度思考，质量更高但耗时更长、'
+                      '消耗更多 token；关闭后更快更省。',
                 ),
               ],
             ),

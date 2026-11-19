@@ -19,7 +19,8 @@ const TOOL_LABELS: Record<string, string> = {
   search_rag: '检索情节素材',
   rag_status: '素材库状态',
   generate_outline: '生成大纲',
-  list_outlines: '列出大纲',
+  list_outlines: '列出作品',
+  list_chapters: '列出章节',
   generate_chapter: '生成章节',
 };
 
@@ -49,6 +50,14 @@ function pretty(value: unknown): string {
 
 const argsText = computed(() => pretty(props.part.args));
 const resultText = computed(() => pretty(props.part.data));
+
+/** 阶段进度文案，如 3/12 · 生成人物；总数缺失时只显示标签 */
+const stageText = computed(() => {
+  const stage = props.part.stage;
+  if (!stage) return '';
+  const progress = stage.total > 0 ? stage.index + '/' + stage.total : '';
+  return [progress, stage.label].filter(Boolean).join(' · ');
+});
 </script>
 
 <template>
@@ -62,6 +71,7 @@ const resultText = computed(() => pretty(props.part.data));
 
       <span class="tool-main">
         <span class="tool-name">{{ label }}</span>
+        <span v-if="part.status === 'running' && stageText" class="tool-stage">{{ stageText }}</span>
         <span v-if="part.summary" class="tool-summary">{{ part.summary }}</span>
         <span v-else-if="part.error" class="tool-summary error">{{ part.error }}</span>
       </span>
@@ -152,6 +162,15 @@ const resultText = computed(() => pretty(props.part.data));
   font-size: 12px;
   font-weight: 600;
   color: var(--ink-1);
+}
+
+.tool-stage {
+  font-size: 10.5px;
+  color: var(--ink-4);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tool-summary {

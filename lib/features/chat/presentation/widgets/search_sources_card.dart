@@ -1,9 +1,10 @@
 // lib/features/chat/presentation/widgets/search_sources_card.dart
-// 联网搜索「来源卡片」——历史消息气泡与流式回答共用同一份渲染。
+// 联网搜索「来源入口」——回答结束后显示的一枚小胶囊，点击打开来源列表。
 //
-// 为什么要抽出来：这段 UI 原先在 message_bubble.dart 与 chat_page.dart 各抄了
-// 一份（约 80 行 × 2），加一个字段就要改两处、还容易改漏一处。DeepSeek 官方
-// 搜索比百度多出站点名/发布时间/权威性等字段，正好借这次合并。
+// 样式参考豆包：聊天里只留一行很轻的「参考 N 篇资料」，中性灰底、按内容
+// 宽度，不占满气泡；来源列表放进底部弹层，避免一张高饱和色块压在回答下面。
+//
+// 兼容百度链路（name/link）与 DeepSeek 官方搜索（title/url/site_name/date）。
 
 import 'package:flutter/material.dart';
 import 'package:deepseekapp/core/theme/app_palette.dart';
@@ -85,145 +86,237 @@ void showSearchDetailDialog(BuildContext context, SearchResultView r) {
   );
 }
 
-/// 来源卡片
+/// 来源入口：回答气泡下方的一枚小胶囊。
 ///
-/// [collapsible] 为 true 时用于历史消息：默认收起、点击标题栏展开；
-/// 为 false 时用于正在流式输出的回答：始终展开，且不显示折叠箭头。
-class SearchSourcesCard extends StatefulWidget {
+/// 只展示「参考 N 篇资料」，不再在聊天流里平铺来源列表；点击后从底部弹层
+/// 查看来源，点单条来源再打开完整摘要/正文。
+class SearchSourcesCard extends StatelessWidget {
   final List<Map<String, dynamic>> results;
-  final bool collapsible;
 
-  /// 最多展示几条（其余只在弹窗/上下文里体现）
+  /// 弹层里最多列几条（其余只计入总数）
   final int maxItems;
 
   const SearchSourcesCard({
     super.key,
     required this.results,
-    this.collapsible = true,
-    this.maxItems = 5,
+    this.maxItems = 30,
   });
 
   @override
-  State<SearchSourcesCard> createState() => _SearchSourcesCardState();
+  Widget build(BuildContext context) {
+    if (results.isEmpty) return const SizedBox.shrink();
+    final p = context.palette;
+    final views = results
+        .map(SearchResultView.fromMap)
+        .take(maxItems)
+        .toList(growable: false);
+
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: () => _openSourcesSheet(context, views, results.length),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+            decoration: BoxDecoration(
+              color: p.surfaceMuted,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: p.border),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.travel_explore_rounded,
+                  size: 12,
+                  color: p.textTertiary,
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  '参考 ${results.length} 篇资料',
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    color: p.textSecondary,
+                    height: 1.2,
+                  ),
+                ),
+                const SizedBox(width: 2),
+                Icon(
+                  Icons.chevron_right_rounded,
+                  size: 13,
+                  color: p.textTertiary,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _openSourcesSheet(
+    BuildContext context,
+    List<SearchResultView> views,
+    int total,
+  ) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        final p = ctx.palette;
+        return Container(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(ctx).height * 0.72,
+          ),
+          decoration: BoxDecoration(
+            color: p.surface,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
+          ),
+          child: SafeArea(
+            top: false,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                  child: Column(
+                    children: [
+                      Container(
+                        width: 36,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: p.borderStrong,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      Row(
+                        children: [
+                          Text(
+                            '参考来源',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: p.textPrimary,
+                            ),
+                          ),
+                          const Spacer(),
+                          Text(
+                            '$total 篇',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: p.textTertiary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                Divider(height: 1, color: p.border),
+                Flexible(
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+                    itemCount: views.length,
+                    separatorBuilder: (context, index) =>
+                        Divider(height: 1, color: p.border),
+                    itemBuilder: (context, index) =>
+                        _SourceRow(view: views[index], index: index),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
 }
 
-class _SearchSourcesCardState extends State<SearchSourcesCard> {
-  bool _expanded = false;
+/// 弹层里的一条来源：序号 + 标题 + 站点/日期 + 摘要。
+class _SourceRow extends StatelessWidget {
+  final SearchResultView view;
+  final int index;
+
+  const _SourceRow({required this.view, required this.index});
 
   @override
   Widget build(BuildContext context) {
     final p = context.palette;
-    final views = widget.results
-        .map(SearchResultView.fromMap)
-        .take(widget.maxItems)
-        .toList(growable: false);
-    final showList = !widget.collapsible || _expanded;
-
-    final card = Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-      decoration: BoxDecoration(
-        color: p.accentSoft,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: p.isDark ? p.borderStrong : const Color(0xFFB3C5FF),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.public, size: 14, color: p.accent),
-              const SizedBox(width: 4),
-              Text(
-                '搜索来源（${widget.results.length}）',
-                style: TextStyle(fontSize: 11, color: p.accent),
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: () => showSearchDetailDialog(context, view),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 20,
+              height: 20,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: p.surfaceMuted,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: p.border),
               ),
-              if (widget.collapsible) ...[
-                const Spacer(),
-                Icon(
-                  _expanded
-                      ? Icons.keyboard_arrow_up
-                      : Icons.keyboard_arrow_down,
-                  size: 14,
-                  color: p.accent,
-                ),
-              ],
-            ],
-          ),
-          if (showList) ...[
-            const SizedBox(height: 6),
-            ...views.map(
-              (r) => GestureDetector(
-                onTap: () => showSearchDetailDialog(context, r),
-                child: Padding(
-                  padding: const EdgeInsets.only(bottom: 6),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        r.title,
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: p.textPrimary,
-                        ),
-                      ),
-                      if (r.meta.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 1),
-                          child: Text(
-                            r.meta,
-                            style: TextStyle(
-                              fontSize: 9,
-                              color: p.textTertiary,
-                            ),
-                          ),
-                        ),
-                      if (r.snippet.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 2),
-                          child: Text(
-                            r.snippet,
-                            style: TextStyle(
-                              fontSize: 10,
-                              color: p.textSecondary,
-                            ),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      if (r.url.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 1),
-                          child: Text(
-                            r.url,
-                            style: TextStyle(
-                              fontSize: 9,
-                              color: p.accent,
-                              decoration: TextDecoration.underline,
-                            ),
-                            // 有些来源链接带 accessToken 之类的查询串，长度能到几百字符，
-                            // 不限制的话一张卡片会被 URL 撑满（真机实测），这里压成一行
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                    ],
-                  ),
+              child: Text(
+                '${index + 1}',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w500,
+                  color: p.textTertiary,
                 ),
               ),
             ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    view.title.isEmpty ? '未命名来源' : view.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      height: 1.35,
+                      color: p.textPrimary,
+                    ),
+                  ),
+                  if (view.meta.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      view.meta,
+                      style: TextStyle(fontSize: 10, color: p.textTertiary),
+                    ),
+                  ],
+                  if (view.snippet.isNotEmpty) ...[
+                    const SizedBox(height: 3),
+                    Text(
+                      view.snippet,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 11,
+                        height: 1.35,
+                        color: p.textSecondary,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 4),
+            Icon(Icons.chevron_right_rounded, size: 14, color: p.textTertiary),
           ],
-        ],
+        ),
       ),
-    );
-
-    if (!widget.collapsible) return card;
-    return GestureDetector(
-      onTap: () => setState(() => _expanded = !_expanded),
-      child: card,
     );
   }
 }

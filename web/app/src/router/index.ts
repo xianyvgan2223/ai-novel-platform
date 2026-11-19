@@ -32,6 +32,12 @@ export const router = createRouter({
       meta: { title: '一键生成大纲' },
     },
     {
+      path: '/writing/inspiration',
+      name: 'writing-inspiration',
+      component: () => import('@/views/writing/InspirationView.vue'),
+      meta: { title: '小说灵感' },
+    },
+    {
       path: '/writing/outlines',
       name: 'writing-outlines',
       component: () => import('@/views/writing/OutlineSelectView.vue'),
@@ -43,6 +49,20 @@ export const router = createRouter({
       component: () => import('@/views/writing/OutlineEditView.vue'),
       props: true,
       meta: { title: '大纲编辑' },
+    },
+    {
+      path: '/writing/outline/:id/view',
+      name: 'writing-outline-view',
+      component: () => import('@/views/writing/OutlineReadView.vue'),
+      props: true,
+      meta: { title: '查看已有大纲' },
+    },
+    {
+      path: '/writing/outline/:id/read',
+      name: 'writing-outline-read',
+      component: () => import('@/views/writing/ChapterReadView.vue'),
+      props: true,
+      meta: { title: '查看已有正文' },
     },
     {
       path: '/writing/outline/:id/convert',
@@ -102,6 +122,12 @@ export const router = createRouter({
       meta: { title: '情节素材库' },
     },
     {
+      path: '/downloads',
+      name: 'downloads',
+      component: () => import('@/views/DownloadsView.vue'),
+      meta: { title: '下载' },
+    },
+    {
       path: '/writing/bili',
       redirect: '/bili',
     },
@@ -111,6 +137,12 @@ export const router = createRouter({
       component: () => import('@/views/ChatView.vue'),
       props: true,
       meta: { title: '会话详情' },
+    },
+    {
+      path: '/browse',
+      name: 'browse-hub',
+      component: () => import('@/views/BrowseView.vue'),
+      meta: { title: '数据浏览' },
     },
     {
       path: '/browse/:db/:table?',

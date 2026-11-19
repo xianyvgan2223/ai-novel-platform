@@ -6,7 +6,7 @@ import 'package:path/path.dart' as p;
 
 class DatabaseHelper {
   static const _dbName = 'deepseek.db';
-  static const _dbVersion = 46;
+  static const _dbVersion = 52;
   static Database? _database;
 
   /// 单例入口，全局复用同一个数据库连接
@@ -128,11 +128,14 @@ class DatabaseHelper {
         search_freshness TEXT NOT NULL DEFAULT '',
         search_engine TEXT NOT NULL DEFAULT 'off',
         search_need_content INTEGER NOT NULL DEFAULT 1,
+        show_cache_hit INTEGER NOT NULL DEFAULT 1,
         history_query INTEGER NOT NULL DEFAULT 0
       )
     ''');
 
     // ── chat_sessions 会话表（每条记录对应一组独立对话） ──
+    // summary_count / context_* 是 DSH 式压缩与缓存命中率展示需要的字段：
+    // summary_count 记录摘要覆盖了多少条消息，避免重复摘要；后三个记录上次请求的实测用量。
     await db.execute('''
       CREATE TABLE chat_sessions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -140,11 +143,19 @@ class DatabaseHelper {
         create_time TEXT NOT NULL,
         last_message TEXT NOT NULL DEFAULT '',
         system_prompt TEXT NOT NULL DEFAULT '',
-        summary TEXT NOT NULL DEFAULT ''
+        summary TEXT NOT NULL DEFAULT '',
+        summary_count INTEGER NOT NULL DEFAULT 0,
+        context_tokens INTEGER NOT NULL DEFAULT 0,
+        cached_tokens INTEGER NOT NULL DEFAULT 0,
+        context_window INTEGER NOT NULL DEFAULT 0,
+        total_prompt_tokens INTEGER NOT NULL DEFAULT 0,
+        total_cached_tokens INTEGER NOT NULL DEFAULT 0
       )
     ''');
 
     // ── chat_messages 消息表（关联 session_id） ──
+    // prompt/cached/completion tokens 记录「产生这条回答的那次请求」的 usage，
+    // 用于在消息菜单里显示该条回答自己的缓存命中率（不随会话累计变化）。
     await db.execute('''
       CREATE TABLE chat_messages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -154,6 +165,9 @@ class DatabaseHelper {
         thinking_text TEXT,
         search_results TEXT,
         timestamp TEXT NOT NULL,
+        prompt_tokens INTEGER NOT NULL DEFAULT 0,
+        cached_tokens INTEGER NOT NULL DEFAULT 0,
+        completion_tokens INTEGER NOT NULL DEFAULT 0,
         FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
       )
     ''');
@@ -179,7 +193,8 @@ class DatabaseHelper {
         temperature REAL NOT NULL DEFAULT 0.8,
         max_tokens INTEGER NOT NULL DEFAULT 4096,
         model TEXT NOT NULL DEFAULT 'deepseek-flash',
-        system_prompt TEXT NOT NULL DEFAULT ''
+        system_prompt TEXT NOT NULL DEFAULT '',
+        enable_thinking INTEGER NOT NULL DEFAULT 1
       )
     ''');
 
@@ -190,6 +205,7 @@ class DatabaseHelper {
       'max_tokens': 4096,
       'model': 'deepseek-flash',
       'system_prompt': '',
+      'enable_thinking': 1,
     });
 
     // ── outline_settings 大纲生成设置表（小说模块） ──
@@ -226,6 +242,7 @@ class DatabaseHelper {
         model TEXT NOT NULL DEFAULT 'deepseek-flash',
         chapter_system_prompt TEXT NOT NULL DEFAULT '',
         enable_thinking INTEGER NOT NULL DEFAULT 1,
+        reasoning_effort TEXT NOT NULL DEFAULT 'high',
         enable_story_state INTEGER NOT NULL DEFAULT 1,
         chapter_min_words INTEGER NOT NULL DEFAULT 2000,
         chapter_max_words INTEGER NOT NULL DEFAULT 3000
@@ -238,6 +255,7 @@ class DatabaseHelper {
       'model': 'deepseek-flash',
       'chapter_system_prompt': '',
       'enable_thinking': 1,
+      'reasoning_effort': 'high',
       'enable_story_state': 1,
       'chapter_min_words': 2000,
       'chapter_max_words': 3000,
@@ -1311,7 +1329,12 @@ class DatabaseHelper {
 
     // V44→V45：小说灵感朗读可选择系统/本地引擎，并支持 0.75–5.0x 语速。
     if (oldVersion < 45) {
-      Future<void> addTo(String table, String name, String type, String def) async {
+      Future<void> addTo(
+        String table,
+        String name,
+        String type,
+        String def,
+      ) async {
         final cols = await db.rawQuery('PRAGMA table_info($table)');
         if (!cols.any((c) => c['name'] == name)) {
           await db.execute(
@@ -1326,13 +1349,92 @@ class DatabaseHelper {
 
     // V45→V46：小说灵感可关闭「回到底部」悬浮按钮。
     if (oldVersion < 46) {
-      final cols = await db.rawQuery(
-        'PRAGMA table_info(inspiration_settings)',
-      );
+      final cols = await db.rawQuery('PRAGMA table_info(inspiration_settings)');
       if (!cols.any((c) => c['name'] == 'show_scroll_to_bottom')) {
         await db.execute(
           'ALTER TABLE inspiration_settings ADD COLUMN '
           'show_scroll_to_bottom INTEGER NOT NULL DEFAULT 1',
+        );
+      }
+    }
+
+    // V46→V47：聊天会话增加压缩进度与上下文用量（DSH 式压缩 + 缓存命中率展示）。
+    if (oldVersion < 47) {
+      final cols = await db.rawQuery('PRAGMA table_info(chat_sessions)');
+      Future<void> add(String name, String type, String def) async {
+        if (!cols.any((c) => c['name'] == name)) {
+          await db.execute(
+            'ALTER TABLE chat_sessions ADD COLUMN $name $type NOT NULL DEFAULT $def',
+          );
+        }
+      }
+
+      await add('summary_count', 'INTEGER', '0');
+      await add('context_tokens', 'INTEGER', '0');
+      await add('cached_tokens', 'INTEGER', '0');
+      await add('context_window', 'INTEGER', '0');
+    }
+
+    // V47→V48：聊天会话增加累计用量（整体缓存命中率 = Σ命中 / Σ输入）。
+    if (oldVersion < 48) {
+      final cols = await db.rawQuery('PRAGMA table_info(chat_sessions)');
+      Future<void> add(String name) async {
+        if (!cols.any((c) => c['name'] == name)) {
+          await db.execute(
+            'ALTER TABLE chat_sessions ADD COLUMN $name INTEGER NOT NULL DEFAULT 0',
+          );
+        }
+      }
+
+      await add('total_prompt_tokens');
+      await add('total_cached_tokens');
+    }
+
+    // V48→V49：chat_messages 增加每条回答的 usage（消息级缓存命中率）。
+    if (oldVersion < 49) {
+      final cols = await db.rawQuery('PRAGMA table_info(chat_messages)');
+      Future<void> add(String name) async {
+        if (!cols.any((c) => c['name'] == name)) {
+          await db.execute(
+            'ALTER TABLE chat_messages ADD COLUMN $name INTEGER NOT NULL DEFAULT 0',
+          );
+        }
+      }
+
+      await add('prompt_tokens');
+      await add('cached_tokens');
+      await add('completion_tokens');
+    }
+
+    // V49→V50：user_settings 增加「显示缓存命中」开关（默认开启）。
+    if (oldVersion < 50) {
+      final cols = await db.rawQuery('PRAGMA table_info(user_settings)');
+      if (!cols.any((c) => c['name'] == 'show_cache_hit')) {
+        await db.execute(
+          'ALTER TABLE user_settings '
+          'ADD COLUMN show_cache_hit INTEGER NOT NULL DEFAULT 1',
+        );
+      }
+    }
+
+    // V50→V51：战斗设置增加「思考模式」开关（默认开启）。
+    if (oldVersion < 51) {
+      final cols = await db.rawQuery('PRAGMA table_info(battle_settings)');
+      if (!cols.any((c) => c['name'] == 'enable_thinking')) {
+        await db.execute(
+          'ALTER TABLE battle_settings '
+          'ADD COLUMN enable_thinking INTEGER NOT NULL DEFAULT 1',
+        );
+      }
+    }
+
+    // V51→V52：章节设置增加「思考深度」（大纲编辑 AI 使用，默认 high）。
+    if (oldVersion < 52) {
+      final cols = await db.rawQuery('PRAGMA table_info(chapter_settings)');
+      if (!cols.any((c) => c['name'] == 'reasoning_effort')) {
+        await db.execute(
+          'ALTER TABLE chapter_settings '
+          "ADD COLUMN reasoning_effort TEXT NOT NULL DEFAULT 'high'",
         );
       }
     }

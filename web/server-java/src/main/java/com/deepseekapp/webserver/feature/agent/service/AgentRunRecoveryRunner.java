@@ -44,7 +44,8 @@ public class AgentRunRecoveryRunner implements ApplicationRunner {
             String deviceId = text(row.get("device_id"));
             String content = text(row.get("text_so_far"));
             String parts = text(row.get("parts_json"));
-            if (sessionId <= 0 || store.countMessagesByRun(runId) > 0) {
+            if (sessionId <= 0 || store.findSession(sessionId, deviceId) == null
+                    || store.countMessagesByRun(runId) > 0) {
                 continue;
             }
             try {
@@ -56,6 +57,7 @@ public class AgentRunRecoveryRunner implements ApplicationRunner {
             }
         }
         store.markInterrupted(System.currentTimeMillis());
+        store.markTasksInterrupted(System.currentTimeMillis());
         log.info("Agent 运行恢复：{} 个未完成的运行已标记为 interrupted", running.size());
     }
 

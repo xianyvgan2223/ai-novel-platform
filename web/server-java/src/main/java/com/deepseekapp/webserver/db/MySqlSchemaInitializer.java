@@ -60,6 +60,7 @@ public class MySqlSchemaInitializer implements ApplicationRunner {
                 for (Map.Entry<String, SchemaCatalog.TableDef> table : db.getValue().tables().entrySet()) {
                     ensureBusinessTable(connection, table.getKey(), table.getValue());
                     ensureDeviceColumn(connection, table.getKey());
+                    ensureBusinessColumns(connection, table.getKey(), table.getValue());
                 }
             }
             log.info("MySQL 表结构检查完成：{} 个库，{} 张业务表",
@@ -133,6 +134,24 @@ public class MySqlSchemaInitializer implements ApplicationRunner {
         execute(connection, "ALTER TABLE `" + table + "` ADD COLUMN `device_id` VARCHAR(64) NOT NULL DEFAULT ''");
     }
 
+    /**
+     * 老库升级：按 schema.json 补齐业务表缺失的列。
+     *
+     * <p>业务表是用 {@code CREATE TABLE IF NOT EXISTS} 建的，已有库不会自动长出新列；
+     * App 端新增字段（例如 battle_settings.enable_thinking）后，如果不同步这里，
+     * 同步写入会因 MySQL 表缺列直接失败。</p>
+     */
+    private void ensureBusinessColumns(Connection connection, String table,
+                                       SchemaCatalog.TableDef def) throws SQLException {
+        for (SchemaCatalog.ColumnDef column : def.columns()) {
+            if (columnExists(connection, table, column.name())) {
+                continue;
+            }
+            execute(connection, "ALTER TABLE `" + table + "` ADD COLUMN `"
+                    + column.name() + "` " + columnType(column));
+        }
+    }
+
     private String columnType(SchemaCatalog.ColumnDef column) {
         String type = column.type() == null ? "TEXT" : column.type().toUpperCase();
         boolean text = !type.startsWith("INT") && !type.startsWith("REAL") && !type.startsWith("DOUBLE")
@@ -146,7 +165,15 @@ public class MySqlSchemaInitializer implements ApplicationRunner {
             case "REAL", "DOUBLE", "FLOAT", "NUMERIC" -> "DOUBLE";
             default -> "BIGINT";
         };
-        return base + (column.isNotNull() || column.isPk() ? " NOT NULL DEFAULT 0" : " NULL");
+        if (!(column.isNotNull() || column.isPk())) {
+            return base + " NULL";
+        }
+        // 数字列尽量沿用 schema.json 的默认值（例如 enable_thinking 默认 1）
+        String defaultSql = column.defaultSql();
+        if (defaultSql != null && defaultSql.trim().matches("-?\\d+(\\.\\d+)?")) {
+            return base + " NOT NULL DEFAULT " + defaultSql.trim();
+        }
+        return base + " NOT NULL DEFAULT 0";
     }
 
     /** TEXT 主键需要前缀长度才能建唯一索引。 */
@@ -274,6 +301,12 @@ public class MySqlSchemaInitializer implements ApplicationRunner {
                   `device_id` VARCHAR(64) NOT NULL DEFAULT '',
                   `title` VARCHAR(191) NOT NULL DEFAULT '',
                   `message_count` INT NOT NULL DEFAULT 0,
+                  `summary` LONGTEXT NULL,
+                  `summary_upto` BIGINT NOT NULL DEFAULT 0,
+                  `context_tokens` BIGINT NOT NULL DEFAULT 0,
+                  `context_cached_tokens` BIGINT NOT NULL DEFAULT 0,
+                  `total_prompt_tokens` BIGINT NOT NULL DEFAULT 0,
+                  `total_cached_tokens` BIGINT NOT NULL DEFAULT 0,
                   `created_at` BIGINT NOT NULL DEFAULT 0,
                   `updated_at` BIGINT NOT NULL DEFAULT 0,
                   PRIMARY KEY (`id`),
@@ -291,6 +324,9 @@ public class MySqlSchemaInitializer implements ApplicationRunner {
                   `status` VARCHAR(16) NOT NULL DEFAULT 'done',
                   `error` VARCHAR(500) NULL,
                   `elapsed_ms` BIGINT NULL,
+                  `prompt_tokens` INT NULL,
+                  `completion_tokens` INT NULL,
+                  `cached_tokens` INT NULL,
                   `created_at` BIGINT NOT NULL DEFAULT 0,
                   PRIMARY KEY (`id`),
                   KEY `idx_agent_messages_session` (`session_id`, `id`)
@@ -308,16 +344,33 @@ public class MySqlSchemaInitializer implements ApplicationRunner {
                   `frequency_penalty` DOUBLE NULL,
                   `presence_penalty` DOUBLE NULL,
                   `system_prompt` LONGTEXT NULL,
+                  `context_window` INT NOT NULL DEFAULT 0,
                   `web_search` TINYINT NOT NULL DEFAULT 0,
                   `search_count` INT NOT NULL DEFAULT 5,
                   `search_need_content` TINYINT NOT NULL DEFAULT 0,
+                  `stream` TINYINT NOT NULL DEFAULT 1,
+                  `thinking` TINYINT NOT NULL DEFAULT 1,
+                  `reasoning_effort` VARCHAR(16) NOT NULL DEFAULT 'high',
                   `updated_at` BIGINT NOT NULL DEFAULT 0,
                   PRIMARY KEY (`device_id`)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """);
         ensureColumn(connection, "agent_settings", "web_search", "TINYINT NOT NULL DEFAULT 0");
+        ensureColumn(connection, "agent_settings", "context_window", "INT NOT NULL DEFAULT 0");
+        ensureColumn(connection, "agent_sessions", "summary", "LONGTEXT NULL");
+        ensureColumn(connection, "agent_sessions", "summary_upto", "BIGINT NOT NULL DEFAULT 0");
+        ensureColumn(connection, "agent_sessions", "context_tokens", "BIGINT NOT NULL DEFAULT 0");
+        ensureColumn(connection, "agent_sessions", "context_cached_tokens", "BIGINT NOT NULL DEFAULT 0");
+        ensureColumn(connection, "agent_sessions", "total_prompt_tokens", "BIGINT NOT NULL DEFAULT 0");
+        ensureColumn(connection, "agent_sessions", "total_cached_tokens", "BIGINT NOT NULL DEFAULT 0");
+        ensureColumn(connection, "agent_messages", "prompt_tokens", "INT NULL");
+        ensureColumn(connection, "agent_messages", "completion_tokens", "INT NULL");
+        ensureColumn(connection, "agent_messages", "cached_tokens", "INT NULL");
         ensureColumn(connection, "agent_settings", "search_count", "INT NOT NULL DEFAULT 5");
         ensureColumn(connection, "agent_settings", "search_need_content", "TINYINT NOT NULL DEFAULT 0");
+        ensureColumn(connection, "agent_settings", "stream", "TINYINT NOT NULL DEFAULT 1");
+        ensureColumn(connection, "agent_settings", "thinking", "TINYINT NOT NULL DEFAULT 1");
+        ensureColumn(connection, "agent_settings", "reasoning_effort", "VARCHAR(16) NOT NULL DEFAULT 'high'");
         execute(connection, """
                 CREATE TABLE IF NOT EXISTS `agent_tasks` (
                   `id` BIGINT NOT NULL AUTO_INCREMENT,
@@ -351,6 +404,22 @@ public class MySqlSchemaInitializer implements ApplicationRunner {
                 """);
         ensureColumn(connection, "agent_messages", "run_id", "VARCHAR(64) NULL");
         ensureIndex(connection, "agent_messages", "idx_agent_messages_run", "`run_id`");
+        execute(connection, """
+                CREATE TABLE IF NOT EXISTS `agent_downloads` (
+                  `id` BIGINT NOT NULL AUTO_INCREMENT,
+                  `device_id` VARCHAR(64) NOT NULL DEFAULT '',
+                  `url` VARCHAR(1024) NOT NULL DEFAULT '',
+                  `filename` VARCHAR(255) NOT NULL DEFAULT '',
+                  `mime` VARCHAR(128) NOT NULL DEFAULT '',
+                  `size` BIGINT NOT NULL DEFAULT 0,
+                  `path` VARCHAR(500) NOT NULL DEFAULT '',
+                  `status` VARCHAR(16) NOT NULL DEFAULT 'done',
+                  `error` VARCHAR(500) NULL,
+                  `created_at` BIGINT NOT NULL DEFAULT 0,
+                  PRIMARY KEY (`id`),
+                  KEY `idx_agent_downloads_device` (`device_id`, `created_at`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """);
     }
 
     // ───────────────────────────── 工具 ─────────────────────────────

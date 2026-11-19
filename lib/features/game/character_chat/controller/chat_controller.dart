@@ -369,6 +369,11 @@ class CharacterChatController extends ChangeNotifier {
   }
 
   /// 构建上下文消息列表（含 World Info 和记忆注入）
+  ///
+  /// system 里只放整场对话保持不变的内容（角色卡 + 对话摘要），
+  /// 每次请求都一致才能命中前缀缓存；World Info（按本轮输入匹配）与长期记忆
+  /// （随对话增长）这些会变的内容追加到本轮用户消息末尾，
+  /// 否则 system 一变，system 之后的所有历史消息都缓存失效。
   Future<List<Map<String, dynamic>>> _buildContextMessages() async {
     final char = _character!;
     final parts = <String>[char.buildSystemPrompt()];
@@ -376,23 +381,6 @@ class CharacterChatController extends ChangeNotifier {
     // 注入摘要（如果有）
     if (_summary != null && _summary!.isNotEmpty) {
       parts.add('[对话摘要]\n$_summary');
-    }
-
-    // 注入 World Info 匹配
-    if (_worldEntries.isNotEmpty) {
-      final lastMsg = _messages.isNotEmpty ? _messages.last.content : '';
-      final wiContent = WorldInfoService.matchContent(_worldEntries, lastMsg);
-      if (wiContent.isNotEmpty) {
-        parts.add(wiContent);
-      }
-    }
-
-    // 注入长期记忆
-    if (_sessionId != null) {
-      final memoryBlock = await MemoryService.buildMemoryBlock(_sessionId!);
-      if (memoryBlock.isNotEmpty) {
-        parts.add(memoryBlock);
-      }
     }
 
     final result = <Map<String, dynamic>>[
@@ -407,6 +395,33 @@ class CharacterChatController extends ChangeNotifier {
         },
       ),
     );
+
+    // 本轮才变化的内容：匹配到的 World Info + 长期记忆，追加到最后一条用户消息末尾
+    final dynamicParts = <String>[];
+    if (_worldEntries.isNotEmpty) {
+      final lastMsg = _messages.isNotEmpty ? _messages.last.content : '';
+      final wiContent = WorldInfoService.matchContent(_worldEntries, lastMsg);
+      if (wiContent.isNotEmpty) {
+        dynamicParts.add(wiContent);
+      }
+    }
+    if (_sessionId != null) {
+      final memoryBlock = await MemoryService.buildMemoryBlock(_sessionId!);
+      if (memoryBlock.isNotEmpty) {
+        dynamicParts.add(memoryBlock);
+      }
+    }
+    if (dynamicParts.isNotEmpty) {
+      final lastUserIndex = result.lastIndexWhere((m) => m['role'] == 'user');
+      if (lastUserIndex >= 0) {
+        final last = result[lastUserIndex];
+        last['content'] = '${last['content']}${dynamicParts.join()}';
+      } else {
+        // 没有用户消息（理论上不会发生）：退回 system 末尾，保证信息不丢
+        result.first['content'] =
+            '${result.first['content']}\n\n${dynamicParts.join()}';
+      }
+    }
 
     return result;
   }

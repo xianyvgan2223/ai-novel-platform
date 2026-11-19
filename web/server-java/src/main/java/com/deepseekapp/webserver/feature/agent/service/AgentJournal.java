@@ -7,8 +7,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -17,9 +17,9 @@ import java.util.concurrent.Executors;
  * 运行日志：把 Agent 运行状态与已产出的内容检查点写进 MySQL。
  *
  * <p>只对内存中的运行做异步写入，不阻塞模型流：非增量事件（工具调用、提问、任务）
- * 立即落一次检查点；token 增量按 800ms 节流，把当前文本与部件快照更新到
- * {@code agent_runs}。进程重启后由 {@link AgentRunRecoveryRunner} 把残留的
- * running 运行标记为 interrupted，并把已产出的内容补成一条历史消息。</p>
+ * 立即落一次检查点；token 增量按 800ms 节流。同一运行同时只排队一个检查点，
+ * 避免数据库抖动时快照在队列里无限堆积。进程重启后由
+ * {@link AgentRunRecoveryRunner} 把残留的 running 运行标记为 interrupted。</p>
  */
 @Component
 public class AgentJournal implements AgentRunListener {
@@ -34,6 +34,7 @@ public class AgentJournal implements AgentRunListener {
         return thread;
     });
     private final Map<String, Long> lastCheckpoint = new ConcurrentHashMap<>();
+    private final Set<String> pendingCheckpoints = ConcurrentHashMap.newKeySet();
 
     public AgentJournal(AgentStore store) {
         this.store = store;
@@ -41,7 +42,7 @@ public class AgentJournal implements AgentRunListener {
 
     @Override
     public void onStart(AgentRun run) {
-        Map<String, Object> row = new LinkedHashMap<>();
+        Map<String, Object> row = new java.util.LinkedHashMap<>();
         row.put("runId", run.id());
         row.put("deviceId", run.deviceId());
         row.put("sessionId", run.sessionId());
@@ -60,33 +61,48 @@ public class AgentJournal implements AgentRunListener {
             }
             lastCheckpoint.put(run.id(), now);
         }
-        checkpoint(run);
+        // 只保留一个在途检查点：真正执行时再取最新快照，既省序列化也不丢最新状态
+        if (!pendingCheckpoints.add(run.id())) {
+            return;
+        }
+        submit(() -> {
+            try {
+                store.checkpointRun(run.id(), run.lastSeq(), run.text(), run.partsJson(), "running");
+            } finally {
+                pendingCheckpoints.remove(run.id());
+            }
+        }, "checkpoint run " + run.id());
     }
 
     @Override
-    public void onFinish(AgentRun run, String status) {
+    public void onFinish(AgentRun run, String status, String error) {
         lastCheckpoint.remove(run.id());
+        pendingCheckpoints.remove(run.id());
         String text = run.text();
         String parts = run.partsJson();
         long seq = run.lastSeq();
-        submit(() -> store.finishRun(run.id(), seq, text, parts, status, null, System.currentTimeMillis()),
+        submit(() -> store.finishRun(run.id(), seq, text, parts, status, error, System.currentTimeMillis()),
                 "finish run " + run.id());
-    }
-
-    private void checkpoint(AgentRun run) {
-        String text = run.text();
-        String parts = run.partsJson();
-        long seq = run.lastSeq();
-        submit(() -> store.checkpointRun(run.id(), seq, text, parts, "running"),
-                "checkpoint run " + run.id());
     }
 
     private void submit(Runnable task, String action) {
         writer.submit(() -> {
-            try {
-                task.run();
-            } catch (RuntimeException e) {
-                log.warn("Agent 运行日志写入失败（{}）：{}", action, e.getMessage());
+            for (int attempt = 0; attempt < 2; attempt++) {
+                try {
+                    task.run();
+                    return;
+                } catch (RuntimeException e) {
+                    if (attempt == 0) {
+                        try {
+                            Thread.sleep(150);
+                        } catch (InterruptedException interrupted) {
+                            Thread.currentThread().interrupt();
+                            return;
+                        }
+                        continue;
+                    }
+                    log.warn("Agent 运行日志写入失败（{}）：{}", action, e.getMessage());
+                }
             }
         });
     }

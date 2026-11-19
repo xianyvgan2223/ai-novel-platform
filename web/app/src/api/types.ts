@@ -205,6 +205,7 @@ export interface OptimizePayload {
   strength?: WritingStrength;
   /** 额外要求，例如「删掉所有比喻」 */
   extra?: string;
+  settings?: AiRequestSettings;
 }
 
 export type DrawKind = 'short' | 'outline';
@@ -216,6 +217,7 @@ export interface DrawPayload {
   perspective?: string;
   count?: number;
   extra?: string;
+  settings?: AiRequestSettings;
 }
 
 export interface WritingCardField {
@@ -248,6 +250,20 @@ export interface AiRequestSettings {
   temperature?: number;
   maxTokens?: number;
   systemPrompt?: string;
+  /** 仅写作工具使用：关闭后请求里带 thinking=disabled */
+  enableThinking?: boolean;
+}
+
+/** 小说灵感：前端拼好的 system + 多轮消息，后端只负责流式生成 */
+export interface InspirationChatTurn {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface InspirationStreamPayload {
+  systemPrompt?: string;
+  messages: InspirationChatTurn[];
+  settings?: AiRequestSettings;
 }
 
 export interface OutlineGeneratePayload {
@@ -432,6 +448,11 @@ export interface BiliExtractPayload {
   mode: 'auto' | 'subtitle' | 'asr';
   duration?: number;
   subtitleUrl?: string;
+  /** 以下字段只用于把这次提取保存成可回看的记录 */
+  title?: string;
+  owner?: string;
+  page?: number;
+  part?: string;
 }
 
 /** 提取完成信息（done 事件） */
@@ -439,6 +460,29 @@ export interface BiliExtractDoneInfo {
   source?: 'subtitle' | 'asr';
   chars?: number;
   elapsedMs?: number;
+  /** 本次提取自动保存到服务端后的记录 id */
+  transcriptId?: string;
+}
+
+/** 一次已保存的提取记录（列表项，不含正文） */
+export interface BiliTranscriptSummary {
+  id: string;
+  title: string;
+  owner: string;
+  bvid: string;
+  aid: number;
+  cid: number;
+  page: number;
+  part: string;
+  duration: number;
+  source: string;
+  chars: number;
+  createdAt: number;
+}
+
+/** 提取记录详情（含完整文字稿） */
+export interface BiliTranscriptDetail extends BiliTranscriptSummary {
+  text: string;
 }
 
 /** 模块标识 → 中文名（与 schema.js 的 module 字段对应） */
@@ -497,17 +541,120 @@ export interface RagScene {
   createdAt: string;
 }
 
+/** 导入任务状态机：解析 →（等待手动开始）→ 提炼 → 合并去重 → 向量化 → 写库 → 完成 */
+export type RagJobStatus =
+  | 'parsing'
+  | 'waiting'
+  | 'extracting'
+  | 'merging'
+  | 'embedding'
+  | 'indexing'
+  | 'done'
+  | 'failed';
+
+export type RagWindowStatus = 'pending' | 'running' | 'done' | 'failed';
+
+/** 分块窗口摘要：任务详情里带，不含窗口全文与 LLM 原文 */
+export interface RagWindowSummary {
+  index: number;
+  title: string;
+  chapterRange: string;
+  chars: number;
+  status: RagWindowStatus;
+  sceneCount: number;
+  error: string;
+  elapsedMs: number;
+  textPreview: string;
+}
+
 export interface RagJob {
   id: string;
   book: string;
-  status: 'running' | 'done' | 'failed';
-  progress: number;
+  status: RagJobStatus;
   phase: string;
+  progress: number;
   message: string;
-  chunksDone: number;
-  chunksTotal: number;
-  sceneCount: number;
   error: string;
+  chunksTotal: number;
+  chunksDone: number;
+  sceneCount: number;
+  mergedCount: number;
+  format: string;
+  chapterPattern: string;
+  paragraphs: number;
+  chapters: number;
+  totalChars: number;
+  windowChars: number;
+  overlapChars: number;
+  concurrency: number;
+  createdAt: number;
+  startedAt: number;
+  finishedAt: number;
+  windows: RagWindowSummary[];
+}
+
+/** 最近任务列表用的精简信息（不含窗口列表） */
+export type RagJobSummary = Pick<
+  RagJob,
+  | 'id'
+  | 'book'
+  | 'status'
+  | 'phase'
+  | 'progress'
+  | 'chunksDone'
+  | 'chunksTotal'
+  | 'sceneCount'
+  | 'error'
+  | 'createdAt'
+  | 'startedAt'
+  | 'finishedAt'
+>;
+
+/** 窗口详情里解析出的情节对象（比入库后的 RagScene 少一些字段） */
+export interface RagSceneLike {
+  title: string;
+  plot: string;
+  tags: string[];
+  characters: string[];
+  sceneType?: string;
+  emotion?: string;
+  reusable?: string;
+}
+
+/** GET /api/rag/jobs/{id}/windows/{index}：窗口全文 + DeepSeek 原始返回 + 解析结果 */
+export interface RagWindowDetail extends RagWindowSummary {
+  text: string;
+  rawOutput: string;
+  scenes: RagSceneLike[];
+}
+
+/** 重新分块 / 开始提炼时提交的参数（字段都可省略，省略则沿用服务端设置） */
+export interface RagJobSplitPayload {
+  windowChars?: number;
+  overlapChars?: number;
+  concurrency?: number;
+}
+
+/** 提炼设置 */
+export interface RagSettings {
+  manualExtract: boolean;
+  windowChars: number;
+  overlapChars: number;
+  concurrency: number;
+  defaults: {
+    manualExtract: boolean;
+    windowChars: number;
+    overlapChars: number;
+    concurrency: number;
+  };
+}
+
+/** PUT /api/rag/settings 允许提交的部分字段 */
+export interface RagSettingsPayload {
+  manualExtract?: boolean;
+  windowChars?: number;
+  overlapChars?: number;
+  concurrency?: number;
 }
 
 export interface RagImportResult {

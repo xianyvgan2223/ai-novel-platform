@@ -14,5 +14,6 @@ public interface AgentRunListener {
 
     void onEvent(AgentRun run, Map<String, Object> event);
 
-    void onFinish(AgentRun run, String status);
+    /** @param error 失败原因（成功/取消时为 null），写进 agent_runs.error 便于排障 */
+    void onFinish(AgentRun run, String status, String error);
 }

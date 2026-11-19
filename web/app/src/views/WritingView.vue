@@ -2,7 +2,7 @@
 import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 import {
-  Aim, DocumentCopy, Download, EditPen, Headset, MagicStick, Promotion, Reading, Upload,
+  Aim, DocumentCopy, Download, EditPen, Headset, MagicStick, Promotion, Reading, Star, Upload,
 } from '@element-plus/icons-vue';
 import PageHeader from '@/components/PageHeader.vue';
 import OutlineTxtExportDialog from './writing/OutlineTxtExportDialog.vue';
@@ -19,6 +19,12 @@ const features = [
     title: '一键生成大纲',
     subtitle: '填写题材与设定，AI 流式生成整部作品的大纲和小事件',
     icon: MagicStick,
+  },
+  {
+    path: '/writing/inspiration',
+    title: '小说灵感',
+    subtitle: '和 AI 一起推演剧情：并行生成多个候选，选中后继续往后推',
+    icon: Star,
   },
   {
     path: '/writing/outlines?intent=edit',

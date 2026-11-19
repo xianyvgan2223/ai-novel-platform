@@ -13,8 +13,38 @@ class TrpgAiService {
   TrpgAiService({ApiService? apiService})
     : _apiService = apiService ?? ApiService();
 
-  /// 构建 DM system prompt（含角色卡 + 场景 + 剧情标记）
-  static String buildSystemPrompt(
+  /// 构建 DM system prompt（**只含每轮请求都相同的固定内容**：
+  /// DM 定位 + 规则 + 输出格式）。
+  ///
+  /// 玩家角色卡 / 当前场景 / 剧情标记这些每轮会变的状态不放进 system，
+  /// 改由 [buildStateBlock] 拼到本轮用户消息末尾 —— 否则 system 每轮都不同，
+  /// system 之后的历史消息会全部失去前缀缓存。
+  static String buildSystemPrompt() {
+    return '''
+你是一名经验丰富的 TRPG 主持人（DM），主持一场 DnD 风格的单人冒险。你负责描述场景、扮演 NPC、根据玩家行动与骰子判定结果推进剧情。你不替玩家做决定，也不直接决定骰子点数（点数由客户端本地掷出）。
+
+【规则】
+1. 用第二人称对玩家叙事，生动但克制。
+2. 当玩家的行动结果不确定、需要考验角色能力时，不要自己脑补结果，而是返回 need_check=true，并在 check 中给出：type（六维属性之一，如 dexterity）、可选 skill（标准技能名）、dc（难度等级 5~25）。
+3. 当玩家已给出骰子判定结果（消息里会带「[判定结果]」），你要据此叙述成功或失败，并给出对应的状态变更。
+4. 战斗、伤害、道具得失等都要通过 state_changes 反馈。
+
+【输出格式】
+先不要输出，只在最后输出一段严格的 JSON（不要 markdown 包裹），字段如下：
+{
+  "narration": "旁白/结果叙事",
+  "npc_dialogue": "NPC 说的话（没有则空字符串）",
+  "need_check": false,
+  "check": {"type": "dexterity", "skill": "sleight_of_hand", "dc": 15, "description": "说明这次判定"},
+  "state_changes": {"hp_delta": 0, "add_flag": [], "add_item": []},
+  "scene_update": "若剧情推进到新场景则填写，否则空字符串"
+}
+''';
+  }
+
+  /// 构建每轮变化的状态块：玩家角色卡 + 当前场景 + 剧情标记。
+  /// 由调用方追加到本轮用户消息末尾（不放进 system，保证 system 前缀稳定）。
+  static String buildStateBlock(
     CharacterSheet character, {
     String scene = '',
     Map<String, String> flags = const {},
@@ -39,8 +69,6 @@ class TrpgAiService {
         : flags.entries.map((e) => '${e.key}: ${e.value}').join('；');
 
     return '''
-你是一名经验丰富的 TRPG 主持人（DM），主持一场 DnD 风格的单人冒险。你负责描述场景、扮演 NPC、根据玩家行动与骰子判定结果推进剧情。你不替玩家做决定，也不直接决定骰子点数（点数由客户端本地掷出）。
-
 【玩家角色卡】
 - 姓名：${character.name}
 - 种族/职业：${character.race} ${character.charClass}
@@ -56,25 +84,7 @@ class TrpgAiService {
 ${scene.isEmpty ? '（待定，由你开局引入）' : scene}
 
 【剧情标记（已发生的关键事件）】
-$flagText
-
-【规则】
-1. 用第二人称对玩家叙事，生动但克制。
-2. 当玩家的行动结果不确定、需要考验角色能力时，不要自己脑补结果，而是返回 need_check=true，并在 check 中给出：type（六维属性之一，如 dexterity）、可选 skill（标准技能名）、dc（难度等级 5~25）。
-3. 当玩家已给出骰子判定结果（消息里会带「[判定结果]」），你要据此叙述成功或失败，并给出对应的状态变更。
-4. 战斗、伤害、道具得失等都要通过 state_changes 反馈。
-
-【输出格式】
-先不要输出，只在最后输出一段严格的 JSON（不要 markdown 包裹），字段如下：
-{
-  "narration": "旁白/结果叙事",
-  "npc_dialogue": "NPC 说的话（没有则空字符串）",
-  "need_check": false,
-  "check": {"type": "dexterity", "skill": "sleight_of_hand", "dc": 15, "description": "说明这次判定"},
-  "state_changes": {"hp_delta": 0, "add_flag": [], "add_item": []},
-  "scene_update": "若剧情推进到新场景则填写，否则空字符串"
-}
-''';
+$flagText''';
   }
 
   static String _signed(int v) => v >= 0 ? '+$v' : '$v';

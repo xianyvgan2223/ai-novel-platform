@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
+import 'package:deepseekapp/core/config/route_names.dart';
 import 'package:deepseekapp/core/theme/app_palette.dart';
 import '../../controller/outline_edit_controller.dart';
 import '../../model/outline_edit_chat_message.dart';
 import '../../model/outline_edit_draft.dart';
+import '../page/outline_edit_ai_setting_page.dart';
 
 /// 「大纲编辑」AI 生成面板（底部弹窗）——只生成大纲，不生成正文。
 ///
@@ -183,6 +185,18 @@ class _OutlineAiChatSheetState extends State<OutlineAiChatSheet> {
               style: TextStyle(fontSize: 11, color: p.textTertiary),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          IconButton(
+            icon: Icon(Icons.tune_rounded, size: 20, color: p.textTertiary),
+            tooltip: 'AI 设置',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                settings: const RouteSettings(
+                  name: kOutlineEditAiSettingsRouteName,
+                ),
+                builder: (_) => const OutlineEditAiSettingPage(),
+              ),
             ),
           ),
           IconButton(

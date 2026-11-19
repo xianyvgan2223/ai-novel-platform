@@ -82,6 +82,11 @@ class ApiService {
     if (tools != null && tools.isNotEmpty) {
       body['tools'] = tools;
     }
+    // 统一打开 usage：面板要显示上下文占用与缓存命中率。
+    // 部分调用方（写作功能）自带 apiParams，这里补一层兜底。
+    if (body['stream'] == true && body['stream_options'] == null) {
+      body['stream_options'] = {'include_usage': true};
+    }
 
     final isStream = apiParams['stream'] == true;
 
@@ -200,6 +205,7 @@ class ApiService {
             'choices': [
               {'delta': msg, 'finish_reason': choice['finish_reason']},
             ],
+            if (data['usage'] != null) 'usage': data['usage'],
           });
         }
       }

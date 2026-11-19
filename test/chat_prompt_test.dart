@@ -2,52 +2,41 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:deepseekapp/features/chat/application/chat_prompt.dart';
 
-/// 聊天系统提示词组装：
-/// - 不再注入「禁止 Markdown」指令（Markdown 由展示层清洗）；
-/// - 联网搜索开启时注入当前时间。
+/// 聊天提示词组装：
+/// - 系统提示词 = 稳定基础提示 + 会话自定义提示，绝不能带时间；
+/// - 时间按每条用户消息自己的发送时间追加，重建历史时逐字节一致。
 void main() {
-  test('搜索关闭：只带会话提示词，不注入当前时间', () {
-    final prompt = buildChatSystemPrompt(
-      sessionPrompt: '你是一个助手',
-      searchEnabled: false,
-      now: DateTime(2026, 11, 6, 20, 49),
-    );
-    expect(prompt, '你是一个助手');
+  test('系统提示词 = 稳定基础提示 + 会话自定义提示，不注入时间', () {
+    final prompt = buildChatSystemPrompt(sessionPrompt: '你是一个助手');
+    expect(prompt, contains(kChatBaseSystemPrompt));
+    expect(prompt, endsWith('你是一个助手'));
     expect(prompt.contains('当前时间'), isFalse);
     expect(prompt.contains('Markdown'), isFalse);
   });
 
-  test('搜索开启：会话提示词后追加当前时间（只加时间，不加行为指令）', () {
-    final prompt = buildChatSystemPrompt(
-      sessionPrompt: '你是一个助手',
-      searchEnabled: true,
-      now: DateTime(2026, 11, 6, 20, 49),
-    );
-    expect(prompt, '你是一个助手\n\n当前时间：2026年11月6日 20:49（星期五，本地时区）');
-    // 只注入时间本身，不附加「请以该时间为准」之类的行为指令，避免干扰模型
-    expect(prompt.contains('请以该时间为准'), isFalse);
-    expect(prompt.contains('时效性'), isFalse);
-    // 会话提示词在前，时间追加在后
-    expect(prompt.indexOf('你是一个助手'), lessThan(prompt.indexOf('当前时间')));
-    // 不再出现「禁止 Markdown」的旧指令
-    expect(prompt.contains('禁止'), isFalse);
+  test('会话提示词为空时仍返回稳定基础提示（保证跨会话可缓存前缀）', () {
+    expect(buildChatSystemPrompt(sessionPrompt: '   '), kChatBaseSystemPrompt);
   });
 
-  test('搜索开启但会话提示词为空：只注入当前时间', () {
-    final prompt = buildChatSystemPrompt(
-      sessionPrompt: '   ',
-      searchEnabled: true,
-      now: DateTime(2026, 11, 8, 9, 5),
-    );
-    expect(prompt, '当前时间：2026年11月8日 09:05（星期日，本地时区）');
-    expect(prompt.startsWith('当前时间：'), isTrue);
+  test('运行环境注记按消息时间稳定生成，同一时间重建结果完全一致', () {
+    final at = DateTime(2026, 11, 6, 20, 49);
+    final first = runtimeHintedContent('第一问', at);
+    final rebuilt = runtimeHintedContent('第一问', at);
+    expect(rebuilt, first);
+    expect(first, startsWith('第一问\n\n'));
+    expect(first, contains('当前时间：2026年11月6日 20:49'));
+    expect(first, contains('星期五'));
   });
 
-  test('搜索关闭且会话提示词为空：返回空串（调用方跳过 system 消息）', () {
-    expect(buildChatSystemPrompt(sessionPrompt: '', searchEnabled: false), '');
+  test('不同消息使用各自时间，历史重建不会引入当前时间', () {
+    final a = runtimeHintedContent('第一问', DateTime(2026, 11, 6, 20, 49));
+    final b = runtimeHintedContent('第二问', DateTime(2026, 11, 7, 8, 5));
+    expect(a, contains('11月6日 20:49'));
+    expect(b, contains('11月7日 08:05'));
+    expect(b, isNot(contains('11月6日')));
   });
 
-  test('当前时间补零与星期覆盖：周一 / 周日', () {
+  test('时间补零与星期覆盖：周一 / 周日', () {
     expect(buildCurrentTimeHint(DateTime(2026, 11, 9, 0, 0)), contains('星期一'));
     expect(
       buildCurrentTimeHint(DateTime(2026, 11, 6, 7, 8)),

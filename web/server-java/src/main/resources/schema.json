@@ -375,6 +375,58 @@
               "type": "TEXT",
               "notNull": true,
               "default": "''"
+            },
+            {
+              "name": "enable_thinking",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "1"
+            }
+          ],
+          "searchColumns": [
+            "model",
+            "system_prompt"
+          ]
+        },
+        "writing_tools_settings": {
+          "label": "写作工具 AI 设置",
+          "module": "novel_writing",
+          "singleton": true,
+          "columns": [
+            {
+              "name": "id",
+              "type": "INTEGER",
+              "pk": true
+            },
+            {
+              "name": "temperature",
+              "type": "REAL",
+              "notNull": true,
+              "default": "0.9"
+            },
+            {
+              "name": "max_tokens",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "4096"
+            },
+            {
+              "name": "model",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "'deepseek-flash'"
+            },
+            {
+              "name": "system_prompt",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "enable_thinking",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "1"
             }
           ],
           "searchColumns": [
@@ -486,6 +538,12 @@
               "type": "INTEGER",
               "notNull": true,
               "default": "1"
+            },
+            {
+              "name": "reasoning_effort",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "'high'"
             },
             {
               "name": "enable_story_state",
@@ -1132,6 +1190,384 @@
             "content"
           ],
           "orderBy": "id ASC"
+        },
+        "inspiration_sessions": {
+          "label": "小说灵感会话",
+          "module": "novel_writing",
+          "columns": [
+            {
+              "name": "id",
+              "type": "INTEGER",
+              "pk": true,
+              "autoincrement": true
+            },
+            {
+              "name": "title",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "world_view",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "theme",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "outline_record_id",
+              "type": "INTEGER"
+            },
+            {
+              "name": "outline_title",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "selected_events",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "'[]'"
+            },
+            {
+              "name": "created_at",
+              "type": "TEXT",
+              "notNull": true
+            },
+            {
+              "name": "updated_at",
+              "type": "TEXT",
+              "notNull": true
+            }
+          ],
+          "searchColumns": [
+            "title",
+            "world_view",
+            "theme",
+            "outline_title"
+          ],
+          "orderBy": "updated_at DESC"
+        },
+        "inspiration_messages": {
+          "label": "小说灵感指令",
+          "module": "novel_writing",
+          "columns": [
+            {
+              "name": "id",
+              "type": "INTEGER",
+              "pk": true,
+              "autoincrement": true
+            },
+            {
+              "name": "session_id",
+              "type": "INTEGER",
+              "notNull": true,
+              "ref": "inspiration_sessions.id",
+              "onDelete": "CASCADE"
+            },
+            {
+              "name": "content",
+              "type": "TEXT",
+              "notNull": true
+            },
+            {
+              "name": "revisions",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "'[]'"
+            },
+            {
+              "name": "created_at",
+              "type": "TEXT",
+              "notNull": true
+            },
+            {
+              "name": "updated_at",
+              "type": "TEXT",
+              "notNull": true
+            }
+          ],
+          "searchColumns": [
+            "content"
+          ],
+          "orderBy": "id ASC"
+        },
+        "inspiration_branches": {
+          "label": "小说灵感推演",
+          "module": "novel_writing",
+          "columns": [
+            {
+              "name": "id",
+              "type": "INTEGER",
+              "pk": true,
+              "autoincrement": true
+            },
+            {
+              "name": "session_id",
+              "type": "INTEGER",
+              "notNull": true,
+              "ref": "inspiration_sessions.id",
+              "onDelete": "CASCADE"
+            },
+            {
+              "name": "message_id",
+              "type": "INTEGER",
+              "notNull": true,
+              "ref": "inspiration_messages.id",
+              "onDelete": "CASCADE"
+            },
+            {
+              "name": "content",
+              "type": "TEXT",
+              "notNull": true
+            },
+            {
+              "name": "kind",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "'single'"
+            },
+            {
+              "name": "chosen",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "0"
+            },
+            {
+              "name": "generation_no",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "1"
+            },
+            {
+              "name": "source_ids",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "'[]'"
+            },
+            {
+              "name": "created_at",
+              "type": "TEXT",
+              "notNull": true
+            },
+            {
+              "name": "updated_at",
+              "type": "TEXT",
+              "notNull": true
+            }
+          ],
+          "searchColumns": [
+            "content"
+          ],
+          "orderBy": "id ASC"
+        },
+        "inspiration_chat_messages": {
+          "label": "小说灵感对话",
+          "module": "novel_writing",
+          "columns": [
+            {
+              "name": "id",
+              "type": "INTEGER",
+              "pk": true,
+              "autoincrement": true
+            },
+            {
+              "name": "session_id",
+              "type": "INTEGER",
+              "notNull": true,
+              "ref": "inspiration_sessions.id",
+              "onDelete": "CASCADE"
+            },
+            {
+              "name": "role",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "'user'"
+            },
+            {
+              "name": "content",
+              "type": "TEXT",
+              "notNull": true
+            },
+            {
+              "name": "created_at",
+              "type": "TEXT",
+              "notNull": true
+            },
+            {
+              "name": "updated_at",
+              "type": "TEXT",
+              "notNull": true
+            }
+          ],
+          "searchColumns": [
+            "content"
+          ],
+          "orderBy": "id ASC"
+        },
+        "inspiration_cards": {
+          "label": "小说灵感人物卡",
+          "module": "novel_writing",
+          "columns": [
+            {
+              "name": "id",
+              "type": "INTEGER",
+              "pk": true,
+              "autoincrement": true
+            },
+            {
+              "name": "session_id",
+              "type": "INTEGER",
+              "notNull": true,
+              "ref": "inspiration_sessions.id",
+              "onDelete": "CASCADE"
+            },
+            {
+              "name": "name",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "description",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "personality",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "experiences",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "skills",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "status",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "inject",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "1"
+            },
+            {
+              "name": "created_at",
+              "type": "TEXT",
+              "notNull": true
+            },
+            {
+              "name": "updated_at",
+              "type": "TEXT",
+              "notNull": true
+            }
+          ],
+          "searchColumns": [
+            "name",
+            "description"
+          ],
+          "orderBy": "id ASC"
+        },
+        "inspiration_settings": {
+          "label": "小说灵感设置",
+          "module": "novel_writing",
+          "singleton": true,
+          "columns": [
+            {
+              "name": "id",
+              "type": "INTEGER",
+              "pk": true
+            },
+            {
+              "name": "model",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "'deepseek-flash'"
+            },
+            {
+              "name": "temperature",
+              "type": "REAL",
+              "notNull": true,
+              "default": "0.8"
+            },
+            {
+              "name": "max_tokens",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "4096"
+            },
+            {
+              "name": "system_prompt",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "''"
+            },
+            {
+              "name": "enable_thinking",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "1"
+            },
+            {
+              "name": "reasoning_effort",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "'high'"
+            },
+            {
+              "name": "tts_voice",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "'stella'"
+            },
+            {
+              "name": "tts_engine",
+              "type": "TEXT",
+              "notNull": true,
+              "default": "'auto'"
+            },
+            {
+              "name": "tts_rate",
+              "type": "REAL",
+              "notNull": true,
+              "default": "1.0"
+            },
+            {
+              "name": "show_scroll_to_bottom",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "1"
+            },
+            {
+              "name": "concurrency",
+              "type": "INTEGER",
+              "notNull": true,
+              "default": "3"
+            }
+          ],
+          "searchColumns": [
+            "model",
+            "system_prompt"
+          ]
         }
       }
     },

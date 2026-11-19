@@ -39,7 +39,6 @@ class UserSetting {
   final bool logprobs;
   final int topLogprobs;
   final String reasoningContent;
-  final int contextRounds;
   final String systemPrompt;
   final bool webSearch;
   final String baiduApiKey;
@@ -59,6 +58,13 @@ class UserSetting {
   /// true：结果里带完整正文（模型答得更准，但注入上下文的字数明显更多）；
   /// false：只有 100~200 字的 snippet 与 600~800 字的 summary。
   final bool searchNeedContent;
+
+  /// 聊天页是否显示缓存命中率（输入框上方的「缓存 xx%」与消息菜单里的
+  /// 「缓存命中」）。默认开启。
+  ///
+  /// 命中率只是 API usage 的展示，不影响请求、计费或上下文；用户在设置页
+  /// 关掉后只隐藏这两处数字，上下文占用与 token 统计仍然保留。
+  final bool showCacheHit;
 
   const UserSetting({
     this.id,
@@ -80,7 +86,6 @@ class UserSetting {
     this.logprobs = false,
     this.topLogprobs = 0,
     this.reasoningContent = '',
-    this.contextRounds = 10,
     this.systemPrompt = '',
     this.webSearch = false,
     this.baiduApiKey = '',
@@ -88,6 +93,7 @@ class UserSetting {
     this.searchFreshness = '',
     this.searchEngine = searchEngineOff,
     this.searchNeedContent = true,
+    this.showCacheHit = true,
   });
 
   /// 实体 → 数据库 Map
@@ -112,7 +118,6 @@ class UserSetting {
       'logprobs': logprobs ? 1 : 0,
       'top_logprobs': topLogprobs,
       'reasoning_content': reasoningContent,
-      'context_rounds': contextRounds,
       'system_prompt': systemPrompt,
       'web_search': webSearch ? 1 : 0,
       'baidu_api_key': baiduApiKey,
@@ -120,6 +125,7 @@ class UserSetting {
       'search_freshness': searchFreshness,
       'search_engine': searchEngine,
       'search_need_content': searchNeedContent ? 1 : 0,
+      'show_cache_hit': showCacheHit ? 1 : 0,
     };
   }
 
@@ -145,7 +151,6 @@ class UserSetting {
       logprobs: (map['logprobs'] as int?) == 1,
       topLogprobs: map['top_logprobs'] as int? ?? 0,
       reasoningContent: map['reasoning_content'] as String? ?? '',
-      contextRounds: map['context_rounds'] as int? ?? 10,
       systemPrompt: map['system_prompt'] as String? ?? '',
       webSearch: (map['web_search'] as int?) == 1,
       baiduApiKey: map['baidu_api_key'] as String? ?? '',
@@ -153,6 +158,9 @@ class UserSetting {
       searchFreshness: map['search_freshness'] as String? ?? '',
       searchEngine: _engineFromMap(map),
       searchNeedContent: (map['search_need_content'] as int?) != 0,
+      // 列缺失（V49 及更早的库）或值为 null 时按「开启」处理：
+      // 默认开启是与需求一致的默认行为，老用户升级后不应突然少一块信息。
+      showCacheHit: (map['show_cache_hit'] as int?) != 0,
     );
   }
 
@@ -189,7 +197,6 @@ class UserSetting {
     bool? logprobs,
     int? topLogprobs,
     String? reasoningContent,
-    int? contextRounds,
     String? systemPrompt,
     bool? webSearch,
     String? baiduApiKey,
@@ -197,6 +204,7 @@ class UserSetting {
     String? searchFreshness,
     String? searchEngine,
     bool? searchNeedContent,
+    bool? showCacheHit,
   }) {
     return UserSetting(
       id: id ?? this.id,
@@ -218,7 +226,6 @@ class UserSetting {
       logprobs: logprobs ?? this.logprobs,
       topLogprobs: topLogprobs ?? this.topLogprobs,
       reasoningContent: reasoningContent ?? this.reasoningContent,
-      contextRounds: contextRounds ?? this.contextRounds,
       systemPrompt: systemPrompt ?? this.systemPrompt,
       webSearch: webSearch ?? this.webSearch,
       baiduApiKey: baiduApiKey ?? this.baiduApiKey,
@@ -226,6 +233,7 @@ class UserSetting {
       searchFreshness: searchFreshness ?? this.searchFreshness,
       searchEngine: searchEngine ?? this.searchEngine,
       searchNeedContent: searchNeedContent ?? this.searchNeedContent,
+      showCacheHit: showCacheHit ?? this.showCacheHit,
     );
   }
 
@@ -257,7 +265,8 @@ class UserSetting {
     }
 
     // stream_options 只能和 stream=true 一起使用，否则官方 API 会返回 400。
-    if (stream && streamIncludeUsage) {
+    // 始终开启 include_usage：面板要显示上下文占用与缓存命中率，没有 usage 就只能估算。
+    if (stream) {
       params['stream_options'] = {'include_usage': true};
     }
 

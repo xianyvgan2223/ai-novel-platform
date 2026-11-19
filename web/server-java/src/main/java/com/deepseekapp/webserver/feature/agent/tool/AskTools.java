@@ -74,12 +74,12 @@ public class AskTools {
                 throw new ApiException(400, "当前对话不可用，无法向用户提问");
             }
             String askId = "ask_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
-            run.emit(AgentEvent.of("ask",
-                    "id", askId, "question", text, "options", cleaned, "allowOther", true));
-
-            CompletableFuture<String> future = asks.register(askId);
+            // 先登记再发事件：用户可能在事件到达的瞬间就点了选项，顺序反了会丢答案
+            CompletableFuture<String> future = asks.register(askId, run.deviceId());
             long deadline = System.currentTimeMillis() + MAX_WAIT_SECONDS * 1000;
             try {
+                run.emit(AgentEvent.of("ask",
+                        "id", askId, "question", text, "options", cleaned, "allowOther", true));
                 while (System.currentTimeMillis() < deadline) {
                     if (run.cancelled()) {
                         asks.cancel(askId);

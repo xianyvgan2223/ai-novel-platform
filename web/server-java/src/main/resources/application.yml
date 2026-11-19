@@ -85,6 +85,10 @@ app:
   rag-es-index: ${RAG_ES_INDEX:novel_rag_scenes}
   dashscope-api-key: ${DASHSCOPE_API_KEY:}
   dashscope-base-url: ${DASHSCOPE_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
-  embedding-model: ${DASHSCOPE_EMBEDDING_MODEL:text-embedding-v3}
+  embedding-model: ${DASHSCOPE_EMBEDDING_MODEL:qwen3.7-text-embedding-flash}
   embedding-dim: ${DASHSCOPE_EMBEDDING_DIM:1024}
   rag-chunk-chars: ${RAG_CHUNK_CHARS:8000}
+  # 情节弧窗口：按章节组窗口，相邻窗口重叠；并行提炼窗口数
+  rag-window-chars: ${RAG_WINDOW_CHARS:12000}
+  rag-overlap-chars: ${RAG_OVERLAP_CHARS:1500}
+  rag-extract-concurrency: ${RAG_EXTRACT_CONCURRENCY:4}

@@ -96,13 +96,18 @@ public class WritingService {
         AiConfig config = requireConfig();
         List<String> actions = actionsOf(body);
         boolean structure = actions.contains("structure");
+        Map<String, Object> settings = settingsOf(body);
+        String extraPrompt = str(settings.get("systemPrompt"));
 
         Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("model", config.model());
-        payload.put("messages", buildOptimizeMessages(body, actions));
+        payload.put("model", apiModel(firstNonBlank(str(settings.get("model")), config.model())));
+        payload.put("messages", withExtraSystem(buildOptimizeMessages(body, actions), extraPrompt));
         payload.put("stream", true);
-        payload.put("temperature", structure ? 0.6 : 0.9);
-        payload.put("max_tokens", 4096);
+        payload.put("temperature", numOf(settings.get("temperature"), structure ? 0.6 : 0.9));
+        payload.put("max_tokens", intOf(settings.get("maxTokens"), 4096));
+        if (!enableThinking(settings)) {
+            payload.put("thinking", Map.of("type", "disabled"));
+        }
 
         HttpResponse<InputStream> response;
         try {
@@ -145,12 +150,17 @@ public class WritingService {
     public List<Map<String, Object>> drawCards(Map<String, Object> body) throws IOException {
         AiConfig config = requireConfig();
         int count = countOf(body);
+        Map<String, Object> settings = settingsOf(body);
+        String extraPrompt = str(settings.get("systemPrompt"));
         Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("model", config.model());
-        payload.put("messages", buildDrawMessages(body, count));
+        payload.put("model", apiModel(firstNonBlank(str(settings.get("model")), config.model())));
+        payload.put("messages", withExtraSystem(buildDrawMessages(body, count), extraPrompt));
         payload.put("stream", false);
-        payload.put("temperature", 1.2);
-        payload.put("max_tokens", Math.min(1200 + count * 700, 6000));
+        payload.put("temperature", numOf(settings.get("temperature"), 1.2));
+        payload.put("max_tokens", intOf(settings.get("maxTokens"), Math.min(1200 + count * 700, 6000)));
+        if (!enableThinking(settings)) {
+            payload.put("thinking", Map.of("type", "disabled"));
+        }
 
         HttpResponse<String> response;
         try {
@@ -233,16 +243,19 @@ public class WritingService {
                 "logline 用一句话写清楚「谁、想要什么、被什么挡住」。",
                 "开场钩子必须具体到一个场景或一句台词，不要写「故事一开始很悬疑」。");
 
-        String system = String.join("\n",
-                role,
-                "只输出一个 JSON 对象，不要 Markdown、不要代码块围栏、不要任何解释文字。",
-                "JSON 结构：{\"cards\":[{\"title\":\"标题\",\"logline\":\"一句话卖点\",\"fields\":[{\"label\":\"字段名\",\"value\":\"内容\"}]}]}",
-                "fields 必须且只能包含这些 label：" + String.join("、", fieldNames) + "。");
-
         List<String> guideLines = new ArrayList<>();
         for (String line : guide) {
             guideLines.add("- " + line);
         }
+
+        // 固定的创作规范放系统提示（同一类卡片的多次抽取可复用），用户输入放后面
+        String system = String.join("\n",
+                role,
+                "只输出一个 JSON 对象，不要 Markdown、不要代码块围栏、不要任何解释文字。",
+                "JSON 结构：{\"cards\":[{\"title\":\"标题\",\"logline\":\"一句话卖点\",\"fields\":[{\"label\":\"字段名\",\"value\":\"内容\"}]}]}",
+                "fields 必须且只能包含这些 label：" + String.join("、", fieldNames) + "。",
+                "",
+                String.join("\n", guideLines));
 
         String extra = str(body.get("extra")).trim();
         String user = String.join("\n",
@@ -252,8 +265,6 @@ public class WritingService {
                 "视角：" + orDefault(str(body.get("perspective")), "第三人称"),
                 "关键词/梗：" + orDefault(str(body.get("keywords")).trim(), "无，请自由发挥"),
                 extra.isEmpty() ? "" : "额外要求：" + extra,
-                "",
-                String.join("\n", guideLines),
                 "",
                 count + " 组之间要有明显差异，不要只是换了名字的同构方案。");
 
@@ -431,6 +442,76 @@ public class WritingService {
 
     private static String str(Object value) {
         return value == null ? "" : String.valueOf(value);
+    }
+
+    /** 本次请求的 AI 设置（与其它写作功能的 settings 结构一致） */
+    private static Map<String, Object> settingsOf(Map<String, Object> body) {
+        Object raw = body.get("settings");
+        if (!(raw instanceof Map<?, ?> map)) {
+            return Map.of();
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> entry : map.entrySet()) {
+            if (entry.getKey() != null) {
+                out.put(String.valueOf(entry.getKey()), entry.getValue());
+            }
+        }
+        return out;
+    }
+
+    /** 把用户填写的补充提示词追加到内置 system 提示后面 */
+    private static List<Map<String, String>> withExtraSystem(List<Map<String, String>> messages, String extra) {
+        String prompt = extra == null ? "" : extra.trim();
+        if (prompt.isEmpty() || messages.isEmpty()) {
+            return messages;
+        }
+        List<Map<String, String>> out = new ArrayList<>(messages);
+        Map<String, String> first = out.get(0);
+        if (!"system".equals(first.get("role"))) {
+            return messages;
+        }
+        Map<String, String> replaced = new LinkedHashMap<>(first);
+        replaced.put("content", first.getOrDefault("content", "") + "\n\n" + prompt);
+        out.set(0, replaced);
+        return out;
+    }
+
+    private static Double numOf(Object value, Double fallback) {
+        if (value instanceof Number number) {
+            return number.doubleValue();
+        }
+        try {
+            return Double.parseDouble(String.valueOf(value));
+        } catch (Exception ignored) {
+            return fallback;
+        }
+    }
+
+    private static Integer intOf(Object value, Integer fallback) {
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        try {
+            return Integer.parseInt(String.valueOf(value));
+        } catch (Exception ignored) {
+            return fallback;
+        }
+    }
+
+    private static boolean enableThinking(Map<String, Object> settings) {
+        Object value = settings.get("enableThinking");
+        if (value == null) {
+            return true;
+        }
+        if (value instanceof Boolean bool) {
+            return bool;
+        }
+        return !"0".equals(String.valueOf(value));
+    }
+
+    /** deepseek-pro 是 App 里的展示名，调用 API 时换成实际模型名 */
+    private static String apiModel(String model) {
+        return "deepseek-pro".equals(model) ? "deepseek-v4-pro" : model;
     }
 
     private static String orDefault(String value, String fallback) {

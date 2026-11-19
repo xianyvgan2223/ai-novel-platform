@@ -4,7 +4,7 @@
 import 'package:flutter/material.dart';
 import 'package:deepseekapp/core/theme/app_palette.dart';
 import '../../domain/chat_message.dart';
-import '../markdown_cleaner.dart';
+import 'chat_markdown.dart';
 import 'search_sources_card.dart';
 
 /// 消息气泡组件（带 RepaintBoundary 独立渲染层）
@@ -12,16 +12,26 @@ class MessageBubble extends StatefulWidget {
   final ChatMessage message;
   final bool isEditMode;
   final bool isSelected;
+
+  /// 是否在「···」菜单里显示缓存命中（设置页「显示缓存命中」开关）。
+  final bool showCacheHit;
   final VoidCallback? onEditRequested;
   final VoidCallback? onToggleSelection;
+  final VoidCallback? onCopy;
+  final VoidCallback? onDelete;
+  final VoidCallback? onShowCache;
 
   const MessageBubble({
     super.key,
     required this.message,
     this.isEditMode = false,
     this.isSelected = false,
+    this.showCacheHit = true,
     this.onEditRequested,
     this.onToggleSelection,
+    this.onCopy,
+    this.onDelete,
+    this.onShowCache,
   });
 
   @override
@@ -43,10 +53,13 @@ class _MessageBubbleState extends State<MessageBubble> {
       Flexible(
         child: GestureDetector(
           onTap: widget.isEditMode ? widget.onToggleSelection : null,
+          // 长按也可以直接进入多选（和「···」菜单里的「多选」等价）
+          onLongPress: widget.isEditMode ? null : widget.onEditRequested,
           child: Column(
+            // 助手气泡占满列表可用宽度；用户气泡仍按内容宽度靠右。
             crossAxisAlignment: isUser
                 ? CrossAxisAlignment.end
-                : CrossAxisAlignment.start,
+                : CrossAxisAlignment.stretch,
             children: [
               if (!isUser && widget.message.thinkingText != null) ...[
                 _buildThinkingSection(p),
@@ -57,14 +70,55 @@ class _MessageBubbleState extends State<MessageBubble> {
                 const SizedBox(height: 8),
                 _buildSearchResultsSection(),
               ],
+              // 每条消息右下角「···」：点开后显示 复制 / 删除 / 多选（助手多一项缓存命中）
               if (!widget.isEditMode)
                 Padding(
-                  padding: const EdgeInsets.only(top: 6),
+                  padding: const EdgeInsets.only(top: 4),
                   child: Align(
                     alignment: Alignment.centerRight,
-                    child: InkWell(
-                      onTap: widget.onEditRequested,
-                      borderRadius: BorderRadius.circular(12),
+                    child: PopupMenuButton<String>(
+                      tooltip: '更多操作',
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(
+                        minWidth: 32,
+                        minHeight: 24,
+                      ),
+                      offset: const Offset(0, 20),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      onSelected: (value) {
+                        switch (value) {
+                          case 'copy':
+                            widget.onCopy?.call();
+                          case 'delete':
+                            widget.onDelete?.call();
+                          case 'select':
+                            widget.onEditRequested?.call();
+                          case 'cache':
+                            widget.onShowCache?.call();
+                        }
+                      },
+                      itemBuilder: (context) => [
+                        _menuItem(p, 'copy', Icons.copy_rounded, '复制'),
+                        _menuItem(
+                          p,
+                          'delete',
+                          Icons.delete_outline,
+                          '删除',
+                          danger: true,
+                        ),
+                        _menuItem(p, 'select', Icons.checklist_rounded, '多选'),
+                        if (!isUser && widget.showCacheHit)
+                          _menuItem(
+                            p,
+                            'cache',
+                            Icons.bolt_rounded,
+                            widget.message.cachePercent == null
+                                ? '缓存命中 —'
+                                : '缓存命中 ${widget.message.cachePercent}%',
+                          ),
+                      ],
                       child: Container(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 8,
@@ -120,9 +174,15 @@ class _MessageBubbleState extends State<MessageBubble> {
           alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
           child: ConstrainedBox(
             constraints: BoxConstraints(
-              maxWidth: MediaQuery.widthOf(context) * 0.8,
+              // 用户气泡最多占 80% 宽；助手气泡占满列表可用宽度
+              // （列表左右各有 12dp 内边距，气泡不会真的贴到屏幕边缘）。
+              maxWidth: isUser
+                  ? MediaQuery.widthOf(context) * 0.8
+                  : double.infinity,
             ),
-            child: bubbleRow,
+            child: isUser
+                ? bubbleRow
+                : SizedBox(width: double.infinity, child: bubbleRow),
           ),
         ),
       ),
@@ -131,10 +191,6 @@ class _MessageBubbleState extends State<MessageBubble> {
 
   Widget _buildBubble(AppPalette p) {
     final isUser = widget.message.isUser;
-    // 助手回复的 Markdown 在展示层清洗成纯文本（用户自己输入的原样显示）
-    final text = isUser
-        ? widget.message.content
-        : stripMarkdownForChat(widget.message.content);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
@@ -146,13 +202,9 @@ class _MessageBubbleState extends State<MessageBubble> {
           bottomRight: isUser ? Radius.zero : const Radius.circular(12),
         ),
       ),
-      child: SelectableText(
-        text,
-        style: TextStyle(
-          fontSize: 13,
-          color: isUser ? p.bubbleUserText : p.bubbleAssistantText,
-          height: 1.5,
-        ),
+      child: ChatMarkdown(
+        widget.message.content,
+        textColor: isUser ? p.bubbleUserText : p.bubbleAssistantText,
       ),
     );
   }
@@ -191,9 +243,10 @@ class _MessageBubbleState extends State<MessageBubble> {
             ),
             if (_showThinking) ...[
               const SizedBox(height: 6),
-              SelectableText(
-                stripMarkdownForChat(widget.message.thinkingText!),
-                style: TextStyle(fontSize: 11, color: p.textSecondary),
+              ChatMarkdown(
+                widget.message.thinkingText!,
+                fontSize: 11,
+                textColor: p.textSecondary,
               ),
             ],
           ],
@@ -203,9 +256,33 @@ class _MessageBubbleState extends State<MessageBubble> {
   }
 
   Widget _buildSearchResultsSection() {
-    return SearchSourcesCard(
-      results: widget.message.searchResults!,
-      collapsible: true,
+    return SearchSourcesCard(results: widget.message.searchResults!);
+  }
+
+  /// 「···」菜单里的一项：复制 / 删除 / 缓存命中
+  PopupMenuItem<String> _menuItem(
+    AppPalette p,
+    String value,
+    IconData icon,
+    String label, {
+    bool danger = false,
+  }) {
+    return PopupMenuItem<String>(
+      value: value,
+      height: 40,
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: danger ? p.danger : p.textSecondary),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              color: danger ? p.danger : p.textPrimary,
+            ),
+          ),
+        ],
+      ),
     );
   }
 

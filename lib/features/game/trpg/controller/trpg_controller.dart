@@ -296,11 +296,8 @@ class TrpgController extends ChangeNotifier {
   }
 
   List<Map<String, dynamic>> _buildContextMessages() {
-    final system = TrpgAiService.buildSystemPrompt(
-      _character!,
-      scene: _campaign?.scene ?? '',
-      flags: _campaign?.flags ?? const {},
-    );
+    // system 只放每轮不变的 DM 定位 / 规则 / 输出格式，保证多轮对话前缀稳定
+    final system = TrpgAiService.buildSystemPrompt();
     final result = <Map<String, dynamic>>[
       {'role': 'system', 'content': system},
     ];
@@ -315,6 +312,22 @@ class TrpgController extends ChangeNotifier {
         (m) => {'role': m.isUser ? 'user' : 'assistant', 'content': m.content},
       ),
     );
+
+    // 每轮会变的状态（角色卡 / 当前场景 / 剧情标记）追加到本轮用户消息末尾，
+    // 不放进 system，避免 system 每轮变化导致整段历史的缓存前缀失效
+    final stateBlock = TrpgAiService.buildStateBlock(
+      _character!,
+      scene: _campaign?.scene ?? '',
+      flags: _campaign?.flags ?? const {},
+    );
+    final lastUserIndex = result.lastIndexWhere((m) => m['role'] == 'user');
+    if (lastUserIndex >= 0) {
+      final last = result[lastUserIndex];
+      last['content'] = '${last['content']}\n\n$stateBlock';
+    } else {
+      // 没有用户消息（理论上不会发生）：退回 system 末尾，保证信息不丢
+      result.first['content'] = '${result.first['content']}\n\n$stateBlock';
+    }
     return result;
   }
 

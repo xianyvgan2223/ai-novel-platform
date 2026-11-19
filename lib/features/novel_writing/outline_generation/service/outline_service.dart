@@ -65,17 +65,21 @@ $r
     required String worldview,
     String extraRequirement = '',
   }) {
+    // 顺序：固定任务说明 + 固定规则在前，本次才会变化的设定数据在后，
+    // 让重复调用的请求前缀（规则部分）保持字节一致，提升缓存命中率
     return '''
 根据以下小说设定，生成书名和核心概念简介，并以严格的 JSON 格式输出（不要输出任何额外文字、解释或 markdown 代码块）。
+
+要求：
+- 书名务必贴合类型、主题、主角核心宿命，简洁有记忆点
+- 输出 JSON 格式为：{"title": "书名", "concept": "核心概念简介"}
 
 小说类型：$genre
 核心主题：$theme
 主角完整人设：$protagonist
 完整世界观：$worldview
 
-${extraRequirementSection(extraRequirement)}要求：
-- 书名务必贴合类型、主题、主角核心宿命，简洁有记忆点
-- 输出 JSON 格式为：{"title": "书名", "concept": "核心概念简介"}''';
+${extraRequirementSection(extraRequirement)}''';
   }
 
   /// 步骤 2a：规划三幕粗骨架 — 全部大事件只写「标题 + 一句话定位」（JSON 输出）
@@ -92,19 +96,10 @@ ${extraRequirementSection(extraRequirement)}要求：
     required String titleAndConcept, // 步骤1的输出：书名+核心概念
     String extraRequirement = '',
   }) {
+    // 顺序：固定任务说明 + 固定规则在前，本次才会变化的设定 / 数量参数在后，
+    // 保证公共前缀字节一致
     return '''
 请根据以下小说设定，规划全篇三幕结构的粗骨架，并以严格的 JSON 格式输出（不要输出任何额外文字、解释或 markdown 代码块）。
-
-小说类型：$genre
-核心主题：$theme
-主角完整人设：$protagonist
-完整世界观：$worldview
-
-${extraRequirementSection(extraRequirement)}已有书名和核心概念：
-$titleAndConcept
-
-全篇主事件总数量：$majorEventCount（三个 act 中 events 事件总数必须严格等于 $majorEventCount）
-单个主事件配套小事件固定数量：$minorEventCount
 
 三幕分配规则：第一幕开端占总主事件约30%，第二幕发展约占50%，第三幕高潮结局约占20%，无法整除时第二幕多分配余量。
 
@@ -123,7 +118,18 @@ $titleAndConcept
 要求：
 - 必须输出 3 个 act，act 依次为「第一幕：开端」「第二幕：发展」「第三幕：高潮&结局」
 - 每个 act 至少包含 1 个事件
-- 全部 events 数量必须严格等于 $majorEventCount''';
+- 全部 events 数量必须严格等于 $majorEventCount
+
+小说类型：$genre
+核心主题：$theme
+主角完整人设：$protagonist
+完整世界观：$worldview
+
+${extraRequirementSection(extraRequirement)}已有书名和核心概念：
+$titleAndConcept
+
+全篇主事件总数量：$majorEventCount（三个 act 中 events 事件总数必须严格等于 $majorEventCount）
+单个主事件配套小事件固定数量：$minorEventCount''';
   }
 
   /// 步骤 2b：精写一批大事件 — 按粗骨架逐个展开为完整概述（JSON 输出）
@@ -153,6 +159,8 @@ $prevRefinedContent
 
 ''';
 
+    // 顺序：固定任务说明 / 全局设定 / 粗骨架 / 固定写作要求在前，本批数据、
+    // 账本、上一批内容在后 —— 分批循环调用时前面字节完全一致，只让最后一段变化
     return '''
 请根据以下全局设定、粗骨架和伏笔账本，精写本批大事件的完整概述，并以严格的 JSON 格式输出（不要输出任何额外文字、解释或 markdown 代码块）。
 
@@ -166,13 +174,7 @@ $prevRefinedContent
 ${extraRequirementSection(extraRequirement)}=== 全局粗骨架（全部大事件，仅标题与定位） ===
 $coarseSkeletonText
 
-=== 本批需要精写的大事件（标题必须与粗骨架完全一致，按顺序输出） ===
-$batchContent
-
-=== 已积累的伏笔账本（来自此前各批，必须延续与照应） ===
-$ledgerText
-
-$prevSection大事件粒度定义（严格遵守）：
+大事件粒度定义（严格遵守）：
 - 大事件 = 改变故事走向的重大阶段节点（如身份揭露、势力决裂、觉醒/蜕变、终局大战），应跨越时间与场景，可独立成章
 - 禁止把单个场景、单次对话、单一动作步骤当作大事件
 - 大事件数量多代表故事铺陈规模大，不代表粒度变细
@@ -197,7 +199,15 @@ $prevSection大事件粒度定义（严格遵守）：
 {"events": [{"title": "与粗骨架完全一致的事件标题", "summary": "完整概述"}]}
 要求：
 - events 数量必须严格等于本批大事件数量
-- title 必须与粗骨架中的标题完全一致，保持顺序''';
+- title 必须与粗骨架中的标题完全一致，保持顺序
+
+=== 本批需要精写的大事件（标题必须与粗骨架完全一致，按顺序输出） ===
+$batchContent
+
+=== 已积累的伏笔账本（来自此前各批，必须延续与照应） ===
+$ledgerText
+
+$prevSection''';
   }
 
   /// 步骤 2c：抽取伏笔账本 — 总结本批大事件，输出结构化状态（JSON 输出）
@@ -208,14 +218,10 @@ $prevSection大事件粒度定义（严格遵守）：
     required String batchContent, // 本批已精写的大事件（标题+完整概述）
     required String prevLedgerText, // 前序账本
   }) {
+    // 顺序：固定任务说明 + 固定要求在前，本批数据与历史账本在后（分批循环调用
+    // 时前缀完全一致，只有账本内容变化）
     return '''
 请阅读以下本批已精写的大事件，结合之前的伏笔账本，抽取并合并出最新的伏笔账本，以严格的 JSON 格式输出（不要输出任何额外文字、解释或 markdown 代码块）。
-
-=== 本批已精写的大事件 ===
-$batchContent
-
-=== 之前已积累的伏笔账本（需保留未回收项，标注本批是否有进展） ===
-$prevLedgerText
 
 要求：
 1. 账本只保留**未回收**的短线伏笔：每条伏笔必须能在 5 个大事件之内回收，不要写长线伏笔；
@@ -229,7 +235,13 @@ $prevLedgerText
    伏笔内容直接写情节本身（人物/物件/原话/场景），不要写「第几章埋的伏笔」
 
 输出 JSON 格式为：
-{"foreshadows": [{"content": "伏笔内容", "status": "已埋/已回收", "plan": "计划回收时机"}], "character_states": ["角色状态1"], "unresolved": ["悬念1"]}''';
+{"foreshadows": [{"content": "伏笔内容", "status": "已埋/已回收", "plan": "计划回收时机"}], "character_states": ["角色状态1"], "unresolved": ["悬念1"]}
+
+=== 本批已精写的大事件 ===
+$batchContent
+
+=== 之前已积累的伏笔账本（需保留未回收项，标注本批是否有进展） ===
+$prevLedgerText''';
   }
 
   /// 步骤 3：展开某幕细节 — 为指定大事件生成完整小事件（文本流式输出）
@@ -301,24 +313,11 @@ $laterContent
 小事件概要
 ……（循环至$minorEventCount个小事件）''';
 
+    // 顺序：固定任务说明 + 固定格式要求 + 全局设定 / 全局框架在前，
+    // 本块的前文 / 后文 / 当前幕框架等变化数据在后 —— 分块循环调用时
+    // 前面字节完全一致，只让最后一段（本块数据）变化
     return '''
 请展开第$actIndex幕（$actName）的详细内容。
-
-小说类型：$genre
-核心主题：$theme
-主角完整人设：$protagonist
-完整世界观：$worldview
-书名：$title
-
-${extraRequirementSection(extraRequirement)}=== 全局框架（保证与全局设定、其他幕保持一致） ===
-$globalSummary
-
-$previousSection$laterSection=== 当前幕已有的大事件框架 ===
-$actContent
-
-请为上述每个大事件展开配套的小事件（共$minorEventCount个小事件每个），严格遵循以下格式（纯文本，禁止任何 markdown 标记）：
-
-$formatExample
 
 格式硬性要求（违反会直接导致大纲解析失败）：
 - 大事件标题行必须写成「══ 大事件N：标题 ══」，N 用本块框架里的具体数字，禁止写成「大事件X」或省略编号
@@ -337,6 +336,22 @@ $formatExample
    不得跳过或省略概述中明确写到的事；不能只写概述的开头几段就收尾
 6. 伏笔只做短线：本块涉及的伏笔必须能在 5 个大事件之内回收，不要设计长线伏笔；
    已经回收的伏笔不要再写
+
+小说类型：$genre
+核心主题：$theme
+主角完整人设：$protagonist
+完整世界观：$worldview
+书名：$title
+
+${extraRequirementSection(extraRequirement)}=== 全局框架（保证与全局设定、其他幕保持一致） ===
+$globalSummary
+
+$previousSection$laterSection=== 当前幕已有的大事件框架 ===
+$actContent
+
+请为上述每个大事件展开配套的小事件（共$minorEventCount个小事件每个），严格遵循以下格式（纯文本，禁止任何 markdown 标记）：
+
+$formatExample
 
 注意：
 - 只输出当前这一幕的内容，不要输出其他幕

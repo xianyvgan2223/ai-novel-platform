@@ -64,6 +64,11 @@ void main() {
     expect(params.containsKey('title'), isFalse);
   });
 
+  test('流式请求始终带 include_usage（面板要显示上下文与缓存）', () {
+    const setting = UserSetting(stream: true, streamIncludeUsage: false);
+    expect(setting.toApiParams()['stream_options'], {'include_usage': true});
+  });
+
   test('reasoning_effort=none 时关闭思考', () {
     const setting = UserSetting(thinking: true, reasoningEffort: 'none');
     final params = setting.toApiParams();

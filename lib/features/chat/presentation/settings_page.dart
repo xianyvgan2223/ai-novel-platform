@@ -3,8 +3,8 @@
 //
 // 页面结构（布局 v2）：
 // - 浅灰底 + 白色圆角卡片，卡片只承担「内容块」，标题在卡外：
-//   全页收敛成 7 个固定区块（必选鉴权 / 模型与联网搜索 / 生成参数 /
-//   流式交互 / 去重与结构化 / 推理与调试 / 数据管理）；
+//   全页收敛成 9 个固定区块（外观 / 必选鉴权 / 模型与推理 / 联网搜索与工具 /
+//   生成参数 / 流式交互 / 对话显示 / 调试与扩展 / 数据管理）；
 // - 每行统一「左标签 + 右值」：值一律右对齐，下拉 = 值 + 小箭头、开关贴右，
 //   所有右边缘都落在卡片 16dp 内边距这条线上；窄屏 / 大字号时长标签会自动
 //   改成两行堆叠，保证 reasoning_effort 这类参数名不被省略号截断；
@@ -31,11 +31,6 @@ import '../../update/presentation/update_changelog_page.dart';
 import '../../update/presentation/update_page.dart';
 import '../application/chat_controller.dart'; // chatProvider
 import '../application/setting_controller.dart';
-
-/// SettingController Riverpod Provider
-final settingProvider = ChangeNotifierProvider<SettingController>(
-  (ref) => SettingController(),
-);
 
 /// 归一化搜索来源取值：兼容历史数据。
 ///
@@ -494,20 +489,31 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 initialValue: ctrl.stream,
                 onChanged: ctrl.setStream,
               ),
-              if (form.stream)
-                SettingsSwitchRow(
-                  key: _k('stream_include_usage'),
-                  label: 'stream_options.include_usage',
-                  subtitle: '返回 token 用量',
-                  help:
-                      '开启后流式响应的最后一个 chunk 会携带 usage 字段，便于统计 prompt/completion token；'
-                      '仅 stream=true 时可用，关闭 stream 时会自动省略。',
-                  initialValue: ctrl.streamIncludeUsage,
-                  onChanged: ctrl.setStreamIncludeUsage,
-                ),
             ],
           ),
-          // ── 6. 调试与 DeepSeek 扩展 ──
+          // ── 6. 对话显示 ──
+          const SettingsSectionHeader(
+            icon: Icons.visibility_rounded,
+            title: '对话显示',
+            subtitle: '聊天页的用量与缓存信息',
+          ),
+          SettingsCard(
+            children: [
+              SettingsSwitchRow(
+                key: _k('show_cache_hit'),
+                label: '显示缓存命中',
+                subtitle: '输入框上方与回答菜单显示命中率',
+                help:
+                    '关闭后隐藏输入框上方的「缓存 xx%」和每条回答「···」菜单里的'
+                    '缓存命中明细；上下文占用与输入/输出 token 仍照常显示。'
+                    '命中率来自 API usage，只影响展示，不影响请求与计费。',
+                initialValue: ctrl.showCacheHit,
+                onChanged: ctrl.setShowCacheHit,
+              ),
+            ],
+          ),
+
+          // ── 7. 调试与 DeepSeek 扩展 ──
           const SettingsSectionHeader(
             icon: Icons.psychology_rounded,
             title: '调试与扩展',
@@ -576,25 +582,10 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 initialValue: ctrl.userId,
                 onChanged: ctrl.setUserId,
               ),
-              SettingsTextRow(
-                key: _k('context_rounds'),
-                label: '上下文轮数',
-                hint: '1 ~ 100',
-                help:
-                    '本地参数，不是官方 API 字段：发送请求时只带最近 N 轮用户消息；'
-                    '更早的对话会被摘要压缩后作为 system 消息注入。轮数越大越占 token。',
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
-                initialValue: ctrl.contextRounds.toString(),
-                onChanged: (v) => ctrl.setContextRounds(
-                  SettingController.clampContextRounds(int.tryParse(v) ?? 10),
-                ),
-              ),
             ],
           ),
 
-          // ── 7. 数据管理 ──
+          // ── 8. 数据管理 ──
           const SettingsSectionHeader(
             icon: Icons.storage_rounded,
             title: '数据管理',

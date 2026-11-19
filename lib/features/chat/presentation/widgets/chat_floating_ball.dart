@@ -12,8 +12,10 @@ import 'package:deepseekapp/core/theme/app_palette.dart';
 
 import '../../../../core/config/route_names.dart';
 import '../../application/chat_controller.dart';
+import '../../application/setting_controller.dart';
 import '../../domain/chat_message.dart';
 import '../chat_page.dart'; // ChatPage（面板“展开”时打开完整聊天页）
+import 'chat_markdown.dart';
 import 'message_bubble.dart';
 
 /// 悬浮球直径
@@ -454,19 +456,27 @@ class _MiniChatPanel extends ConsumerStatefulWidget {
 class _MiniChatPanelState extends ConsumerState<_MiniChatPanel> {
   final TextEditingController _inputCtrl = TextEditingController();
   final ScrollController _scrollCtrl = ScrollController();
+
+  /// 聊天控制器（在 initState 取一次，dispose 时不能再通过 ref 读，见 ChatPage）
+  late final ChatController _chat;
   bool _isNearBottom = true;
+  bool _followScheduled = false;
   int? _lastSessionId;
 
   @override
   void initState() {
     super.initState();
+    _chat = ref.read(chatProvider);
     _scrollCtrl.addListener(_onScrollChanged);
+    // 流式分片时跟着生成内容继续向下（面板不会因为分片重建，见 _onChatUpdated）
+    _chat.addListener(_onChatUpdated);
     // 面板展开时滚动到底部，展示最新消息
     widget.visible.addListener(_onVisibleChanged);
   }
 
   @override
   void dispose() {
+    _chat.removeListener(_onChatUpdated);
     widget.visible.removeListener(_onVisibleChanged);
     _scrollCtrl.removeListener(_onScrollChanged);
     _inputCtrl.dispose();
@@ -497,23 +507,38 @@ class _MiniChatPanelState extends ConsumerState<_MiniChatPanel> {
     }
   }
 
+  /// 流式生成时贴底跟随：面板只在消息条数 / isStreamingEmpty 变化时重建，
+  /// 分片本身不会重跑 build，所以必须监听控制器而不是在 build 里补跳。
+  /// 生成结束落库成正式消息时也跟随一次，保证最后一行不被切在屏幕外。
+  void _onChatUpdated() {
+    if (!_isNearBottom) return;
+    _scheduleFollowBottom();
+  }
+
+  /// 下一帧布局完成后再贴底；同一帧只排一次。
+  void _scheduleFollowBottom() {
+    if (_followScheduled) return;
+    _followScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _followScheduled = false;
+      if (!mounted || !_scrollCtrl.hasClients) return;
+      if (!_isNearBottom) return;
+      final position = _scrollCtrl.position;
+      final target = position.maxScrollExtent;
+      if (target <= position.pixels + 0.5) return;
+      _scrollCtrl.jumpTo(target);
+    });
+  }
+
   void _onSend() {
     final text = _inputCtrl.text;
     final chat = ref.read(chatProvider);
     if (text.trim().isEmpty || chat.isLoading) return;
 
     _inputCtrl.clear();
+    // sendMessage 会同步 notifyListeners（isLoading=true），停在底部时由
+    // _onChatUpdated 排队贴底。
     chat.sendMessage(text);
-
-    Future.delayed(const Duration(milliseconds: 100), () {
-      if (_scrollCtrl.hasClients && _isNearBottom) {
-        _scrollCtrl.animateTo(
-          _scrollCtrl.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
-        );
-      }
-    });
   }
 
   @override
@@ -532,6 +557,10 @@ class _MiniChatPanelState extends ConsumerState<_MiniChatPanel> {
     final sessionId = ref.watch(
       chatProvider.select((p) => p.currentSession?.id),
     );
+    // 与主聊天页共用设置页的「显示缓存命中」开关
+    final showCacheHit = ref.watch(
+      settingProvider.select((c) => c.showCacheHit),
+    );
     // 会话切换后刷新列表并滚动到底部
     if (sessionId != _lastSessionId) {
       _lastSessionId = sessionId;
@@ -548,6 +577,7 @@ class _MiniChatPanelState extends ConsumerState<_MiniChatPanel> {
             isStreamingEmpty,
             isLoading,
             title,
+            showCacheHit,
           ),
         ),
         // 边缘滑动缩放热区（透明，置于内容之上）
@@ -704,6 +734,7 @@ class _MiniChatPanelState extends ConsumerState<_MiniChatPanel> {
     bool isStreamingEmpty,
     bool isLoading,
     String title,
+    bool showCacheHit,
   ) {
     final p = context.palette;
     return Material(
@@ -723,7 +754,12 @@ class _MiniChatPanelState extends ConsumerState<_MiniChatPanel> {
           _buildHeader(title),
           Divider(height: 1, color: p.border),
           Expanded(
-            child: _buildMessageList(messages, messageCount, isStreamingEmpty),
+            child: _buildMessageList(
+              messages,
+              messageCount,
+              isStreamingEmpty,
+              showCacheHit,
+            ),
           ),
           Divider(height: 1, color: p.border),
           _buildInputArea(isLoading),
@@ -781,11 +817,7 @@ class _MiniChatPanelState extends ConsumerState<_MiniChatPanel> {
               onPressed: widget.onMinimize,
             ),
             IconButton(
-              icon: Icon(
-                Icons.open_in_full,
-                size: 15,
-                color: p.textSecondary,
-              ),
+              icon: Icon(Icons.open_in_full, size: 15, color: p.textSecondary),
               tooltip: '回到聊天页',
               constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
               padding: EdgeInsets.zero,
@@ -801,19 +833,18 @@ class _MiniChatPanelState extends ConsumerState<_MiniChatPanel> {
     List<ChatMessage> messages,
     int messageCount,
     bool isStreamingEmpty,
+    bool showCacheHit,
   ) {
-    // 流式生成中若用户在底部附近则自动滚动
-    if (!isStreamingEmpty && _isNearBottom && _scrollCtrl.hasClients) {
-      _scrollCtrl.jumpTo(_scrollCtrl.position.maxScrollExtent);
-    }
-
     return ListView.builder(
       controller: _scrollCtrl,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       itemCount: messageCount + (isStreamingEmpty ? 0 : 1),
       itemBuilder: (context, index) {
         if (index < messages.length) {
-          return MessageBubble(message: messages[index]);
+          return MessageBubble(
+            message: messages[index],
+            showCacheHit: showCacheHit,
+          );
         }
         return const _MiniStreamingBubble();
       },
@@ -839,10 +870,7 @@ class _MiniChatPanelState extends ConsumerState<_MiniChatPanel> {
               onSubmitted: (_) => _onSend(),
               decoration: InputDecoration(
                 hintText: '输入问题或指令...',
-                hintStyle: TextStyle(
-                  color: p.textTertiary,
-                  fontSize: 12,
-                ),
+                hintStyle: TextStyle(color: p.textTertiary, fontSize: 12),
                 filled: true,
                 fillColor: p.surfaceMuted,
                 isDense: true,
@@ -894,12 +922,11 @@ class _MiniStreamingBubble extends ConsumerWidget {
       padding: const EdgeInsets.only(bottom: 12),
       child: Align(
         alignment: Alignment.centerLeft,
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            maxWidth: MediaQuery.widthOf(context) * 0.8,
-          ),
+        // 助手输出占满迷你面板可用宽度
+        child: SizedBox(
+          width: double.infinity,
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               if (chat.streamingThinking.isNotEmpty)
                 _buildThinkingBox(chat.streamingThinking, p),
@@ -914,8 +941,15 @@ class _MiniStreamingBubble extends ConsumerWidget {
               if (chat.streamingText.isEmpty &&
                   chat.streamingThinking.isEmpty &&
                   !hasPhase1)
-                const _MiniLoading(),
-              if (phase1Visible) const _MiniLoading(),
+                const Align(
+                  alignment: Alignment.centerLeft,
+                  child: _MiniLoading(),
+                ),
+              if (phase1Visible)
+                const Align(
+                  alignment: Alignment.centerLeft,
+                  child: _MiniLoading(),
+                ),
             ],
           ),
         ),
@@ -946,11 +980,7 @@ class _MiniStreamingBubble extends ConsumerWidget {
             ],
           ),
           const SizedBox(height: 6),
-          SelectableText(
-            thinking,
-            maxLines: 8,
-            style: TextStyle(fontSize: 11, color: p.textSecondary),
-          ),
+          ChatMarkdown(thinking, fontSize: 11, textColor: p.textSecondary),
         ],
       ),
     );
@@ -967,14 +997,7 @@ class _MiniStreamingBubble extends ConsumerWidget {
           bottomRight: Radius.circular(12),
         ),
       ),
-      child: SelectableText(
-        text,
-        style: TextStyle(
-          fontSize: 13,
-          color: p.bubbleAssistantText,
-          height: 1.5,
-        ),
-      ),
+      child: ChatMarkdown(text),
     );
   }
 }
@@ -990,10 +1013,7 @@ class _MiniLoading extends StatelessWidget {
       child: SizedBox(
         width: 20,
         height: 20,
-        child: CircularProgressIndicator(
-          strokeWidth: 2,
-          color: p.accent,
-        ),
+        child: CircularProgressIndicator(strokeWidth: 2, color: p.accent),
       ),
     );
   }

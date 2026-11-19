@@ -1021,7 +1021,10 @@ class OutlineEditController extends ChangeNotifier {
       'max_tokens': settings.chapterSetting.maxTokens,
       // 与章节生成保持一致：关闭深度思考时显式禁用，避免思考抢占输出预算
       if (!settings.chapterSetting.enableThinking)
-        'thinking': {'type': 'disabled'},
+        'thinking': {'type': 'disabled'}
+      else
+        // 开启思考时只传强度；传了 thinking 会覆盖 reasoning_effort。
+        'reasoning_effort': settings.chapterSetting.reasoningEffort,
     };
 
     try {

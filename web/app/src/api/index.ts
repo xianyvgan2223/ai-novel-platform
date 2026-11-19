@@ -4,11 +4,12 @@ import type {
   Catalog, ChapterGeneratePayload, ChapterRewritePayload, ChapterRewriteResult, ConflictInfo, DbKey, DeleteResult,
   DeviceList, DrawPayload, DrawResult, HealthInfo, ImportReport, OptimizePayload, OutlineEditPayload,
   OutlineFormatPayload, BattleGeneratePayload,
-  BiliExtractPayload, BiliSettingsInfo, BiliSettingsSaveResult, BiliSubtitle, BiliVideoInfo,
+  BiliExtractPayload, BiliSettingsInfo, BiliSettingsSaveResult, BiliSubtitle, BiliVideoInfo, BiliTranscriptDetail, BiliTranscriptSummary,
   OutlineChatPayload,
   OutlineGeneratePayload, OutlineSplitPayload, OutlineSplitResult, PagedMeta, Row, Stats, SyncOverview,
   SyncRequestInfo, WriteResult, RagStatus, RagScene, RagJob, RagImportResult, RagSearchResult, RagImitateResult,
-  OutlineStagePayload,
+  RagJobSplitPayload, RagJobSummary, RagSettings, RagSettingsPayload, RagWindowDetail,
+  OutlineStagePayload, InspirationStreamPayload,
 } from './types';
 import type { StreamHandlers } from './client';
 
@@ -79,6 +80,9 @@ export const api = {
       /** 把粘贴的外部大纲重排成 App 固定格式（SSE） */
       formatOutline: (payload: OutlineFormatPayload, handlers: StreamHandlers, signal?: AbortSignal) =>
         postStream('/api/writing/novel/outline/format', payload, handlers, signal),
+      /** 小说灵感：推演 / 对话 / 合并 / 人物状态，前端拼好消息后统一流式生成 */
+      streamInspiration: (payload: InspirationStreamPayload, handlers: StreamHandlers, signal?: AbortSignal) =>
+        postStream('/api/writing/novel/inspiration/stream', payload, handlers, signal),
       /** AI 写战斗：按三要素生成战斗场面（SSE） */
       generateBattle: (payload: BattleGeneratePayload, handlers: StreamHandlers, signal?: AbortSignal) =>
         postStream('/api/writing/novel/battle/generate', payload, handlers, signal),
@@ -101,6 +105,8 @@ export const api = {
   // ── RAG 情节素材库 ──
   rag: {
     status: () => get<RagStatus>('/api/rag/status'),
+
+    /** 旧版一步到位导入（保留兼容，前端不再使用，改用 analyze + startJob） */
     importNovel: (file: File, book: string) => {
       const form = new FormData();
       form.append('file', file);
@@ -108,7 +114,34 @@ export const api = {
       form.append('replace', 'true');
       return uploadForm<RagImportResult>('/api/rag/import', form);
     },
+
+    /** 上传 txt：格式检测 → 段落/章节结构化 → 按情节弧切窗口，返回任务（可能直接开始提炼） */
+    analyze: (file: File, book: string) => {
+      const form = new FormData();
+      form.append('file', file);
+      form.append('book', book);
+      return uploadForm<RagJob>('/api/rag/analyze', form);
+    },
+
+    /** 最近任务列表（运行中的在前） */
+    jobs: () => get<RagJobSummary[]>('/api/rag/jobs'),
+    /** 任务详情：含窗口摘要，不含窗口全文/LLM 原文 */
     job: (id: string) => get<RagJob>('/api/rag/jobs/' + encodeURIComponent(id)),
+
+    /** 按新参数重新分块，状态回到 waiting */
+    resplit: (id: string, payload: RagJobSplitPayload) =>
+      post<RagJob>('/api/rag/jobs/' + encodeURIComponent(id) + '/resplit', payload),
+    /** 开始提炼/抽取，状态进入 extracting */
+    startJob: (id: string, payload?: RagJobSplitPayload) =>
+      post<RagJob>('/api/rag/jobs/' + encodeURIComponent(id) + '/start', payload ?? {}),
+    /** 单个窗口的全文、DeepSeek 原始返回与解析结果 */
+    window: (id: string, index: number) =>
+      get<RagWindowDetail>('/api/rag/jobs/' + encodeURIComponent(id) + '/windows/' + index),
+
+    /** 提炼设置（手动开始 / 窗口字数 / 重叠 / 并行数） */
+    settings: () => get<RagSettings>('/api/rag/settings'),
+    saveSettings: (payload: RagSettingsPayload) => put<RagSettings>('/api/rag/settings', payload),
+
     scenes: (params: Record<string, unknown> = {}) =>
       getWithMeta<RagScene[], PagedMeta>('/api/rag/scenes', params),
     search: (payload: { query: string; size?: number; tags?: string[] }) =>
@@ -127,6 +160,13 @@ export const api = {
     /** SSE 流式提取：字幕路径逐条输出；转写路径带 stage/progress 进度 */
     extract: (payload: BiliExtractPayload, handlers: StreamHandlers, signal?: AbortSignal) =>
       postStream('/api/bili/extract', payload, handlers, signal),
+    /** 每次提取自动保存的文字稿：列表（不含正文） */
+    transcripts: () => get<{ transcripts: BiliTranscriptSummary[] }>('/api/bili/transcripts'),
+    /** 单条提取记录（含完整正文） */
+    transcript: (id: string) => get<BiliTranscriptDetail>('/api/bili/transcripts/' + encodeURIComponent(id)),
+    /** 删除一条提取记录 */
+    deleteTranscript: (id: string) =>
+      del<{ id: string; deleted: boolean }>('/api/bili/transcripts/' + encodeURIComponent(id)),
     /** SESSDATA / 转写环境配置概况（脱敏） */
     settings: () => get<BiliSettingsInfo>('/api/bili/settings'),
     /** 保存 SESSDATA（服务端会先校验有效性） */

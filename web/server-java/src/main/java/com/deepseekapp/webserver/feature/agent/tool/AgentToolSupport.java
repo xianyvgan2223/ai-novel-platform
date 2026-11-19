@@ -104,6 +104,32 @@ public class AgentToolSupport {
         }
     }
 
+    /**
+     * 可以交给模型的列：剔除 schema.json 里标了 sensitive 的字段（API Key 等），
+     * 否则一次 list_data / get_row 就能把用户密钥送进模型请求与历史消息。
+     */
+    public List<String> readableColumns(String db, String table) {
+        List<String> sensitive = schema.tableDef(db, table).sensitive();
+        return schema.columnNames(db, table).stream()
+                .filter(column -> !sensitive.contains(column))
+                .toList();
+    }
+
+    /** 把结果行里的敏感列打码；没有敏感列时原样返回。 */
+    public Map<String, Object> redactSensitive(String db, String table, Map<String, Object> row) {
+        List<String> sensitive = schema.tableDef(db, table).sensitive();
+        if (row == null || sensitive.isEmpty()) {
+            return row;
+        }
+        Map<String, Object> out = new LinkedHashMap<>(row);
+        for (String column : sensitive) {
+            if (out.containsKey(column)) {
+                out.put(column, "***");
+            }
+        }
+        return out;
+    }
+
     /** 统一的调用追踪：进入时推 tool_call，结束时推 tool_result / tool_error。 */
     public <T> T traced(AgentRun run, String tool, Map<String, Object> args, Supplier<T> body) {
         String callId = "call_" + sequence.incrementAndGet();
@@ -151,9 +177,14 @@ public class AgentToolSupport {
                     + (map.get("rows") instanceof List<?> list ? list.size() : 0) + " 行";
             case "search_rag" -> "命中 " + map.getOrDefault("count", 0) + " 条素材";
             case "rag_status" -> "素材库共 " + map.getOrDefault("totalScenes", 0) + " 条情节";
-            case "generate_outline" -> "大纲已生成（未保存）";
-            case "list_outlines" -> "共 " + map.getOrDefault("count", 0) + " 条大纲";
-            case "generate_chapter" -> "正文已生成，共 " + map.getOrDefault("chars", 0) + " 字（未保存）";
+            case "generate_outline" -> Boolean.TRUE.equals(map.get("saved"))
+                    ? "已保存为作品 #" + map.get("outlineId") + "，共 " + map.getOrDefault("chapterCount", 0) + " 章"
+                    : "已生成《" + map.getOrDefault("title", "未命名作品") + "》，但保存失败";
+            case "list_outlines" -> "共 " + map.getOrDefault("count", 0) + " 部作品";
+            case "list_chapters" -> "共 " + map.getOrDefault("count", 0) + " 章";
+            case "generate_chapter" -> Boolean.TRUE.equals(map.get("saved"))
+                    ? "正文已写入章节 #" + map.get("chapterId") + "，共 " + map.getOrDefault("chars", 0) + " 字"
+                    : "正文已生成（" + map.getOrDefault("chars", 0) + " 字），但保存失败";
             default -> tool + " 执行完成";
         };
     }

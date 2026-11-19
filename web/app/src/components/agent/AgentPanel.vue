@@ -6,11 +6,14 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { ArrowRight, ChatDotRound, Delete, Plus, Promotion, Setting, VideoPause } from '@element-plus/icons-vue';
+import { ArrowRight, ChatDotRound, Delete, Download, Plus, Promotion, Setting, VideoPause } from '@element-plus/icons-vue';
 import RichText from '@/components/RichText.vue';
 import AgentToolCard from '@/components/agent/AgentToolCard.vue';
 import AgentTaskCard from '@/components/agent/AgentTaskCard.vue';
 import AgentAskCard from '@/components/agent/AgentAskCard.vue';
+import AgentThinking from '@/components/agent/AgentThinking.vue';
+import AgentDownloadList from '@/components/agent/AgentDownloadList.vue';
+import SettingLabel from '@/components/agent/SettingLabel.vue';
 import { formatTime } from '@/api';
 import { useAgentStore } from '@/stores/agent';
 import type { AgentAskPart, AgentMessage, AgentTextPart } from '@/stores/agent';
@@ -27,6 +30,8 @@ const resizing = ref(false);
 const draftWidth = ref(agent.panelWidth);
 const historyOpen = ref(false);
 const settingsOpen = ref(false);
+const downloadsOpen = ref(false);
+const downloadsLoading = ref(false);
 const saving = ref(false);
 
 let startX = 0;
@@ -42,9 +47,9 @@ const suggestions = [
 const form = ref({
   apiKey: '',
   baseUrl: '',
-  model: '',
-  temperature: undefined as number | undefined,
-  maxTokens: undefined as number | undefined,
+  model: 'deepseek-flash',
+  temperature: 1 as number | undefined,
+  maxTokens: 32768 as number | undefined,
   topP: undefined as number | undefined,
   frequencyPenalty: undefined as number | undefined,
   presencePenalty: undefined as number | undefined,
@@ -52,6 +57,10 @@ const form = ref({
   webSearch: false,
   searchCount: 5,
   searchNeedContent: false,
+  stream: true,
+  thinking: true,
+  reasoningEffort: 'high',
+  contextWindow: 0,
 });
 
 const shellStyle = computed(() => ({
@@ -62,7 +71,109 @@ const canSubmit = computed(() => agent.canSend && input.value.trim().length > 0)
 const hasApiKey = computed(() => Boolean(agent.settings?.hasApiKey));
 const maskedKey = computed(() => agent.settings?.apiKey || '');
 const defaultBaseUrl = computed(() => agent.settings?.defaults?.baseUrl || 'https://api.deepseek.com');
-const defaultModel = computed(() => agent.settings?.defaults?.model || 'deepseek-chat');
+const defaultModel = computed(() => agent.settings?.defaults?.model || 'deepseek-flash');
+const modelOptions = computed(
+  () =>
+    agent.settings?.modelOptions ?? [
+      { id: 'deepseek-flash', label: 'DeepSeek Flash', description: '响应更快，适合日常对话与快速生成' },
+      { id: 'deepseek-v4-pro', label: 'DeepSeek Pro', description: '推理更强，适合复杂任务与长文创作' },
+    ],
+);
+const downloadItems = computed(() => agent.downloads);
+const reasoningEfforts = computed(() => agent.settings?.reasoningEfforts ?? ['none', 'low', 'high', 'max']);
+
+/** 上下文占用展示：百分比来自服务端，窗口为 0 时先不显示进度条 */
+const ctxPercent = computed(() => {
+  const window = agent.context.window || 0;
+  if (window <= 0) return 0;
+  const tokens = Math.max(0, agent.context.tokens || 0);
+  return Math.min(100, (tokens * 100) / window);
+});
+/** 1M 窗口下 3k tokens 只有 0.3%，取一位小数才看得出变化 */
+const ctxPercentText = computed(() =>
+  ctxPercent.value > 0 && ctxPercent.value < 10 ? ctxPercent.value.toFixed(1) : String(Math.round(ctxPercent.value)),
+);
+const ctxBarWidth = computed(() => (ctxPercent.value > 0 ? Math.max(ctxPercent.value, 0.6) : 0));
+const ctxWindow = computed(() => agent.context.window || 0);
+const ctxTone = computed(() => (ctxPercent.value >= 90 ? 'danger' : ctxPercent.value >= 75 ? 'warn' : 'ok'));
+
+/** 整体缓存命中率：本会话 Σ命中 / Σ输入（不是最近一次请求） */
+const cacheRate = computed<number | null>(() => {
+  const totalPrompt = agent.context.totalPromptTokens;
+  if (totalPrompt <= 0) return null;
+  return Math.min(
+    100,
+    Math.round((agent.context.totalCachedTokens * 1000) / totalPrompt) / 10,
+  );
+});
+const cacheText = computed(() => (cacheRate.value === null ? '缓存 —' : `缓存 ${cacheRate.value}%`));
+const cacheTooltip = computed(() => {
+  if (agent.context.totalPromptTokens <= 0) return '本会话还没有可统计的用量（旧会话不回溯）';
+  const parts = [
+    `累计命中 ${formatTokens(agent.context.totalCachedTokens)} / 累计输入 ${formatTokens(agent.context.totalPromptTokens)}`,
+  ];
+  const usage = agent.context.lastUsage;
+  if (usage) {
+    parts.push(`最近一次 ${formatTokens(usage.cachedTokens)} / ${formatTokens(usage.promptTokens)}`);
+  }
+  return parts.join(' · ');
+});
+
+const ctxSummary = computed(() => {
+  const usage = agent.context.lastUsage;
+  const parts = [`占用 ${ctxPercentText.value}%`];
+  if (ctxWindow.value > 0) {
+    parts.push(`${formatTokens(agent.context.tokens)} / ${formatTokens(ctxWindow.value)}`);
+  }
+  if (agent.context.threshold > 0) {
+    parts.push(`压缩阈值 ${formatTokens(agent.context.threshold)}`);
+  }
+  if (usage) {
+    parts.push(`输入 ${formatTokens(usage.promptTokens)} · 输出 ${formatTokens(usage.completionTokens)}`);
+    if (usage.cachedTokens > 0) parts.push(`最近一次缓存命中 ${formatTokens(usage.cachedTokens)}`);
+  }
+  if (agent.context.totalPromptTokens > 0) {
+    parts.push(
+      `累计缓存命中 ${formatTokens(agent.context.totalCachedTokens)} / ${formatTokens(agent.context.totalPromptTokens)}`,
+    );
+  }
+  return parts.join(' · ');
+});
+
+/** 1.2M / 850k / 900 这类紧凑写法 */
+function formatTokens(value: number): string {
+  const n = Number(value) || 0;
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1) + 'M';
+  if (n >= 1_000) return (n / 1_000).toFixed(n >= 100_000 ? 0 : 1) + 'k';
+  return String(n);
+}
+
+async function compactHistory(): Promise<void> {
+  try {
+    const result = await agent.compactNow();
+    if (!result) return;
+    if (result.count > 0) {
+      ElMessage.success(`已压缩 ${result.count} 条历史，释放约 ${formatTokens(result.freedTokens)} tokens`);
+    } else {
+      ElMessage.info('当前历史还不需要压缩');
+    }
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : String(error));
+  }
+}
+
+function effortLabel(effort: string): string {
+  switch (effort) {
+    case 'none':
+      return 'none（不思考）';
+    case 'low':
+      return 'low（浅）';
+    case 'max':
+      return 'max（最深）';
+    default:
+      return 'high（标准）';
+  }
+}
 
 function textOf(message: AgentMessage): string {
   return message.parts
@@ -71,11 +182,34 @@ function textOf(message: AgentMessage): string {
     .join('');
 }
 
+/** 单条回答的缓存命中率：cachedTokens / promptTokens（0-100，一位小数） */
+function messageCacheRate(message: AgentMessage): number | null {
+  const usage = message.usage;
+  if (!usage || usage.promptTokens <= 0) return null;
+  return Math.min(100, Math.round((usage.cachedTokens * 1000) / usage.promptTokens) / 10);
+}
+
+function messageCachePercent(message: AgentMessage): string {
+  const rate = messageCacheRate(message);
+  return rate === null ? '—' : String(rate);
+}
+
+function messageCacheTip(message: AgentMessage): string {
+  const usage = message.usage;
+  if (!usage) return '';
+  return (
+    `本次请求：缓存命中 ${formatTokens(usage.cachedTokens)} / 输入 ${formatTokens(usage.promptTokens)}` +
+    ` · 输出 ${formatTokens(usage.completionTokens)}`
+  );
+}
+
 function submit(): void {
   const text = input.value.trim();
   if (!text || agent.streaming) return;
   input.value = '';
   void agent.send(text);
+  // 用户自己发消息：无论之前滚到哪里都拉回底部看回复
+  scrollToBottom(true);
 }
 
 function useSuggestion(text: string): void {
@@ -85,23 +219,43 @@ function useSuggestion(text: string): void {
 }
 
 function onKeydown(event: KeyboardEvent): void {
+  // 中文输入法组字时按回车只是上屏，不能当成发送
+  if (event.isComposing || event.keyCode === 229) return;
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault();
     submit();
   }
 }
 
-function scrollToBottom(): void {
+const NEAR_BOTTOM_GAP = 80;
+const nearBottom = ref(true);
+
+/** 记录用户是否停在底部附近：只有这时才自动滚动，避免打断上翻阅读 */
+function onScroll(): void {
+  const el = bodyRef.value;
+  if (!el) return;
+  nearBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_GAP;
+}
+
+/** force=true 用于发送、切换会话等必须看到最新内容的场景 */
+function scrollToBottom(force = false): void {
+  if (!force && !nearBottom.value) return;
   void nextTick(() => {
     const el = bodyRef.value;
     if (el) el.scrollTop = el.scrollHeight;
   });
 }
 
+// 流式输出用 lastSeq（每个事件都会变）当滚动信号，避免每个 token 深遍历整棵消息树
 watch(
-  () => agent.messages,
+  () => agent.lastSeq,
   () => scrollToBottom(),
-  { deep: true },
+);
+
+// 消息条数变化覆盖发送消息、切换会话等不产生事件的情况
+watch(
+  () => agent.messages.length,
+  () => scrollToBottom(),
 );
 
 watch(
@@ -111,7 +265,7 @@ watch(
       void agent.loadTools();
       void agent.loadSessions();
       void agent.resumeActive();
-      scrollToBottom();
+      scrollToBottom(true);
     }
   },
 );
@@ -121,7 +275,8 @@ async function openSession(id: number): Promise<void> {
   historyOpen.value = false;
   try {
     await agent.openSession(id);
-    scrollToBottom();
+    // 切换会话后直接定位到最新消息
+    scrollToBottom(true);
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : String(error));
   }
@@ -152,16 +307,21 @@ async function openSettings(): Promise<void> {
   const target = form.value;
   target.apiKey = '';
   target.baseUrl = settings?.baseUrl || settings?.defaults?.baseUrl || '';
-  target.model = settings?.model || settings?.defaults?.model || '';
-  target.temperature = settings?.temperature ?? undefined;
-  target.maxTokens = settings?.maxTokens ?? undefined;
+  target.model = settings?.model || settings?.defaults?.model || 'deepseek-flash';
+  target.temperature = settings?.temperature ?? settings?.defaults?.temperature ?? 1;
+  target.maxTokens = settings?.maxTokens ?? settings?.defaults?.maxTokens ?? 32768;
   target.topP = settings?.topP ?? undefined;
   target.frequencyPenalty = settings?.frequencyPenalty ?? undefined;
   target.presencePenalty = settings?.presencePenalty ?? undefined;
   target.systemPrompt = settings?.systemPrompt ?? '';
   target.webSearch = Boolean(settings?.webSearch);
-  target.searchCount = settings?.searchCount ?? 5;
+  target.searchCount = settings?.searchCount ?? settings?.defaults?.searchCount ?? 5;
   target.searchNeedContent = Boolean(settings?.searchNeedContent);
+  target.stream = settings?.stream ?? settings?.defaults?.stream ?? true;
+  target.thinking = settings?.thinking ?? settings?.defaults?.thinking ?? true;
+  target.reasoningEffort =
+    settings?.reasoningEffort ?? settings?.defaults?.reasoningEffort ?? 'high';
+  target.contextWindow = settings?.contextWindow ?? settings?.defaults?.contextWindow ?? 0;
   settingsOpen.value = true;
 }
 
@@ -182,6 +342,10 @@ async function saveSettings(): Promise<void> {
       webSearch: target.webSearch,
       searchCount: target.searchCount,
       searchNeedContent: target.searchNeedContent,
+      stream: target.stream,
+      thinking: target.thinking,
+      reasoningEffort: target.reasoningEffort,
+      contextWindow: target.contextWindow,
     };
     await agent.saveSettings(payload);
     settingsOpen.value = false;
@@ -193,9 +357,45 @@ async function saveSettings(): Promise<void> {
   }
 }
 
-async function answerAsk(part: AgentAskPart, value: string): Promise<void> {
+async function answerAsk(
+  part: AgentAskPart,
+  value: string,
+  done?: (ok: boolean) => void,
+): Promise<void> {
   try {
     await agent.answerAsk(part, value);
+    done?.(true);
+  } catch (error) {
+    done?.(false);
+    ElMessage.error(error instanceof Error ? error.message : String(error));
+  }
+}
+
+async function openDownloads(): Promise<void> {
+  downloadsOpen.value = true;
+  downloadsLoading.value = true;
+  try {
+    await agent.loadDownloads();
+  } catch (error) {
+    // 下载库加载失败不再静默，明确提示用户
+    ElMessage.error(error instanceof Error ? error.message : String(error));
+  } finally {
+    downloadsLoading.value = false;
+  }
+}
+
+async function refreshDownloads(): Promise<void> {
+  try {
+    await agent.loadDownloads();
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : String(error));
+  }
+}
+
+async function removeDownload(id: number): Promise<void> {
+  try {
+    await agent.deleteDownload(id);
+    ElMessage.success('已删除');
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : String(error));
   }
@@ -316,6 +516,9 @@ onUnmounted(() => {
           <el-tooltip content="新对话" placement="bottom">
             <el-button text circle :icon="Plus" :disabled="agent.streaming" @click="agent.newSession()" />
           </el-tooltip>
+          <el-tooltip content="下载库" placement="bottom">
+            <el-button text circle :icon="Download" @click="openDownloads" />
+          </el-tooltip>
           <el-tooltip content="模型设置（只影响本面板）" placement="bottom">
             <el-button text circle :icon="Setting" @click="openSettings" />
           </el-tooltip>
@@ -325,7 +528,11 @@ onUnmounted(() => {
         </div>
       </header>
 
-      <div ref="bodyRef" class="agent-body">
+      <div v-if="agent.lastError" class="agent-error">
+        <span class="agent-error-text">{{ agent.lastError }}</span>
+      </div>
+
+      <div ref="bodyRef" class="agent-body" @scroll="onScroll">
         <div v-if="!agent.hasMessages" class="agent-empty">
           <div class="empty-title">可以帮你做什么</div>
           <div class="empty-sub">查数据、找素材、生成大纲与正文，每次工具调用都会展示参数和返回。</div>
@@ -362,10 +569,15 @@ onUnmounted(() => {
             <div class="bubble assistant">
               <template v-for="(part, index) in message.parts" :key="index">
                 <RichText v-if="part.kind === 'text'" :text="part.text" />
+                <AgentThinking
+                  v-else-if="part.kind === 'thinking'"
+                  :text="part.text"
+                  :streaming="message.status === 'streaming' && index === message.parts.length - 1"
+                />
                 <AgentAskCard
                   v-else-if="part.kind === 'ask'"
                   :part="part"
-                  @answer="(value) => answerAsk(part, value)"
+                  @answer="(value, done) => answerAsk(part, value, done)"
                 />
                 <AgentToolCard v-else :part="part" />
               </template>
@@ -375,17 +587,71 @@ onUnmounted(() => {
               </div>
               <div v-if="message.status === 'cancelled'" class="msg-note">已停止生成</div>
               <div v-if="message.status === 'interrupted'" class="msg-note">
-                任务因服务重启中断，发送「继续」可以接着做
+                {{ message.error || '任务因服务重启中断，发送「继续」可以接着做' }}
               </div>
-              <div v-if="message.status === 'error'" class="msg-note error">{{ message.error }}</div>
+              <!-- 当前运行的错误详情统一在顶部错误条展示，避免同一条错误出现两次；历史消息的错误跟随气泡 -->
+              <div v-if="message.status === 'error'" class="msg-note error">
+                {{ (message.fromHistory && message.error) || '生成失败' }}
+              </div>
+            </div>
+            <!-- 这条回答自己的缓存命中（最后一次模型请求），与会话累计值区分开 -->
+            <div
+              v-if="message.status !== 'streaming' && message.usage"
+              class="msg-cache"
+              :class="{ good: (messageCacheRate(message) ?? 0) >= 60 }"
+              :title="messageCacheTip(message)"
+            >
+              <span class="msg-cache-dot"></span>
+              缓存命中 {{ messageCachePercent(message) }}%
+              <span class="msg-cache-tokens">
+                {{ formatTokens(message.usage.cachedTokens) }} / {{ formatTokens(message.usage.promptTokens) }}
+              </span>
             </div>
           </template>
         </div>
       </div>
 
-      <AgentTaskCard v-if="agent.activeTask" :task="agent.activeTask" />
+      <AgentTaskCard
+        v-if="agent.activeTask"
+        :task="agent.activeTask"
+        @close="agent.dismissTask()"
+      />
 
       <footer class="agent-foot">
+        <div class="ctx-row" :class="ctxTone">
+          <span class="ctx-label">上下文</span>
+          <span class="ctx-track" :title="ctxSummary">
+            <span class="ctx-fill" :style="{ width: ctxBarWidth + '%' }"></span>
+          </span>
+          <span class="ctx-text" :title="ctxSummary">
+            <template v-if="ctxWindow > 0">{{ ctxPercentText }}%</template>
+            <template v-else>待统计</template>
+          </span>
+          <span
+            class="ctx-cache"
+            :class="{ good: cacheRate !== null && cacheRate >= 60 }"
+            :title="cacheTooltip"
+          >
+            {{ cacheText }}
+          </span>
+          <button
+            v-if="agent.currentSessionId"
+            type="button"
+            class="ctx-compact"
+            :disabled="agent.streaming || agent.compacting"
+            title="把更早的历史压缩成摘要，释放上下文"
+            @click="compactHistory"
+          >
+            {{ agent.compacting ? '压缩中…' : '压缩历史' }}
+          </button>
+        </div>
+        <div v-if="agent.context.compacted" class="ctx-note">
+          <span>
+            已压缩 {{ agent.context.compacted.count }} 条历史，释放约
+            {{ formatTokens(agent.context.compacted.freedTokens) }} tokens
+          </span>
+          <button type="button" class="ctx-note-close" @click="agent.context.compacted = null">×</button>
+        </div>
         <textarea
           v-model="input"
           class="agent-input"
@@ -394,7 +660,7 @@ onUnmounted(() => {
           @keydown="onKeydown"
         />
         <div class="agent-foot-row">
-          <span class="agent-hint">只读 · 生成结果不会自动保存</span>
+          <span class="agent-hint">生成结果会自动保存 · 查询类工具只读</span>
           <el-button
             v-if="agent.streaming"
             type="danger"
@@ -419,9 +685,12 @@ onUnmounted(() => {
       </footer>
     </template>
 
-    <el-dialog v-model="settingsOpen" title="Agent 设置" width="460px" :teleported="false">
-      <el-form label-width="92px" size="small" class="settings-form">
-        <el-form-item label="API Key">
+    <el-dialog v-model="settingsOpen" title="Agent 设置" width="min(480px, 92vw)" :teleported="false">
+      <el-form label-width="108px" size="small" class="settings-form">
+        <el-form-item>
+          <template #label>
+            <SettingLabel text="访问 DeepSeek 的密钥。留空表示不修改；读取时只显示脱敏值。">API Key</SettingLabel>
+          </template>
           <el-input
             v-model="form.apiKey"
             show-password
@@ -429,22 +698,73 @@ onUnmounted(() => {
           />
           <div v-if="hasApiKey" class="form-hint mono">当前：{{ maskedKey }}</div>
         </el-form-item>
-        <el-form-item label="Base URL">
+        <el-form-item>
+          <template #label>
+            <SettingLabel text="接口地址，默认 https://api.deepseek.com；使用代理或兼容服务时修改。">
+              Base URL
+            </SettingLabel>
+          </template>
           <el-input v-model="form.baseUrl" :placeholder="defaultBaseUrl" />
         </el-form-item>
-        <el-form-item label="模型">
-          <el-input v-model="form.model" :placeholder="defaultModel" />
+        <el-form-item>
+          <template #label>
+            <SettingLabel text="对话模型。Flash 响应快，Pro 推理强、适合复杂任务与长文创作；也可以自己输入模型名。">
+              模型
+            </SettingLabel>
+          </template>
+          <el-select
+            v-model="form.model"
+            filterable
+            allow-create
+            default-first-option
+            :placeholder="defaultModel"
+            class="model-select"
+          >
+            <el-option
+              v-for="option in modelOptions"
+              :key="option.id"
+              :label="option.label"
+              :value="option.id"
+            >
+              <div class="model-option">
+                <span class="model-option-label">{{ option.label }}</span>
+                <span class="model-option-desc">{{ option.description }}</span>
+              </div>
+            </el-option>
+          </el-select>
         </el-form-item>
-        <el-form-item label="Temperature">
+        <el-form-item>
+          <template #label>
+            <SettingLabel text="0~2，越大越发散。默认 1，创作类任务建议 0.8~1.2。">
+              Temperature
+            </SettingLabel>
+          </template>
           <el-input-number v-model="form.temperature" :min="0" :max="2" :step="0.1" controls-position="right" />
         </el-form-item>
-        <el-form-item label="Max Tokens">
-          <el-input-number v-model="form.maxTokens" :min="256" :max="32768" :step="256" controls-position="right" />
+        <el-form-item>
+          <template #label>
+            <SettingLabel text="单次回复的最大 token 数，默认 32768（当前允许的最大值）。">
+              Max Tokens
+            </SettingLabel>
+          </template>
+          <el-input-number
+            v-model="form.maxTokens"
+            :min="256"
+            :max="32768"
+            :step="512"
+            controls-position="right"
+          />
         </el-form-item>
-        <el-form-item label="Top P">
+        <el-form-item>
+          <template #label>
+            <SettingLabel text="核采样阈值 0~1，和 Temperature 二选一调整即可。">Top P</SettingLabel>
+          </template>
           <el-input-number v-model="form.topP" :min="0" :max="1" :step="0.05" controls-position="right" />
         </el-form-item>
-        <el-form-item label="频率惩罚">
+        <el-form-item>
+          <template #label>
+            <SettingLabel text="-2~2，正值降低重复用词。默认 0。">频率惩罚</SettingLabel>
+          </template>
           <el-input-number
             v-model="form.frequencyPenalty"
             :min="-2"
@@ -453,7 +773,10 @@ onUnmounted(() => {
             controls-position="right"
           />
         </el-form-item>
-        <el-form-item label="存在惩罚">
+        <el-form-item>
+          <template #label>
+            <SettingLabel text="-2~2，正值鼓励引入新话题。默认 0。">存在惩罚</SettingLabel>
+          </template>
           <el-input-number
             v-model="form.presencePenalty"
             :min="-2"
@@ -462,20 +785,73 @@ onUnmounted(() => {
             controls-position="right"
           />
         </el-form-item>
-        <el-form-item label="追加提示词">
+        <el-form-item>
+          <template #label>
+            <SettingLabel text="上下文窗口（tokens）。DeepSeek Flash / Pro 都是 1M；填 0 表示按模型默认，自建小窗口模型时按实际填写。">
+              上下文窗口
+            </SettingLabel>
+          </template>
+          <el-input-number
+            v-model="form.contextWindow"
+            :min="0"
+            :max="2000000"
+            :step="10000"
+            controls-position="right"
+          />
+        </el-form-item>
+        <el-form-item>
+          <template #label>
+            <SettingLabel text="追加到系统提示词后面，用来约束语气、格式或角色。">追加提示词</SettingLabel>
+          </template>
           <el-input
             v-model="form.systemPrompt"
             type="textarea"
             :rows="3"
-            placeholder="会追加到系统提示词后面，例如「回答尽量简短」"
+            placeholder="例如：回答尽量简短"
           />
         </el-form-item>
-        <el-form-item label="联网搜索">
+        <el-form-item>
+          <template #label>
+            <SettingLabel text="逐字显示回复。关闭后整段返回，适合网络不稳定时。默认开启。">
+              流式输出
+            </SettingLabel>
+          </template>
+          <el-switch v-model="form.stream" />
+        </el-form-item>
+        <el-form-item>
+          <template #label>
+            <SettingLabel text="开启后模型会先思考再回答，过程会实时显示在对话里；耗时与 token 消耗更高，关闭则直接输出。">
+              思考模式
+            </SettingLabel>
+          </template>
+          <el-switch v-model="form.thinking" />
+        </el-form-item>
+        <el-form-item v-if="form.thinking">
+          <template #label>
+            <SettingLabel text="思考深度：none 不思考、low 浅、high 标准、max 最深。越深越慢，但复杂任务更稳。">
+              思考深度
+            </SettingLabel>
+          </template>
+          <el-select v-model="form.reasoningEffort" class="model-select">
+            <el-option
+              v-for="effort in reasoningEfforts"
+              :key="effort"
+              :label="effortLabel(effort)"
+              :value="effort"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item>
+          <template #label>
+            <SettingLabel text="开启后 Agent 才能调用 web_search；搜索按次计费。">联网搜索</SettingLabel>
+          </template>
           <el-switch v-model="form.webSearch" />
-          <span class="form-hint inline">开启后 Agent 可调用 web_search</span>
         </el-form-item>
         <template v-if="form.webSearch">
-          <el-form-item label="搜索条数">
+          <el-form-item>
+            <template #label>
+              <SettingLabel text="每次搜索返回的条数。默认 5，实际最多取 8 条。">搜索条数</SettingLabel>
+            </template>
             <el-input-number
               v-model="form.searchCount"
               :min="1"
@@ -484,9 +860,11 @@ onUnmounted(() => {
               controls-position="right"
             />
           </el-form-item>
-          <el-form-item label="抓取正文">
+          <el-form-item>
+            <template #label>
+              <SettingLabel text="开启后返回网页正文，信息更全但更耗上下文。">抓取正文</SettingLabel>
+            </template>
             <el-switch v-model="form.searchNeedContent" />
-            <span class="form-hint inline">开启后返回网页正文，上下文消耗更大</span>
           </el-form-item>
         </template>
       </el-form>
@@ -494,6 +872,15 @@ onUnmounted(() => {
         <el-button @click="settingsOpen = false">取消</el-button>
         <el-button type="primary" :loading="saving" @click="saveSettings">保存</el-button>
       </template>
+    </el-dialog>
+
+    <el-dialog v-model="downloadsOpen" title="下载库" width="min(540px, 92vw)" :teleported="false">
+      <AgentDownloadList
+        :items="downloadItems"
+        :loading="downloadsLoading"
+        @refresh="refreshDownloads"
+        @delete="removeDownload"
+      />
     </el-dialog>
   </aside>
 </template>
@@ -622,7 +1009,7 @@ onUnmounted(() => {
 }
 
 .agent-dot.busy {
-  background: var(--warning);
+  background: var(--warn);
   animation: agent-pulse 1.1s ease-in-out infinite;
 }
 
@@ -737,6 +1124,27 @@ onUnmounted(() => {
   color: var(--ink-4);
 }
 
+/* ── 错误条 ── */
+.agent-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex: 0 0 auto;
+  margin: 8px 12px 0;
+  padding: 7px 9px;
+  border-radius: 7px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
+.agent-error-text {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+
 /* ── 消息区 ── */
 .agent-body {
   flex: 1;
@@ -745,7 +1153,13 @@ onUnmounted(() => {
   padding: 14px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 18px;
+}
+
+/* 轮与轮之间（上一条助手回答结束 → 下一条用户提问）再额外留一段，
+   避免连续几轮对话像一整段文字一样粘在一起 */
+.msg + .msg.user {
+  margin-top: 12px;
 }
 
 .agent-empty {
@@ -859,6 +1273,34 @@ onUnmounted(() => {
   color: var(--danger);
 }
 
+/* 单条回答的缓存命中（会话累计在底部 ctx-cache 里） */
+.msg-cache {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 3px;
+  font-size: 10.5px;
+  color: var(--ink-4);
+  cursor: default;
+}
+
+.msg-cache-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.7;
+}
+
+.msg-cache.good {
+  color: var(--brand);
+}
+
+.msg-cache-tokens {
+  color: var(--ink-4);
+  opacity: 0.85;
+}
+
 /* ── 输入区 ── */
 .agent-foot {
   flex: 0 0 auto;
@@ -900,11 +1342,136 @@ onUnmounted(() => {
   color: var(--ink-4);
 }
 
+/* ── 上下文占用 ── */
+.ctx-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  font-size: 10.5px;
+  color: var(--ink-4);
+}
+
+.ctx-label {
+  flex: 0 0 auto;
+}
+
+.ctx-track {
+  position: relative;
+  flex: 1 1 auto;
+  height: 4px;
+  min-width: 40px;
+  border-radius: 999px;
+  background: var(--bg-soft);
+  overflow: hidden;
+}
+
+.ctx-fill {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: var(--brand);
+  transition: width 0.25s ease;
+}
+
+.ctx-row.warn .ctx-fill {
+  background: var(--warn);
+}
+
+.ctx-row.danger .ctx-fill {
+  background: var(--danger);
+}
+
+.ctx-text {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ctx-cache {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--bg-soft);
+  color: var(--ink-4);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ctx-cache.good {
+  color: var(--brand);
+}
+
+.ctx-compact {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink-3);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.ctx-compact:hover:not(:disabled) {
+  color: var(--ink-1);
+  border-color: var(--ink-4);
+}
+
+.ctx-compact:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ctx-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--bg-soft);
+  color: var(--ink-3);
+  font-size: 10.5px;
+}
+
+.ctx-note-close {
+  border: none;
+  background: transparent;
+  color: var(--ink-4);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+}
+
 /* ── 设置弹窗 ── */
 .settings-form {
   padding-right: 6px;
   max-height: 60vh;
   overflow-y: auto;
+}
+
+.model-select {
+  width: 100%;
+}
+
+.model-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.model-option-label {
+  font-size: 12px;
+  color: var(--ink-1);
+}
+
+.model-option-desc {
+  font-size: 10.5px;
+  color: var(--ink-4);
 }
 
 .form-hint {

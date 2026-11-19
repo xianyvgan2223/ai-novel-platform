@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
-import { ElMessage } from 'element-plus';
-import { CopyDocument, Download, Link, VideoPlay, VideoPause } from '@element-plus/icons-vue';
-import { api } from '@/api';
-import type { BiliExtractDoneInfo, BiliSettingsInfo, BiliSubtitle, BiliVideoInfo } from '@/api';
+import { ElMessage, ElMessageBox } from 'element-plus';
+import { CopyDocument, Delete, Download, Link, Refresh, VideoPlay, VideoPause } from '@element-plus/icons-vue';
+import { api, formatTime } from '@/api';
+import type {
+  BiliExtractDoneInfo, BiliSettingsInfo, BiliSubtitle, BiliTranscriptSummary, BiliVideoInfo,
+} from '@/api';
 import PageHeader from '@/components/PageHeader.vue';
 
 /* ── 视频解析 ── */
@@ -75,6 +77,90 @@ const progressText = ref('');
 const result = ref('');
 const doneInfo = ref<BiliExtractDoneInfo | null>(null);
 
+/* ── 提取记录（每次完整提取自动保存）── */
+const transcriptList = ref<BiliTranscriptSummary[]>([]);
+const transcriptsLoading = ref(false);
+const transcriptBusyId = ref('');
+const viewingTranscriptId = ref('');
+const viewingTitle = ref('');
+
+async function loadTranscripts() {
+  transcriptsLoading.value = true;
+  try {
+    const res = await api.bili.transcripts();
+    transcriptList.value = res.transcripts ?? [];
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : String(err));
+  } finally {
+    transcriptsLoading.value = false;
+  }
+}
+
+async function openTranscript(item: BiliTranscriptSummary) {
+  if (transcriptBusyId.value) return;
+  transcriptBusyId.value = item.id;
+  try {
+    const detail = await api.bili.transcript(item.id);
+    result.value = String(detail.text ?? '');
+    doneInfo.value = {
+      source: detail.source === 'asr' ? 'asr' : 'subtitle',
+      chars: Number(detail.chars ?? 0),
+    };
+    viewingTranscriptId.value = detail.id;
+    viewingTitle.value = detail.title || item.title || '';
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : String(err));
+  } finally {
+    transcriptBusyId.value = '';
+  }
+}
+
+async function deleteTranscript(item: BiliTranscriptSummary) {
+  try {
+    await ElMessageBox.confirm(
+      `删除《${item.title || '未命名视频'}》${item.part ? ' · ' + item.part : ''} 的提取记录？删除后服务端文字稿一起移除。`,
+      '删除提取记录',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
+    );
+  } catch {
+    return;
+  }
+  try {
+    await api.bili.deleteTranscript(item.id);
+    transcriptList.value = transcriptList.value.filter((row) => row.id !== item.id);
+    if (viewingTranscriptId.value === item.id) {
+      viewingTranscriptId.value = '';
+      viewingTitle.value = '';
+      result.value = '';
+      doneInfo.value = null;
+    }
+    ElMessage.success('已删除提取记录');
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : String(err));
+  }
+}
+
+function saveTextFile(name: string, text: string) {
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name.replace(/[\\/:*?"<>|]/g, '_') + '.txt';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function downloadTranscript(item: BiliTranscriptSummary) {
+  try {
+    const detail = await api.bili.transcript(item.id);
+    saveTextFile(detail.title || item.title || 'bilibili-转写', String(detail.text ?? ''));
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : String(err));
+  }
+}
+
 let controller: AbortController | null = null;
 const resultBox = ref<HTMLElement | null>(null);
 
@@ -94,10 +180,10 @@ const noSubtitleHint = computed(() => {
 });
 
 watch(result, async () => {
-  // 实时文本跟随滚动
+  // 提取中实时跟随到底部；回看历史记录时回到开头
   await nextTick();
   const box = resultBox.value;
-  if (box) box.scrollTop = box.scrollHeight;
+  if (box) box.scrollTop = extracting.value ? box.scrollHeight : 0;
 });
 
 async function extract() {
@@ -107,6 +193,8 @@ async function extract() {
 
   result.value = '';
   doneInfo.value = null;
+  viewingTranscriptId.value = '';
+  viewingTitle.value = '';
   stageLabel.value = '';
   percent.value = null;
   progressText.value = '';
@@ -124,6 +212,10 @@ async function extract() {
         mode: 'auto',
         duration: page.duration || info.duration,
         subtitleUrl: chosen?.url,
+        title: info.title,
+        owner: info.owner,
+        page: page.page,
+        part: page.part,
       },
       {
         onStage: (stage) => {
@@ -145,7 +237,13 @@ async function extract() {
             source: (info2.source as BiliExtractDoneInfo['source']) ?? undefined,
             chars: Number(info2.chars ?? 0),
             elapsedMs: Number(info2.elapsedMs ?? Date.now() - startedAt),
+            transcriptId: info2.transcriptId ? String(info2.transcriptId) : undefined,
           };
+          if (info2.transcriptId) {
+            viewingTranscriptId.value = String(info2.transcriptId);
+            viewingTitle.value = info.title;
+            void loadTranscripts();
+          }
         },
       },
       controller.signal,
@@ -178,16 +276,10 @@ async function copyResult() {
 
 function downloadTxt() {
   if (!result.value) return;
-  const title = (video.value?.title || 'bilibili-转写').replace(/[\\/:*?"<>|]/g, '_');
-  const blob = new Blob([result.value], { type: 'text/plain;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = title + '.txt';
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
+  const title = viewingTranscriptId.value
+    ? (viewingTitle.value || video.value?.title || 'bilibili-转写')
+    : (video.value?.title || 'bilibili-转写');
+  saveTextFile(title, result.value);
 }
 
 /* ── SESSDATA 设置 ── */
@@ -244,7 +336,10 @@ function formatDuration(seconds: number): string {
   return Math.floor(seconds / 3600) + '时' + Math.floor((seconds % 3600) / 60) + '分';
 }
 
-onMounted(loadSettings);
+onMounted(() => {
+  void loadSettings();
+  void loadTranscripts();
+});
 </script>
 
 <template>
@@ -392,6 +487,51 @@ onMounted(loadSettings);
         </div>
       </section>
     </div>
+
+    <!-- 提取记录：每次完整提取自动保存 -->
+    <section class="card history-card">
+      <div class="panel-head history-head">
+        <div>
+          <h3>提取记录</h3>
+          <p>每次完整提取自动保存在服务端，可回看、下载 txt 或删除。</p>
+        </div>
+        <div class="history-tools">
+          <span class="text-muted history-count">{{ transcriptList.length }} 条</span>
+          <el-button text :icon="Refresh" :loading="transcriptsLoading" @click="loadTranscripts">刷新</el-button>
+        </div>
+      </div>
+
+      <div v-loading="transcriptsLoading" class="history-list">
+        <div v-if="!transcriptList.length && !transcriptsLoading" class="empty-hint">
+          还没有提取记录。完成一次提取后会自动出现在这里。
+        </div>
+        <div
+          v-for="item in transcriptList"
+          :key="item.id"
+          class="history-row"
+          :class="{ on: viewingTranscriptId === item.id }"
+        >
+          <button type="button" class="history-main" @click="openTranscript(item)">
+            <span class="history-title">{{ item.title || '未命名视频' }}</span>
+            <span class="history-meta">
+              <span>{{ item.source === 'asr' ? '本地转写' : '官方字幕' }}</span>
+              <span v-if="item.part"> · {{ item.part }}</span>
+              <span> · {{ item.chars }} 字</span>
+              <span> · {{ formatTime(item.createdAt) }}</span>
+            </span>
+          </button>
+          <div class="history-actions">
+            <el-button text size="small" :loading="transcriptBusyId === item.id" @click="openTranscript(item)">
+              查看
+            </el-button>
+            <el-button text size="small" :icon="Download" @click="downloadTranscript(item)">下载</el-button>
+            <el-button text size="small" type="danger" :icon="Delete" @click="deleteTranscript(item)">
+              删除
+            </el-button>
+          </div>
+        </div>
+      </div>
+    </section>
 
     <!-- 字幕登录配置（SESSDATA） -->
     <section class="card settings-card">
@@ -674,4 +814,85 @@ onMounted(loadSettings);
 .env-status .ok { color: var(--brand); }
 
 .env-status .bad { color: var(--warn); }
+
+/* ── 提取记录 ── */
+.history-card { margin-bottom: 18px; }
+
+.history-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+
+.history-head h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink-1);
+}
+
+.history-head p {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ink-3);
+}
+
+.history-tools { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.history-count { font-size: 11.5px; }
+
+.history-list { display: flex; flex-direction: column; gap: 6px; }
+
+.history-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--bg-card);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.history-row:hover { background: var(--bg-soft); }
+.history-row.on { border-color: var(--line-strong); background: var(--brand-soft); }
+
+.history-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.history-title {
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--ink-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-meta {
+  font-size: 11px;
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-actions { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; }
+
+@media (max-width: 760px) {
+  .history-row { align-items: flex-start; flex-direction: column; }
+  .history-actions { align-self: flex-end; }
+}
 </style>

@@ -8,6 +8,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:deepseekapp/core/theme/app_palette.dart';
 import '../../../core/config/route_names.dart';
 import '../application/chat_controller.dart';
+import '../application/chat_context_budget.dart';
+import '../application/setting_controller.dart';
 import '../domain/chat_message.dart';
 import 'history_page.dart';
 import 'settings_page.dart';
@@ -15,7 +17,7 @@ import 'session_setting_page.dart';
 import 'markdown_cleaner.dart';
 import '../../novel_writing/novel_writing_page.dart';
 import 'widgets/message_bubble.dart';
-import 'widgets/search_sources_card.dart';
+import 'widgets/chat_markdown.dart';
 import '../../game/game_hub_page.dart';
 
 /// ChatController Riverpod Provider 定义见 chat_controller.dart（全局单例）
@@ -41,17 +43,44 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   /// 用户是否在聊天底部附近（防自动滚动干扰手动翻阅）
   bool _isNearBottom = true;
 
+  /// 是否允许自动贴底跟随。
+  ///
+  /// 与 `_isNearBottom` 分开：用户一按下并开始拖动就立即关闭；只有真正
+  /// 回到最底部（距离 ≤1px）才重新打开。否则底部附近 80px 的「贴底区」
+  /// 会让上滑的前 80px 一直被下一帧拉回底部，表现为「滑不动」。
+  bool _followEnabled = true;
+
+  /// 输入框上方的上下文 / 缓存条是否收起（收起后只在右端留一个展开按钮）
+  bool _usageBarCollapsed = false;
+
+  /// 自动跟随是否已排队：流式分片每秒可达几十次，同一帧只允许排一次帧回调。
+  bool _followScheduled = false;
+
+  /// 路由转场是否已停下（由动画状态监听维护，见 [didChangeDependencies]）。
+  bool _routeIdle = true;
+
+  /// 本页所在路由；转场动画的状态变化会更新 [_routeIdle]。
+  ModalRoute<dynamic>? _route;
+
   /// 已滚到底部的会话 id（抽屉切换会话/新建会话后需要重新定位到底部）
   int? _scrolledSessionId;
 
-  ChatController get _chat => ref.read(chatProvider);
+  /// 当前聊天控制器（在 initState 里取一次）。
+  ///
+  /// 不在 dispose 里用 `ref.read`：Riverpod 会在 State 卸载时先让 ref 失效，
+  /// 那里再读会抛「Cannot use "ref" after the widget was disposed」。监听器
+  /// 必须用同一个控制器实例移除，所以保存成字段。
+  late final ChatController _chat;
 
   @override
   void initState() {
     super.initState();
+    _chat = ref.read(chatProvider);
     _scrollCtrl.addListener(_onScrollChanged);
     // 监听会话切换：抽屉里选中历史会话后自动定位到最新消息
-    ref.read(chatProvider).addListener(_onChatChanged);
+    _chat.addListener(_onChatChanged);
+    // 监听流式分片：停在底部时跟着生成内容继续向下
+    _chat.addListener(_onChatUpdated);
     // 预热全局设置（幂等、异步）：设置页推入时首帧就有内容，
     // 不会出现「转圈 → 整页表单」在转场动画中途切换的掉帧。
     ref.read(settingProvider).loadSettings();
@@ -77,19 +106,70 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   void _onScrollChanged() {
     if (_scrollCtrl.hasClients) {
       final maxScroll = _scrollCtrl.position.maxScrollExtent;
-      _isNearBottom = (maxScroll - _scrollCtrl.position.pixels) < 80;
+      final remaining = maxScroll - _scrollCtrl.position.pixels;
+      _isNearBottom = remaining < 80;
+      // 只有真正回到最底部才恢复跟随；上滑后停在 80px 内也不再拉回去。
+      _followEnabled = remaining <= 1;
     }
+  }
+
+  /// 用户手指拖动时立即暂停贴底；方向放开后由 [_onScrollChanged] 按位置恢复。
+  bool _onScrollNotification(ScrollNotification notification) {
+    if (notification is ScrollStartNotification &&
+        notification.dragDetails != null) {
+      _followEnabled = false;
+    } else if (notification is ScrollUpdateNotification &&
+        notification.dragDetails != null &&
+        (notification.scrollDelta ?? 0) < 0) {
+      _followEnabled = false;
+    }
+    return false;
+  }
+
+  /// 流式生成时贴底跟随。
+  ///
+  /// 以前是在 `_buildMessageList`（build 期间）直接 jumpTo。但 ChatPage 只在
+  /// `messages` / `isStreamingEmpty` 变化时重建，流式分片只重建内部的气泡，
+  /// 主页面不会重新 build —— 于是只在回答刚开始时跳一次，回答越长底部跑得
+  /// 越远。改成监听 ChatController：每次通知后按帧排队，等这一帧布局完成、
+  /// maxScrollExtent 更新后再跳过去。生成结束、回答落库成正式消息时也一样，
+  /// 保证最后一行和它下面的「···」不会被切在屏幕外。
+  ///
+  /// 只在「用户停在底部附近」时跟随；用户手动上翻后不再抢滚动。
+  void _onChatUpdated() {
+    if (!_followEnabled || !_isNearBottom) return;
+    _scheduleFollowBottom();
+  }
+
+  /// 下一帧布局完成后再贴底。
+  ///
+  /// 同一帧只排一次：流式分片可能一帧来好几次，逐个排帧回调只会重复同一个
+  /// 目标位置。转场动画进行中直接放弃，避免和转场/输入法收起动画抢同一帧
+  /// （见 [_computeTransitionIdle]）。
+  void _scheduleFollowBottom() {
+    if (_followScheduled) return;
+    _followScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _followScheduled = false;
+      if (!mounted || !_scrollCtrl.hasClients) return;
+      if (!_followEnabled || !_isNearBottom || !_routeIdle) return;
+      final position = _scrollCtrl.position;
+      final target = position.maxScrollExtent;
+      if (target <= position.pixels + 0.5) return;
+      _scrollCtrl.jumpTo(target);
+    });
   }
 
   /// 路由转场（切页 / 返回）是否已经停下。
   ///
-  /// 为什么要判断这个：`_ModalScope` 是把 `buildPage` 包在 `AnimatedBuilder`
-  /// 里调用的（flutter/lib/src/widgets/routes.dart），所以**转场动画的每一帧
-  /// 都会重跑整页 build**。自动跟随如果在 build 里直接 jumpTo，就等于每帧强制
-  /// 写一次滚动位置——视口要重新布局并重绘，和转场动画、以及输入法收起动画
-  /// 叠在同一帧里，这就是「键盘开着切页掉帧」的主要来源。
-  bool get _transitionIdle {
-    final route = ModalRoute.of(context);
+  /// 自动跟随如果在转场期间逐帧写滚动位置，就会和转场动画、以及输入法收起
+  /// 动画抢同一帧。这里只按路由动画的**状态**判断，不读动画值：在
+  /// [didChangeDependencies] 里给两条动画挂状态监听，转场一开始立刻标记为
+  /// 「忙」，动画完成后恢复。状态监听只在 forward/reverse/completed 切换时
+  /// 触发，开销可以忽略；同时避免在帧回调里调用 `ModalRoute.of`（那会在
+  /// 非 build 时机注册 InheritedWidget 依赖）。
+  bool _computeTransitionIdle() {
+    final route = _route;
     if (route == null) return true;
     for (final animation in <Animation<double>?>[
       route.animation,
@@ -105,8 +185,29 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (!identical(route, _route)) {
+      _route?.animation?.removeStatusListener(_onRouteStatusChanged);
+      _route?.secondaryAnimation?.removeStatusListener(_onRouteStatusChanged);
+      _route = route;
+      _route?.animation?.addStatusListener(_onRouteStatusChanged);
+      _route?.secondaryAnimation?.addStatusListener(_onRouteStatusChanged);
+    }
+    _routeIdle = _computeTransitionIdle();
+  }
+
+  void _onRouteStatusChanged(AnimationStatus status) {
+    _routeIdle = _computeTransitionIdle();
+  }
+
+  @override
   void dispose() {
-    ref.read(chatProvider).removeListener(_onChatChanged);
+    _route?.animation?.removeStatusListener(_onRouteStatusChanged);
+    _route?.secondaryAnimation?.removeStatusListener(_onRouteStatusChanged);
+    _chat.removeListener(_onChatChanged);
+    _chat.removeListener(_onChatUpdated);
     _scrollCtrl.removeListener(_onScrollChanged);
     _inputCtrl.dispose();
     _scrollCtrl.dispose();
@@ -217,6 +318,99 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     }
   }
 
+  /// 复制单条消息（气泡下方「复制」）
+  void _copyMessage(int index) {
+    final chat = ref.read(chatProvider);
+    if (index < 0 || index >= chat.messages.length) return;
+    final msg = chat.messages[index];
+    final content = msg.isUser
+        ? msg.content
+        : stripMarkdownForChat(msg.content);
+    Clipboard.setData(ClipboardData(text: content));
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('已复制到剪贴板', style: TextStyle(fontSize: 12)),
+          duration: Duration(seconds: 1),
+        ),
+      );
+    }
+  }
+
+  /// 删除单条消息（气泡下方「删除」，需要确认）
+  Future<void> _deleteMessageAt(int index) async {
+    final chat = ref.read(chatProvider);
+    if (index < 0 || index >= chat.messages.length) return;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('删除消息', style: TextStyle(fontSize: 14)),
+        content: const Text('确定删除这条消息吗？删除后无法恢复。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text('删除', style: TextStyle(color: ctx.palette.danger)),
+          ),
+        ],
+      ),
+    );
+    if (confirm == true) {
+      await chat.deleteMessages({index});
+    }
+  }
+
+  /// 「缓存命中」：显示**这条回答**那次请求的缓存命中（不是会话累计）
+  void _showCacheStats(int index) {
+    final chat = ref.read(chatProvider);
+    if (index < 0 || index >= chat.messages.length) return;
+    final message = chat.messages[index];
+    final percent = message.cachePercent;
+    final p = context.palette;
+    final lines = <String>[];
+    if (percent == null) {
+      lines.add('这条回答没有记录缓存数据。');
+      lines.add('旧消息或非流式请求不统计；之后的新回答会记录当次的用量。');
+    } else {
+      lines.add('该条回答缓存命中：$percent%');
+      lines.add('输入：${_formatTokenCount(message.promptTokens)} tokens');
+      lines.add('命中：${_formatTokenCount(message.cachedTokens)} tokens');
+      lines.add('输出：${_formatTokenCount(message.completionTokens)} tokens');
+      final sessionPercent = chat.cachePercent;
+      lines.add('');
+      lines.add(
+        sessionPercent == null
+            ? '本会话累计：暂无统计'
+            : '本会话累计：$sessionPercent%（见输入框上方）',
+      );
+    }
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.bolt, size: 16, color: p.accent),
+            const SizedBox(width: 6),
+            const Text('缓存命中', style: TextStyle(fontSize: 14)),
+          ],
+        ),
+        content: Text(
+          lines.join('\n'),
+          style: TextStyle(fontSize: 12, height: 1.6, color: p.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('知道了'),
+          ),
+        ],
+      ),
+    );
+  }
+
   // ── 页面跳转 ──
 
   /// 切换页面：收输入法 + 立即 push，不做任何等待。
@@ -259,18 +453,9 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     if (text.trim().isEmpty || _chat.isLoading) return;
 
     _inputCtrl.clear();
+    // sendMessage 会同步 notifyListeners（isLoading=true），停在底部时由
+    // _onChatUpdated 排队贴底；不再用固定 100ms 的 delayed 抢滚动。
     _chat.sendMessage(text);
-
-    // 滚动到底部（用户未手动翻阅时才自动跟随）
-    Future.delayed(const Duration(milliseconds: 100), () {
-      if (_scrollCtrl.hasClients && _isNearBottom) {
-        _scrollCtrl.animateTo(
-          _scrollCtrl.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
-      }
-    });
   }
 
   @override
@@ -287,6 +472,22 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     );
     final hasSession = ref.watch(
       chatProvider.select((p) => p.currentSession != null),
+    );
+    // 上下文占用 / 缓存命中：合成一条 watch，任一变化都重建输入区
+    final usage = ref.watch(
+      chatProvider.select(
+        (p) => (
+          tokens: p.displayContextTokens,
+          window: p.contextWindow,
+          cache: p.cachePercent,
+          compacted: p.lastCompactedCount,
+          compacting: p.isCompacting,
+        ),
+      ),
+    );
+    // 设置页「显示缓存命中」开关：只影响展示，不影响请求。
+    final showCacheHit = ref.watch(
+      settingProvider.select((c) => c.showCacheHit),
     );
 
     return PopScope(
@@ -338,10 +539,16 @@ class _ChatPageState extends ConsumerState<ChatPage> {
             : _buildAppBar(sessionTitle, hasSession),
         body: Column(
           children: [
-            Expanded(child: _buildMessageList(messages, isStreamingEmpty)),
+            Expanded(
+              child: _buildMessageList(
+                messages,
+                isStreamingEmpty,
+                showCacheHit,
+              ),
+            ),
             if (!_isEditMode) ...[
               Divider(height: 1, color: p.border),
-              _buildInputArea(isLoading, context),
+              _buildInputArea(isLoading, context, usage, showCacheHit),
             ],
           ],
         ),
@@ -568,47 +775,63 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     );
   }
 
-  Widget _buildMessageList(List<ChatMessage> messages, bool isStreamingEmpty) {
-    // 流式生成中：若用户在底部附近则自动滚动
-    // 直接 jumpTo 而非 addPostFrameCallback，减少帧回调堆积；
-    // 但转场动画进行中必须停手——转场每帧都会重跑整页 build（见 _transitionIdle），
-    // 那时 jumpTo 等于每帧强制写一次滚动位置，和转场/输入法收起动画抢同一帧。
-    if (isStreamingEmpty == false &&
-        _isNearBottom &&
-        _transitionIdle &&
-        _scrollCtrl.hasClients) {
-      _scrollCtrl.jumpTo(_scrollCtrl.position.maxScrollExtent);
-    }
-
-    return CupertinoScrollbar(
-      controller: _scrollCtrl,
-      // 只在滑动时显示：thumbVisibility 保持默认 false（不传 true）。
-      // 常显的滚动条在聊天页会一直压着消息列表右侧，很扎眼；默认行为是
-      // 开始滚动时淡入、停止滚动后自动淡出，内容不足一屏时不会出现。
-      thickness: 6,
-      radius: const Radius.circular(3),
-      child: ListView.builder(
-        controller: _scrollCtrl,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        itemCount: messages.length + (isStreamingEmpty ? 0 : 1),
-        itemBuilder: (context, index) {
-          if (index < messages.length) {
-            return RepaintBoundary(
-              child: MessageBubble(
-                key: ValueKey(messages[index].hashCode),
-                message: messages[index],
-                isEditMode: _isEditMode,
-                isSelected: _selectedIndices.contains(index),
-                onEditRequested: () => _enterEditMode(index),
-                onToggleSelection: _isEditMode
-                    ? () => _toggleSelection(index)
-                    : null,
-              ),
-            );
+  Widget _buildMessageList(
+    List<ChatMessage> messages,
+    bool isStreamingEmpty,
+    bool showCacheHit,
+  ) {
+    return NotificationListener<ScrollNotification>(
+      // 用户开始拖动 / 上滑时立即暂停自动贴底，避免底部附近被下一帧拉回去。
+      onNotification: _onScrollNotification,
+      child: NotificationListener<ScrollMetricsNotification>(
+        // 内容变高 / 键盘弹出改变视口时 maxScrollExtent 会变化，但 ChatController
+        // 不一定发通知（例如输入法收起、字体加载、图片解码）。这里兜底一次：
+        // 只有用户仍停在底部且没有手动上翻时才重新贴底。
+        onNotification: (notification) {
+          if (notification.depth == 0 &&
+              axisDirectionToAxis(notification.metrics.axisDirection) ==
+                  Axis.vertical &&
+              _followEnabled &&
+              _isNearBottom) {
+            _scheduleFollowBottom();
           }
-          // 流式实时渲染
-          return RepaintBoundary(child: const _StreamingBubble());
+          return false;
         },
+        child: CupertinoScrollbar(
+          controller: _scrollCtrl,
+          // 只在滑动时显示：thumbVisibility 保持默认 false（不传 true）。
+          // 常显的滚动条在聊天页会一直压着消息列表右侧，很扎眼；默认行为是
+          // 开始滚动时淡入、停止滚动后自动淡出，内容不足一屏时不会出现。
+          thickness: 6,
+          radius: const Radius.circular(3),
+          child: ListView.builder(
+            controller: _scrollCtrl,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            itemCount: messages.length + (isStreamingEmpty ? 0 : 1),
+            itemBuilder: (context, index) {
+              if (index < messages.length) {
+                return RepaintBoundary(
+                  child: MessageBubble(
+                    key: ValueKey(messages[index].hashCode),
+                    message: messages[index],
+                    showCacheHit: showCacheHit,
+                    isEditMode: _isEditMode,
+                    isSelected: _selectedIndices.contains(index),
+                    onEditRequested: () => _enterEditMode(index),
+                    onCopy: () => _copyMessage(index),
+                    onDelete: () => _deleteMessageAt(index),
+                    onShowCache: () => _showCacheStats(index),
+                    onToggleSelection: _isEditMode
+                        ? () => _toggleSelection(index)
+                        : null,
+                  ),
+                );
+              }
+              // 流式实时渲染
+              return RepaintBoundary(child: const _StreamingBubble());
+            },
+          ),
+        ),
       ),
     );
   }
@@ -715,66 +938,300 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     );
   }
 
-  Widget _buildInputArea(bool isLoading, BuildContext context) {
+  Widget _buildInputArea(
+    bool isLoading,
+    BuildContext context,
+    ({int tokens, int window, int? cache, int compacted, bool compacting})
+    usage,
+    bool showCacheHit,
+  ) {
     final p = context.palette;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       color: p.surface,
       child: SafeArea(
-        child: Row(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Expanded(
-              child: TextField(
-                controller: _inputCtrl,
-                style: TextStyle(fontSize: 12, color: p.textPrimary),
-                decoration: InputDecoration(
-                  hintText: '输入问题或指令...',
-                  hintStyle: TextStyle(color: p.textTertiary, fontSize: 12),
-                  filled: true,
-                  fillColor: p.surfaceMuted,
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 6,
-                  ),
-                  suffixIcon: Padding(
-                    padding: const EdgeInsets.only(right: 2),
-                    child: GestureDetector(
-                      onTap: () => _showExpandInputDialog(context),
-                      child: Icon(
-                        Icons.fullscreen,
-                        size: 14,
-                        color: p.textTertiary,
+            _buildUsageBar(context, usage, showCacheHit),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _inputCtrl,
+                    style: TextStyle(fontSize: 12, color: p.textPrimary),
+                    decoration: InputDecoration(
+                      hintText: '输入问题或指令...',
+                      hintStyle: TextStyle(color: p.textTertiary, fontSize: 12),
+                      filled: true,
+                      fillColor: p.surfaceMuted,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
+                      suffixIcon: Padding(
+                        padding: const EdgeInsets.only(right: 2),
+                        child: GestureDetector(
+                          onTap: () => _showExpandInputDialog(context),
+                          child: Icon(
+                            Icons.fullscreen,
+                            size: 14,
+                            color: p.textTertiary,
+                          ),
+                        ),
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(16),
+                        borderSide: BorderSide.none,
                       ),
                     ),
-                  ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(16),
-                    borderSide: BorderSide.none,
+                    maxLines: 4,
+                    minLines: 1,
+                    textInputAction: TextInputAction.newline,
+                    onSubmitted: (_) => _onSend(),
                   ),
                 ),
-                maxLines: 4,
-                minLines: 1,
-                textInputAction: TextInputAction.newline,
-                onSubmitted: (_) => _onSend(),
-              ),
-            ),
-            const SizedBox(width: 6),
-            IconButton(
-              onPressed: isLoading ? () => _chat.cancelRequest() : _onSend,
-              icon: Icon(isLoading ? Icons.stop : Icons.arrow_upward, size: 16),
-              style: IconButton.styleFrom(
-                backgroundColor: isLoading ? p.danger : p.accent,
-                foregroundColor: p.onAccent,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
+                const SizedBox(width: 6),
+                IconButton(
+                  onPressed: isLoading ? () => _chat.cancelRequest() : _onSend,
+                  icon: Icon(
+                    isLoading ? Icons.stop : Icons.arrow_upward,
+                    size: 16,
+                  ),
+                  style: IconButton.styleFrom(
+                    backgroundColor: isLoading ? p.danger : p.accent,
+                    foregroundColor: p.onAccent,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    minimumSize: const Size(32, 32),
+                  ),
                 ),
-                minimumSize: const Size(32, 32),
-              ),
+              ],
             ),
           ],
         ),
       ),
     );
+  }
+
+  /// 输入框上方的上下文占用 / 缓存命中条。
+  ///
+  /// 数值来自 API usage；还没拿到时显示发送前估算的占用。DSH 式压缩发生时
+  /// 会提示压缩了多少条历史。
+  Widget _buildUsageBar(
+    BuildContext context,
+    ({int tokens, int window, int? cache, int compacted, bool compacting})
+    usage,
+    bool showCacheHit,
+  ) {
+    if (usage.tokens <= 0 && usage.window <= 0 && usage.compacted == 0) {
+      return const SizedBox.shrink();
+    }
+    final p = context.palette;
+    final window = usage.window > 0
+        ? usage.window
+        : ChatContextBudget.defaultWindow;
+    final percent = window > 0
+        ? (usage.tokens * 100 / window).clamp(0.0, 100.0)
+        : 0.0;
+    final percentText = percent > 0 && percent < 10
+        ? percent.toStringAsFixed(1)
+        : percent.round().toString();
+    final cache = usage.cache;
+
+    // 统一中性色：上下文 / 缓存只做信息展示，不用颜色区分高低。
+    final neutralForeground = p.textSecondary;
+    final neutralBackground = p.surfaceMuted;
+
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOut,
+      alignment: Alignment.topCenter,
+      child: _usageBarCollapsed
+          ? Padding(
+              padding: const EdgeInsets.fromLTRB(4, 0, 4, 2),
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: _usageBarToggle(collapsed: true),
+              ),
+            )
+          : Padding(
+              padding: const EdgeInsets.fromLTRB(4, 0, 4, 6),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      _usagePill(
+                        context,
+                        key: const ValueKey('chat_usage_context'),
+                        icon: Icons.data_usage_rounded,
+                        label: '上下文',
+                        value: '$percentText%',
+                        foreground: neutralForeground,
+                        background: neutralBackground,
+                      ),
+                      if (showCacheHit) ...[
+                        const SizedBox(width: 6),
+                        _usagePill(
+                          context,
+                          key: const ValueKey('chat_usage_cache'),
+                          icon: Icons.bolt_rounded,
+                          label: '缓存',
+                          value: cache == null ? '—' : '$cache%',
+                          foreground: neutralForeground,
+                          background: neutralBackground,
+                        ),
+                      ],
+                      if (usage.compacting) ...[
+                        const SizedBox(width: 6),
+                        _usagePill(
+                          context,
+                          leading: SizedBox(
+                            width: 10,
+                            height: 10,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 1.6,
+                              color: p.textTertiary,
+                            ),
+                          ),
+                          label: '压缩中',
+                          value: '',
+                          foreground: neutralForeground,
+                          background: neutralBackground,
+                        ),
+                      ] else if (usage.compacted > 0) ...[
+                        const SizedBox(width: 6),
+                        _usagePill(
+                          context,
+                          icon: Icons.compress,
+                          label: '已压缩',
+                          value: '${usage.compacted} 条',
+                          foreground: neutralForeground,
+                          background: neutralBackground,
+                        ),
+                      ],
+                      const Spacer(),
+                      if (usage.tokens > 0)
+                        Flexible(
+                          child: Text(
+                            '${_formatTokenCount(usage.tokens)} / ${_formatTokenCount(window)}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 9.5,
+                              color: p.textTertiary,
+                              height: 1.2,
+                              fontFeatures: const [
+                                FontFeature.tabularFigures(),
+                              ],
+                            ),
+                          ),
+                        ),
+                      const SizedBox(width: 2),
+                      _usageBarToggle(collapsed: false),
+                    ],
+                  ),
+                  const SizedBox(height: 5),
+                  // 细进度条：只表达占用比例，同样保持中性色
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(2),
+                    child: LinearProgressIndicator(
+                      value: percent / 100,
+                      minHeight: 3,
+                      backgroundColor: p.border,
+                      color: p.textTertiary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+    );
+  }
+
+  /// 用量条右端的收起 / 展开按钮。
+  Widget _usageBarToggle({required bool collapsed}) {
+    final p = context.palette;
+    return Semantics(
+      button: true,
+      label: collapsed ? '展开上下文与缓存' : '收起上下文与缓存',
+      child: InkResponse(
+        key: const ValueKey('chat_usage_toggle'),
+        onTap: () => setState(() => _usageBarCollapsed = !_usageBarCollapsed),
+        radius: 14,
+        child: Padding(
+          padding: const EdgeInsets.all(2),
+          child: Icon(
+            collapsed
+                ? Icons.keyboard_arrow_up_rounded
+                : Icons.keyboard_arrow_down_rounded,
+            size: 18,
+            color: p.textTertiary,
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 用量条上的小胶囊：图标 + 标签 + 数值，全部使用中性色。
+  Widget _usagePill(
+    BuildContext context, {
+    Key? key,
+    IconData? icon,
+    Widget? leading,
+    required String label,
+    required String value,
+    required Color foreground,
+    required Color background,
+  }) {
+    return Container(
+      key: key,
+      height: 22,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(11),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (leading != null)
+            leading
+          else if (icon != null)
+            Icon(icon, size: 12, color: foreground),
+          if (leading != null || icon != null) const SizedBox(width: 4),
+          Text(
+            label,
+            style: TextStyle(fontSize: 10, color: foreground, height: 1.1),
+          ),
+          if (value.isNotEmpty) ...[
+            const SizedBox(width: 3),
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: foreground,
+                height: 1.1,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  static String _formatTokenCount(int value) {
+    if (value >= 1000000) {
+      return '${(value / 1000000).toStringAsFixed(1)}M';
+    }
+    if (value >= 1000) {
+      final k = value / 1000;
+      return '${k >= 100 ? k.round() : k.toStringAsFixed(1)}k';
+    }
+    return '$value';
   }
 }
 
@@ -796,12 +1253,11 @@ class _StreamingBubble extends ConsumerWidget {
       padding: const EdgeInsets.only(bottom: 12),
       child: Align(
         alignment: Alignment.centerLeft,
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            maxWidth: MediaQuery.widthOf(context) * 0.8,
-          ),
+        // 助手输出占满列表可用宽度（列表左右各有 12dp 内边距）。
+        child: SizedBox(
+          width: double.infinity,
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               // 流式思考内容
               if (chat.streamingThinking.isNotEmpty)
@@ -821,14 +1277,7 @@ class _StreamingBubble extends ConsumerWidget {
                       bottomRight: Radius.circular(12),
                     ),
                   ),
-                  child: SelectableText(
-                    stripMarkdownForChat(chat.phase1Text),
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: p.bubbleAssistantText,
-                      height: 1.5,
-                    ),
-                  ),
+                  child: ChatMarkdown(chat.phase1Text),
                 ),
               // Phase 2 正文（流式展示，含 Phase 1 前缀）
               if (phase2Visible) ...[
@@ -847,17 +1296,10 @@ class _StreamingBubble extends ConsumerWidget {
                       bottomRight: Radius.circular(12),
                     ),
                   ),
-                  child: SelectableText(
-                    stripMarkdownForChat(
-                      hasPhase1
-                          ? '${chat.phase1Text}\n\n${chat.streamingText}'
-                          : chat.streamingText,
-                    ),
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: p.bubbleAssistantText,
-                      height: 1.5,
-                    ),
+                  child: ChatMarkdown(
+                    hasPhase1
+                        ? '${chat.phase1Text}\n\n${chat.streamingText}'
+                        : chat.streamingText,
                   ),
                 ),
               ],
@@ -865,38 +1307,34 @@ class _StreamingBubble extends ConsumerWidget {
               if (chat.streamingText.isEmpty &&
                   chat.streamingThinking.isEmpty &&
                   !hasPhase1)
-                Padding(
-                  padding: EdgeInsets.all(12),
-                  child: SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: p.accent,
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Padding(
+                    padding: EdgeInsets.all(12),
+                    child: SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: p.accent,
+                      ),
                     ),
                   ),
                 ),
               // Phase 1 加载中（搜索进行中）
               if (phase1Visible)
-                Padding(
-                  padding: EdgeInsets.only(top: 8),
-                  child: SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: p.accent,
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Padding(
+                    padding: EdgeInsets.only(top: 8),
+                    child: SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: p.accent,
+                      ),
                     ),
-                  ),
-                ),
-              // 流式搜索结果（保持在最底部，与 _MessageBubble 顺序一致）
-              if (chat.streamingSearchResults != null &&
-                  chat.streamingSearchResults!.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: SearchSourcesCard(
-                    results: chat.streamingSearchResults!,
-                    collapsible: false,
                   ),
                 ),
             ],
@@ -929,10 +1367,7 @@ class _StreamingBubble extends ConsumerWidget {
             ],
           ),
           const SizedBox(height: 6),
-          SelectableText(
-            stripMarkdownForChat(thinking),
-            style: TextStyle(fontSize: 11, color: p.textSecondary),
-          ),
+          ChatMarkdown(thinking, fontSize: 11, textColor: p.textSecondary),
         ],
       ),
     );

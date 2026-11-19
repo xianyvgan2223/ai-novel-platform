@@ -14,24 +14,30 @@ const outlines = ref<Row[]>([]);
 const chapters = ref<Row[]>([]);
 const loading = ref(false);
 
-/** 从首页带过来的意图：edit / convert / chapters，决定点卡片时进入哪个页面 */
+/** 从首页带过来的意图：edit / convert / chapters / view / read，决定点卡片时进入哪个页面 */
 const intent = computed(() => String(route.query.intent ?? 'edit'));
 
 const pageTitle = computed(() => {
   if (intent.value === 'convert') return '小事件详写 · 选择作品';
   if (intent.value === 'chapters') return '小事件写作 · 选择作品';
+  if (intent.value === 'view') return '查看已有大纲 · 选择作品';
+  if (intent.value === 'read') return '查看已有正文 · 选择作品';
   return '大纲编辑 · 选择作品';
 });
 
 const pageDesc = computed(() => {
   if (intent.value === 'convert') return '选一部作品，把大纲拆成小事件并逐个生成正文。';
   if (intent.value === 'chapters') return '选一部作品，进入小事件列表开始写正文。';
+  if (intent.value === 'view') return '选一部作品，只读查看大纲正文与事件结构。';
+  if (intent.value === 'read') return '选一部作品，按小事件翻看已写好的正文。';
   return '选一部作品，编辑大纲正文与事件结构。';
 });
 
 const entryLabel = computed(() => {
   if (intent.value === 'convert') return '进入小事件详写';
   if (intent.value === 'chapters') return '进入小事件列表';
+  if (intent.value === 'view') return '查看大纲';
+  if (intent.value === 'read') return '查看正文';
   return '进入大纲编辑';
 });
 
@@ -55,7 +61,7 @@ function stats(id: number) {
   return statsOf(chaptersOf(id));
 }
 
-function open(id: number, action: 'edit' | 'convert' | 'chapters') {
+function open(id: number, action: 'edit' | 'convert' | 'chapters' | 'view' | 'read') {
   router.push(`/writing/outline/${id}/${action}`);
 }
 
@@ -64,6 +70,10 @@ function primary(id: number) {
     open(id, 'convert');
   } else if (intent.value === 'chapters') {
     open(id, 'chapters');
+  } else if (intent.value === 'view') {
+    open(id, 'view');
+  } else if (intent.value === 'read') {
+    open(id, 'read');
   } else {
     open(id, 'edit');
   }

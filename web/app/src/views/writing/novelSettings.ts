@@ -11,6 +11,8 @@ export const MODEL_OPTIONS = [
 export const DEFAULT_OUTLINE_PROMPT = '你是一个专业的小说大纲生成助手，请用纯文本格式输出。';
 export const DEFAULT_CHAPTER_PROMPT = '你是一个专业的小说作家。';
 export const DEFAULT_BATTLE_PROMPT = '你是一位专业的战斗场景描写作家。请根据用户提供的战斗要素（双方人物技能、战斗场景氛围、战斗结果），生成一段精彩具体的战斗场景描写。\n\n要求：\n1. 紧扣用户提供的要素，不要偏离设定\n2. 描写要生动具体，包含动作、环境、心理等细节\n3. 合理运用打斗过程的起承转合\n4. 战斗结果必须与用户指定的结果一致\n5. 用中文创作，使用纯文本格式\n6. 篇幅在 1000-3000 字之间';
+/** 写作工具的补充提示词默认留空：具体规则内置在服务端 */
+export const DEFAULT_TOOLS_PROMPT = '';
 
 export interface OutlineAiSettings {
   id: number | null;
@@ -46,6 +48,16 @@ export interface BattleAiSettings {
   enableThinking?: boolean;
 }
 
+export interface ToolsAiSettings {
+  id: number | null;
+  model: string;
+  temperature: number;
+  maxTokens: number;
+  /** 追加在内置规则后面的补充提示词 */
+  systemPrompt: string;
+  enableThinking: boolean;
+}
+
 export const outlineSettings = reactive<OutlineAiSettings>({
   id: null,
   model: 'deepseek-flash',
@@ -76,6 +88,15 @@ export const battleSettings = reactive<BattleAiSettings>({
   temperature: 0.8,
   maxTokens: 4096,
   systemPrompt: DEFAULT_BATTLE_PROMPT,
+});
+
+export const toolsSettings = reactive<ToolsAiSettings>({
+  id: null,
+  model: 'deepseek-flash',
+  temperature: 0.9,
+  maxTokens: 4096,
+  systemPrompt: DEFAULT_TOOLS_PROMPT,
+  enableThinking: true,
 });
 
 function num(value: unknown, fallback: number): number {
@@ -123,16 +144,28 @@ function applyBattle(row: Row | undefined) {
   battleSettings.systemPrompt = String(row.system_prompt || DEFAULT_BATTLE_PROMPT);
 }
 
+function applyTools(row: Row | undefined) {
+  if (!row) return;
+  toolsSettings.id = Number(row.id);
+  toolsSettings.model = String(row.model || 'deepseek-flash');
+  toolsSettings.temperature = num(row.temperature, 0.9);
+  toolsSettings.maxTokens = num(row.max_tokens, 4096);
+  toolsSettings.systemPrompt = String(row.system_prompt ?? DEFAULT_TOOLS_PROMPT);
+  toolsSettings.enableThinking = bool(row.enable_thinking, true);
+}
+
 export async function loadAiSettings(): Promise<void> {
   try {
-    const [outline, chapter, battle] = await Promise.all([
+    const [outline, chapter, battle, tools] = await Promise.all([
       api.listRows('deepseek', 'outline_settings', { page: 1, pageSize: 1 }),
       api.listRows('deepseek', 'chapter_settings', { page: 1, pageSize: 1 }),
       api.listRows('deepseek', 'battle_settings', { page: 1, pageSize: 1 }),
+      api.listRows('deepseek', 'writing_tools_settings', { page: 1, pageSize: 1 }),
     ]);
     applyOutline(outline.data[0]);
     applyChapter(chapter.data[0]);
     applyBattle(battle.data[0]);
+    applyTools(tools.data[0]);
   } catch {
     // 首次使用还没有设置行时保持默认值即可
   }
@@ -193,6 +226,22 @@ export async function saveBattleSettings(): Promise<void> {
   }
 }
 
+export async function saveToolsSettings(): Promise<void> {
+  const payload = {
+    model: toolsSettings.model,
+    temperature: toolsSettings.temperature,
+    max_tokens: toolsSettings.maxTokens,
+    system_prompt: toolsSettings.systemPrompt,
+    enable_thinking: toolsSettings.enableThinking ? 1 : 0,
+  };
+  if (toolsSettings.id) {
+    await api.updateRow('deepseek', 'writing_tools_settings', toolsSettings.id, payload);
+  } else {
+    const created = await api.createRow('deepseek', 'writing_tools_settings', payload);
+    toolsSettings.id = Number(created.pk);
+  }
+}
+
 /** 传给后端的单次调用设置 */
 export function outlineRequestSettings() {
   return {
@@ -218,5 +267,15 @@ export function battleRequestSettings() {
     temperature: battleSettings.temperature,
     maxTokens: battleSettings.maxTokens,
     systemPrompt: battleSettings.systemPrompt,
+  };
+}
+
+export function toolsRequestSettings() {
+  return {
+    model: toolsSettings.model,
+    temperature: toolsSettings.temperature,
+    maxTokens: toolsSettings.maxTokens,
+    systemPrompt: toolsSettings.systemPrompt,
+    enableThinking: toolsSettings.enableThinking,
   };
 }

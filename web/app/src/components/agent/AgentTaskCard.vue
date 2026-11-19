@@ -4,10 +4,11 @@
 -->
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { CircleCheck, CircleClose, Loading, Minus } from '@element-plus/icons-vue';
+import { CircleCheck, CircleClose, Close, Loading, Minus } from '@element-plus/icons-vue';
 import type { AgentTask } from '@/api/agent';
 
 const props = defineProps<{ task: AgentTask }>();
+const emit = defineEmits<{ (event: 'close'): void }>();
 
 const expanded = ref(true);
 
@@ -19,12 +20,17 @@ const total = computed(() => props.task.steps.length);
 
 <template>
   <div class="task-card" :class="{ done: task.status === 'done' }">
-    <button class="task-head" type="button" @click="expanded = !expanded">
-      <span class="task-dot" :class="{ running: task.status !== 'done' }" />
-      <span class="task-title">{{ task.title }}</span>
-      <span class="task-progress">{{ finished }}/{{ total }}</span>
-      <span class="task-caret">{{ expanded ? '收起' : '展开' }}</span>
-    </button>
+    <div class="task-head">
+      <button class="task-toggle" type="button" @click="expanded = !expanded">
+        <span class="task-dot" :class="{ running: task.status !== 'done' }" />
+        <span class="task-title">{{ task.title }}</span>
+        <span class="task-progress">{{ finished }}/{{ total }}</span>
+        <span class="task-caret">{{ expanded ? '收起' : '展开' }}</span>
+      </button>
+      <button class="task-close" type="button" title="关闭任务栏" @click="emit('close')">
+        <el-icon><Close /></el-icon>
+      </button>
+    </div>
 
     <ol v-if="expanded" class="task-steps">
       <li v-for="(step, index) in task.steps" :key="index" :class="step.status">
@@ -58,14 +64,42 @@ const total = computed(() => props.task.steps.length);
 .task-head {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 4px;
   width: 100%;
-  padding: 7px 10px;
+  padding: 4px 6px 4px 10px;
+  color: var(--ink-1);
+}
+
+.task-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1;
+  min-width: 0;
+  padding: 3px 0;
   border: none;
   background: transparent;
   cursor: pointer;
   text-align: left;
   color: var(--ink-1);
+}
+
+.task-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink-4);
+  cursor: pointer;
+}
+
+.task-close:hover {
+  background: var(--bg-card);
+  color: var(--ink-2);
 }
 
 .task-dot {
@@ -77,7 +111,7 @@ const total = computed(() => props.task.steps.length);
 }
 
 .task-dot.running {
-  background: var(--warning);
+  background: var(--warn);
   animation: task-pulse 1.2s ease-in-out infinite;
 }
 
@@ -144,7 +178,7 @@ const total = computed(() => props.task.steps.length);
 }
 
 .task-steps li.running .step-icon {
-  color: var(--warning);
+  color: var(--warn);
 }
 
 .task-steps li.done .step-icon {

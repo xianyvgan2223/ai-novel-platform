@@ -975,7 +975,7 @@ class _SettingsSwitchRowState extends State<SettingsSwitchRow> {
 
 /// 滑杆行（新）：上排「标签 + 右侧主色数值」，下排整行宽 Slider。
 ///
-/// 用于 temperature / top_p / 上下文轮数这类"连续数值"参数：
+/// 用于 temperature / top_p 这类"连续数值"参数（上下文轮数已改为按窗口自动压缩，不再有该设置）：
 /// 滑杆比输入框更直观，数值实时显示在右上角（主色，和选中值同一层级）。
 /// [valueLabel] 可以自定义数值格式；不传时按步长自动取整或保留 1~2 位小数。
 class SettingsSliderRow extends StatelessWidget {

@@ -23,14 +23,16 @@ public class AgentToolCatalog {
     }
 
     public AgentToolCatalog(DataTools dataTools, RagTools ragTools, WritingTools writingTools,
-                           TaskTools taskTools, AskTools askTools, WebSearchTools webSearchTools) {
+                           TaskTools taskTools, AskTools askTools, WebSearchTools webSearchTools,
+                           DownloadTools downloadTools) {
         this.beans = List.of(
                 new ToolBean(dataTools, DataTools.class),
                 new ToolBean(ragTools, RagTools.class),
                 new ToolBean(writingTools, WritingTools.class),
                 new ToolBean(taskTools, TaskTools.class),
                 new ToolBean(askTools, AskTools.class),
-                new ToolBean(webSearchTools, WebSearchTools.class)
+                new ToolBean(webSearchTools, WebSearchTools.class),
+                new ToolBean(downloadTools, DownloadTools.class)
         );
     }
 

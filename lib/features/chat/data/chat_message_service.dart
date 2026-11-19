@@ -19,6 +19,9 @@ class ChatMessageService {
       'content': message.content,
       'thinking_text': message.thinkingText,
       'timestamp': message.timestamp,
+      'prompt_tokens': message.promptTokens,
+      'cached_tokens': message.cachedTokens,
+      'completion_tokens': message.completionTokens,
     };
     if (message.searchResults != null) {
       row['search_results'] = jsonEncode(message.searchResults);
@@ -100,6 +103,9 @@ class ChatMessageService {
       thinkingText: row['thinking_text'] as String?,
       timestamp: row['timestamp'] as String? ?? '',
       searchResults: searchResults,
+      promptTokens: row['prompt_tokens'] as int? ?? 0,
+      cachedTokens: row['cached_tokens'] as int? ?? 0,
+      completionTokens: row['completion_tokens'] as int? ?? 0,
     );
   }
 }

@@ -2,11 +2,16 @@ package com.deepseekapp.webserver.feature.bili.api;
 
 import com.deepseekapp.webserver.feature.bili.service.BiliSettingsService;
 import com.deepseekapp.webserver.feature.bili.service.BiliTranscriptService;
+import com.deepseekapp.webserver.feature.bili.service.BiliTranscriptStore;
 import com.deepseekapp.webserver.util.Json;
 import com.deepseekapp.webserver.web.Api;
 import com.deepseekapp.webserver.web.ApiException;
 import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -30,12 +35,17 @@ import java.util.Map;
 @RequestMapping("/api/bili")
 public class BiliController {
 
+    private static final Logger log = LoggerFactory.getLogger(BiliController.class);
+
     private final BiliTranscriptService service;
     private final BiliSettingsService settingsService;
+    private final BiliTranscriptStore transcriptStore;
 
-    public BiliController(BiliTranscriptService service, BiliSettingsService settingsService) {
+    public BiliController(BiliTranscriptService service, BiliSettingsService settingsService,
+                          BiliTranscriptStore transcriptStore) {
         this.service = service;
         this.settingsService = settingsService;
+        this.transcriptStore = transcriptStore;
     }
 
     @PostMapping("/resolve")
@@ -125,6 +135,7 @@ public class BiliController {
             done.put("source", stats.get("source"));
             done.put("chars", stats.get("chars"));
             done.put("elapsedMs", System.currentTimeMillis() - startedAt);
+            done.put("transcriptId", saveTranscript(payload, stats));
             writeEvent(out, done);
         } catch (IOException e) {
             // 浏览器中途断开：停止上游，不再写任何内容
@@ -143,6 +154,61 @@ public class BiliController {
         Map<String, Object> payload = body == null ? Map.of() : body;
         String sessdata = String.valueOf(payload.getOrDefault("sessdata", "")).trim();
         return Api.ok(settingsService.save(sessdata));
+    }
+
+    /* ── 提取记录（每次完整提取自动保存） ── */
+
+    @GetMapping("/transcripts")
+    public Map<String, Object> listTranscripts() {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("transcripts", transcriptStore.list());
+        return Api.ok(data);
+    }
+
+    @GetMapping("/transcripts/{id}")
+    public Map<String, Object> transcript(@PathVariable("id") String id) {
+        return Api.ok(transcriptStore.get(id));
+    }
+
+    @DeleteMapping("/transcripts/{id}")
+    public Map<String, Object> deleteTranscript(@PathVariable("id") String id) {
+        boolean deleted = transcriptStore.delete(id);
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("id", id);
+        data.put("deleted", deleted);
+        return Api.ok(data);
+    }
+
+    /**
+     * 把这次提取的文字稿落盘。存储失败不影响已经流式返回的文字，
+     * 只记录日志（比如磁盘满）。
+     */
+    private String saveTranscript(Map<String, Object> payload, Map<String, Object> stats) {
+        String text = strOf(stats.get("text"));
+        if (text.isBlank()) {
+            return "";
+        }
+        Map<String, Object> meta = new LinkedHashMap<>();
+        meta.put("title", strOf(payload.get("title")));
+        meta.put("owner", strOf(payload.get("owner")));
+        meta.put("bvid", strOf(payload.get("bvid")));
+        meta.put("aid", longOf(payload.get("aid")));
+        meta.put("cid", longOf(payload.get("cid")));
+        meta.put("page", longOf(payload.get("page")));
+        meta.put("part", strOf(payload.get("part")));
+        meta.put("duration", longOf(payload.get("duration")));
+        meta.put("source", strOf(stats.get("source")));
+        try {
+            Map<String, Object> saved = transcriptStore.save(meta, text);
+            return String.valueOf(saved.getOrDefault("id", ""));
+        } catch (Exception e) {
+            log.warn("保存B站提取记录失败：{}", e.getMessage());
+            return "";
+        }
+    }
+
+    private static String strOf(Object value) {
+        return value == null ? "" : String.valueOf(value).trim();
     }
 
     private static long longOf(Object value) {

@@ -55,11 +55,15 @@ class BattleSetting {
   final String model;
   final String systemPrompt;
 
+  /// 是否启用深度思考（默认开启；关闭时请求显式带 thinking=disabled）
+  final bool enableThinking;
+
   const BattleSetting({
     this.temperature = 0.8,
     this.maxTokens = 4096,
     this.model = 'deepseek-flash',
     this.systemPrompt = '',
+    this.enableThinking = true,
   });
 
   Map<String, dynamic> toMap() => {
@@ -67,6 +71,7 @@ class BattleSetting {
     'max_tokens': maxTokens,
     'model': model,
     'system_prompt': systemPrompt,
+    'enable_thinking': enableThinking ? 1 : 0,
   };
 
   factory BattleSetting.fromMap(Map<String, dynamic> map) => BattleSetting(
@@ -74,6 +79,9 @@ class BattleSetting {
     maxTokens: map['max_tokens'] as int? ?? 4096,
     model: map['model'] as String? ?? 'deepseek-flash',
     systemPrompt: map['system_prompt'] as String? ?? '',
+    // 旧库没有该列时默认开启，与章节写作设置保持一致
+    enableThinking:
+        map['enable_thinking'] == null || (map['enable_thinking'] as int?) == 1,
   );
 
   BattleSetting copyWith({
@@ -81,10 +89,12 @@ class BattleSetting {
     int? maxTokens,
     String? model,
     String? systemPrompt,
+    bool? enableThinking,
   }) => BattleSetting(
     temperature: temperature ?? this.temperature,
     maxTokens: maxTokens ?? this.maxTokens,
     model: model ?? this.model,
     systemPrompt: systemPrompt ?? this.systemPrompt,
+    enableThinking: enableThinking ?? this.enableThinking,
   );
 }

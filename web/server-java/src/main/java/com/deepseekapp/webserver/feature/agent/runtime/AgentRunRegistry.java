@@ -1,5 +1,7 @@
 package com.deepseekapp.webserver.feature.agent.runtime;
 
+import com.deepseekapp.webserver.config.AppProperties;
+import com.deepseekapp.webserver.web.ApiException;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -8,12 +10,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 运行注册表：runId → AgentRun。
  *
  * <p>运行结束后不立即移除，保留一段时间供重连客户端重放事件；
- * 真正过期（默认 10 分钟）或超过容量上限时才清理。</p>
+ * 定时清理已过期/已完成的运行。容量满时拒绝新运行，**不再取消最老的活跃运行**
+ * （那会让用户正在进行的对话被静默杀掉）。</p>
  */
 @Component
 public class AgentRunRegistry {
@@ -23,15 +29,40 @@ public class AgentRunRegistry {
 
     private final Map<String, AgentRun> runs = new ConcurrentHashMap<>();
     private final AgentRunListener listener;
+    private final AppProperties props;
+    private final ScheduledExecutorService cleaner = Executors.newSingleThreadScheduledExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "agent-run-cleaner");
+        thread.setDaemon(true);
+        return thread;
+    });
 
-    public AgentRunRegistry(AgentRunListener listener) {
+    public AgentRunRegistry(AgentRunListener listener, AppProperties props) {
         this.listener = listener;
+        this.props = props;
+        // 之前只在 create 时清理，没有新运行时完成的运行会一直占内存
+        cleaner.scheduleWithFixedDelay(this::evictFinished, 60, 60, TimeUnit.SECONDS);
     }
 
+    /**
+     * 创建运行。
+     *
+     * <p>同一设备同一会话同时只允许一个运行：两个标签页各发一条会各自读同一份 history，
+     * 两条 assistant 消息交错落库，历史从此错乱。</p>
+     */
     public AgentRun create(String deviceId, long sessionId) {
         evict();
+        if (!activeFor(deviceId, sessionId).isEmpty()) {
+            throw new ApiException(409, "这个会话还有一条回复正在生成，请等它结束或先停止");
+        }
+        if (runs.size() >= MAX_RUNS) {
+            evictFinished();
+        }
+        if (runs.size() >= MAX_RUNS) {
+            throw new ApiException(429, "服务端正在运行的对话较多，请稍后再试");
+        }
         String id = UUID.randomUUID().toString().replace("-", "");
-        AgentRun run = new AgentRun(id, deviceId, sessionId, listener);
+        AgentRun run = new AgentRun(id, deviceId, sessionId, listener,
+                props.getAgentDetachGraceSeconds(), props.getAgentMaxEvents());
         runs.put(id, run);
         if (listener != null) {
             listener.onStart(run);
@@ -80,20 +111,13 @@ public class AgentRunRegistry {
 
     private void evict() {
         runs.entrySet().removeIf(entry -> entry.getValue().expired(KEEP_FINISHED_MS));
-        if (runs.size() < MAX_RUNS) {
-            return;
-        }
-        runs.values().stream()
-                .filter(run -> run.finished())
-                .min(Comparator.comparingLong(AgentRun::startedAt))
-                .ifPresent(run -> runs.remove(run.id()));
-        if (runs.size() >= MAX_RUNS) {
-            runs.values().stream()
-                    .min(Comparator.comparingLong(AgentRun::startedAt))
-                    .ifPresent(oldest -> {
-                        oldest.cancel();
-                        runs.remove(oldest.id());
-                    });
+    }
+
+    private void evictFinished() {
+        try {
+            evict();
+        } catch (RuntimeException ignored) {
+            // 清理线程不能因为单次异常退出
         }
     }
 }

@@ -3,6 +3,7 @@
 /// 基于 ChangeNotifier + Riverpod 暴露全局状态
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/config/user_setting.dart';
 import '../../../core/config/user_setting_service.dart';
 
@@ -29,13 +30,15 @@ class SettingController extends ChangeNotifier {
   String get userId => _setting.userId;
   bool get logprobs => _setting.logprobs;
   int get topLogprobs => _setting.topLogprobs;
-  int get contextRounds => _setting.contextRounds;
   bool get webSearch => _setting.webSearch;
   String get baiduApiKey => _setting.baiduApiKey;
   int get searchCount => _setting.searchCount;
   String get searchFreshness => _setting.searchFreshness;
   String get searchEngine => _setting.searchEngine;
   bool get searchNeedContent => _setting.searchNeedContent;
+
+  /// 聊天页是否显示缓存命中率（默认开启，见 [UserSetting.showCacheHit]）
+  bool get showCacheHit => _setting.showCacheHit;
 
   /// 正在进行的加载（同一时刻只查一次库）
   Future<void>? _loading;
@@ -165,11 +168,6 @@ class SettingController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void setContextRounds(int v) {
-    _setting = _setting.copyWith(contextRounds: v);
-    notifyListeners();
-  }
-
   /// 历史遗留入口：联网开关现在由 [setSearchEngine] 统一管理
   /// （search_engine 是唯一事实来源）。这里转调一次，避免两个开关状态脱节。
   void setWebSearch(bool v) {
@@ -199,6 +197,12 @@ class SettingController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 是否在聊天页显示缓存命中率（纯展示开关，不影响请求）
+  void setShowCacheHit(bool v) {
+    _setting = _setting.copyWith(showCacheHit: v);
+    notifyListeners();
+  }
+
   void setSearchEngine(String v) {
     // search_engine 是联网搜索的「唯一事实来源」，旧的 web_search 布尔量
     // 只是历史遗留：这里同步写一次，保证两处判断永远一致
@@ -209,7 +213,12 @@ class SettingController extends ChangeNotifier {
     );
     notifyListeners();
   }
-
-  /// context_rounds 静态裁剪：1 ~ 100
-  static int clampContextRounds(int v) => v.clamp(1, 100);
 }
+
+/// SettingController Riverpod Provider（全局单例）
+///
+/// 放在控制器旁边而不是设置页里：聊天页、悬浮聊天面板等展示层都要读它，
+/// 不应该为了一个 Provider 去 import 整个设置页。
+final settingProvider = ChangeNotifierProvider<SettingController>(
+  (ref) => SettingController(),
+);

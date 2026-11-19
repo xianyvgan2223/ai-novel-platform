@@ -22,6 +22,28 @@ public class ChapterGenerationService {
     private static final int OUTLINE_EXCERPT_LIMIT = 6000;
     private static final int PREV_CONTENT_LIMIT = 1200;
 
+    /**
+     * 静态写作规则放系统提示：同一部作品连写多章时，这段前缀可以整段命中缓存；
+     * 具体设定、大纲、事件概要与前文都放在用户消息里，按「稳定的书 → 变化的事件」排列。
+     */
+    private static final String SYSTEM = """
+            你是一位小说作家。请根据用户消息里的大纲设定，完整写出指定事件的详细正文。
+
+            要求：
+            - 本小事件开头必须承接【前文内容】结尾的场景、时间与人物状态，禁止突兀跳转；如需切换时间/地点，先用一小段过渡衔接
+            - 本小事件内容必须严格围绕【当前小事件】与【事件概要】展开，禁止偏离大纲或编造大纲中不存在的情节
+            - 以自然流畅的叙述方式展开，包含场景描写、对话、心理活动
+            - 语言平实克制，贴近通俗小说文风；全篇比喻、排比等修辞手法不超过 1-2 处，禁止堆砌辞藻、空泛抒情
+            - 用具体的动作、环境细节和人物对话推进情节，不要用比喻或抽象修辞来渲染气氛
+            - 目标字数见用户消息末尾的【字数要求】
+            - 结尾自然衔接【后续事件】中的下一个事件（若存在）
+            - 若当前事件涉及【伏笔清单】中的伏笔，按其计划埋设或回收；清单未涉及的不要强行引入
+            - 角色状态、位置与悬念需与【全局剧情状态】保持连续一致
+            - 人物行为、言谈必须符合【人物档案】中设定的性格与能力，禁止擅自改变角色性格
+            - 只写当前事件的内容，不要超出范围
+            - 直接输出正文，不要添加注释说明
+            """;
+
     private final NovelAiService ai;
     private final WritingService writingService;
 
@@ -82,29 +104,12 @@ public class ChapterGenerationService {
             user.append("\n【全局剧情状态】\n").append(storyState).append('\n');
         }
 
-        user.append("""
-
-                要求：
-                - 本小事件开头必须承接【前文内容】结尾的场景、时间与人物状态，禁止突兀跳转；如需切换时间/地点，先用一小段过渡衔接
-                - 本小事件内容必须严格围绕【当前小事件】与【事件概要】展开，禁止偏离大纲或编造大纲中不存在的情节
-                - 以自然流畅的叙述方式展开，包含场景描写、对话、心理活动
-                - 语言平实克制，贴近通俗小说文风；全篇比喻、排比等修辞手法不超过 1-2 处，禁止堆砌辞藻、空泛抒情
-                - 用具体的动作、环境细节和人物对话推进情节，不要用比喻或抽象修辞来渲染气氛
-                - 目标字数：%d~%d 字
-                - 结尾自然衔接【后续事件】中的下一个事件（若存在）
-                - 若当前事件涉及【伏笔清单】中的伏笔，按其计划埋设或回收；清单未涉及的不要强行引入
-                - 角色状态、位置与悬念需与【全局剧情状态】保持连续一致
-                - 人物行为、言谈必须符合【人物档案】中设定的性格与能力，禁止擅自改变角色性格
-                - 只写当前事件的内容，不要超出范围
-                - 直接输出正文，不要添加注释说明
-                """.formatted(minWords, maxWords));
-
+        user.append("\n【字数要求】").append(minWords).append('~').append(maxWords).append(" 字\n");
         if (!extra.isBlank()) {
             user.append("额外要求：").append(extra).append('\n');
         }
 
-        String system = "你是一位小说作家。请根据以下大纲设定，完整写出指定事件的详细正文。";
-        for (String delta : ai.stream(system, user.toString(), AiSettings.from(body)).toIterable()) {
+        for (String delta : ai.stream(SYSTEM, user.toString(), AiSettings.from(body)).toIterable()) {
             sink.delta(delta);
         }
     }

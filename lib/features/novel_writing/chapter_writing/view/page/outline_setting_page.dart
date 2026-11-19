@@ -37,6 +37,9 @@ class _ChapterSettingPageState extends State<ChapterSettingPage> {
   int _maxTokens = 4096;
   String _model = 'deepseek-flash';
   bool _enableThinking = true;
+
+  /// 思考深度由大纲编辑的设置页维护；本页只负责保存时原样带回，避免被覆盖。
+  String _reasoningEffort = 'high';
   bool _enableStoryState = true;
 
   /// 章节字数范围：字数行由 kit 的 SettingsTextRow 自己持有输入框 controller，
@@ -66,6 +69,7 @@ class _ChapterSettingPageState extends State<ChapterSettingPage> {
         _maxTokens = setting.maxTokens;
         _model = setting.model;
         _chapterSystemCtrl.text = setting.chapterSystemPrompt;
+        _reasoningEffort = setting.reasoningEffort;
         _chapterMinText = '${setting.chapterMinWords}';
         _chapterMaxText = '${setting.chapterMaxWords}';
         _enableThinking = setting.enableThinking;
@@ -103,6 +107,7 @@ class _ChapterSettingPageState extends State<ChapterSettingPage> {
       model: _model,
       chapterSystemPrompt: _chapterSystemCtrl.text,
       enableThinking: _enableThinking,
+      reasoningEffort: _reasoningEffort,
       enableStoryState: _enableStoryState,
       chapterMinWords: minWords,
       chapterMaxWords: maxWords,

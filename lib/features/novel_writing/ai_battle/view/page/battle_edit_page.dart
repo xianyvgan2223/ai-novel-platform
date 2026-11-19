@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:deepseekapp/core/theme/app_palette.dart';
+import '../../../../../core/config/route_names.dart';
 import '../../controller/battle_controller.dart';
 import '../../model/battle_model.dart';
 import '../../model/db/battle_db_helper.dart';
+import 'battle_setting_page.dart';
 
 /// 战斗场景编辑页面 — 查看并修改已生成的内容
 class BattleEditPage extends StatefulWidget {
@@ -94,6 +96,24 @@ class _BattleEditPageState extends State<BattleEditPage> {
           onPressed: () => Navigator.of(context).pop(),
         ),
         actions: [
+          IconButton(
+            icon: Icon(
+              Icons.settings_outlined,
+              size: 20,
+              color: p.textSecondary,
+            ),
+            tooltip: '战斗设置',
+            onPressed: () async {
+              await Navigator.of(context).push(
+                MaterialPageRoute(
+                  // 命名路由：让全局悬浮球在战斗设置页隐藏
+                  settings: const RouteSettings(name: kBattleSettingsRouteName),
+                  builder: (_) => const BattleSettingPage(),
+                ),
+              );
+              if (mounted) setState(() {});
+            },
+          ),
           TextButton(
             onPressed: _loading ? null : _save,
             child: Text(

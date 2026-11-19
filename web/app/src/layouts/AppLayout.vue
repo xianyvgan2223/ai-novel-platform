@@ -1,8 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
+import type { Component } from 'vue';
 import { useRoute } from 'vue-router';
+import type { RouteLocationNormalizedLoaded } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { ChatDotRound, Collection, DataLine, Delete, Expand, Fold, Grid, Iphone, MagicStick, Monitor, Moon, Refresh, RefreshRight, Sunny, VideoPlay } from '@element-plus/icons-vue';
+import {
+  ChatDotRound, Collection, DataLine, Delete, Download, Expand, Fold, Grid, Iphone, MagicStick, Monitor, Moon,
+  Notebook, Refresh, RefreshRight, Sunny, VideoPlay, View,
+} from '@element-plus/icons-vue';
 import { api, formatTime } from '@/api';
 import { useServerStore } from '@/stores/server';
 import { useAgentStore } from '@/stores/agent';
@@ -254,21 +259,58 @@ onUnmounted(() => {
 const navItems = [
   { path: '/', label: '总览', icon: DataLine, match: (p: string) => p === '/' },
   { path: '/sessions', label: '对话会话', icon: ChatDotRound, match: (p: string) => p.startsWith('/sessions') },
-  { path: '/browse/deepseek/chat_sessions', label: '数据浏览', icon: Grid, match: (p: string) => p.startsWith('/browse') },
+  { path: '/browse', label: '数据浏览', icon: Grid, match: (p: string) => p.startsWith('/browse') },
   { path: '/sync', label: '同步与备份', icon: RefreshRight, match: (p: string) => p.startsWith('/sync') },
 ];
 
-const creativeItems = [
-  { path: '/writing', label: '写作', icon: MagicStick },
+/** 「查看已有大纲」：选作品页（intent=view）与具体作品的大纲查看页 */
+function isOutlineViewRoute(current: RouteLocationNormalizedLoaded): boolean {
+  return (current.path === '/writing/outlines' && String(current.query.intent ?? '') === 'view')
+    || /^\/writing\/outline\/\d+\/view$/.test(current.path);
+}
+
+/** 「查看已有正文」：选作品页（intent=read）与具体作品的正文查看页 */
+function isChapterReadRoute(current: RouteLocationNormalizedLoaded): boolean {
+  return (current.path === '/writing/outlines' && String(current.query.intent ?? '') === 'read')
+    || /^\/writing\/outline\/\d+\/read$/.test(current.path);
+}
+
+const creativeItems: {
+  path: string;
+  label: string;
+  icon: Component;
+  match: (current: RouteLocationNormalizedLoaded) => boolean;
+}[] = [
+  {
+    path: '/writing',
+    label: '写作',
+    icon: MagicStick,
+    match: (current) =>
+      current.path.startsWith('/writing') && !isOutlineViewRoute(current) && !isChapterReadRoute(current),
+  },
+  {
+    path: '/writing/outlines?intent=view',
+    label: '查看大纲',
+    icon: View,
+    match: isOutlineViewRoute,
+  },
+  {
+    path: '/writing/outlines?intent=read',
+    label: '查看正文',
+    icon: Notebook,
+    match: isChapterReadRoute,
+  },
 ];
 
 const toolItems = [
   { path: '/rag', label: '情节素材库', icon: Collection, match: (p: string) => p.startsWith('/rag') },
   { path: '/bili', label: 'B站转文字', icon: VideoPlay, match: (p: string) => p.startsWith('/bili') },
+  { path: '/downloads', label: '下载', icon: Download, match: (p: string) => p.startsWith('/downloads') },
 ];
 
 const activeMenu = computed(() => {
-  if (route.path.startsWith('/writing')) return '/writing';
+  const creative = creativeItems.find((item) => item.match(route));
+  if (creative) return creative.path;
   return [...toolItems, ...navItems].find((item) => item.match(route.path))?.path ?? '/';
 });
 const pageTitle = computed(() => (route.meta.title as string | undefined) ?? '总览');
@@ -499,7 +541,8 @@ onMounted(() => {
         />
         <router-view v-slot="{ Component }">
           <transition name="fade-slide" mode="out-in">
-            <component :is="Component" />
+            <!-- 换设备时整个页面重建：所有按 device 取数的页面都会重新 onMounted 加载，避免还显示上一台设备的数据 -->
+            <component :is="Component" :key="deviceEpoch" />
           </transition>
         </router-view>
       </main>

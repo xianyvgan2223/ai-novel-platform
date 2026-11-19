@@ -24,6 +24,37 @@ export interface AgentSession {
   messageCount: number;
   createdAt: number;
   updatedAt: number;
+  /** 上次请求的精确上下文占用（prompt_tokens） */
+  contextTokens?: number;
+  /** 上次请求命中的缓存 token 数 */
+  contextCachedTokens?: number;
+  /** 是否已有压缩摘要 */
+  hasSummary?: boolean;
+}
+
+/** 上下文占用（tokens / 窗口 / 压缩阈值 / 缓存命中） */
+export interface AgentContextInfo {
+  tokens: number;
+  window: number;
+  threshold: number;
+  percent: number;
+  cachedTokens?: number;
+  cachePercent?: number;
+  /** 会话累计：Σ 所有请求的 prompt / cache hit */
+  totalPromptTokens?: number;
+  totalCachedTokens?: number;
+  totalCachePercent?: number;
+  compacted?: boolean;
+}
+
+export interface AgentCompactResult {
+  compacted: boolean;
+  count: number;
+  freedTokens: number;
+  estimatedTokens: number;
+  contextWindow: number;
+  threshold: number;
+  percent: number;
 }
 
 export interface AgentTaskStep {
@@ -49,6 +80,9 @@ export interface AgentMessageDto {
   status: string;
   error?: string;
   elapsedMs?: number;
+  promptTokens?: number;
+  completionTokens?: number;
+  cachedTokens?: number;
   createdAt: number;
 }
 
@@ -56,6 +90,7 @@ export interface AgentSessionDetail {
   session: AgentSession;
   messages: AgentMessageDto[];
   tasks: AgentTask[];
+  context?: AgentContextInfo;
 }
 
 export interface AgentSettings {
@@ -63,6 +98,7 @@ export interface AgentSettings {
   hasApiKey: boolean;
   baseUrl: string;
   model: string;
+  modelOptions?: { id: string; label: string; description: string }[];
   temperature: number | null;
   maxTokens: number | null;
   topP: number | null;
@@ -72,7 +108,36 @@ export interface AgentSettings {
   webSearch: boolean;
   searchCount: number;
   searchNeedContent: boolean;
-  defaults?: { baseUrl: string; model: string; hasEnvKey: boolean };
+  stream: boolean;
+  thinking: boolean;
+  reasoningEffort: string;
+  /** 面板覆盖的上下文窗口（0 = 按模型默认 1M） */
+  contextWindow: number;
+  reasoningEfforts?: string[];
+  defaults?: {
+    baseUrl: string;
+    model: string;
+    temperature: number;
+    maxTokens: number;
+    searchCount: number;
+    stream: boolean;
+    thinking: boolean;
+    reasoningEffort: string;
+    contextWindow: number;
+    hasEnvKey: boolean;
+  };
+}
+
+export interface AgentDownload {
+  id: number;
+  url: string;
+  filename: string;
+  mime: string;
+  size: number;
+  status: string;
+  error?: string;
+  createdAt: number;
+  downloadUrl: string;
 }
 
 export const agentApi = {
@@ -100,6 +165,10 @@ export const agentApi = {
   deleteSession: (id: number) =>
     del<{ id: number; deleted: boolean }>('/api/agent/sessions/' + id),
 
+  /** 手动压缩当前会话历史（对应 DSH 的 /compact） */
+  compactSession: (id: number) =>
+    post<AgentCompactResult>('/api/agent/sessions/' + id + '/compact', {}),
+
   settings: () => get<AgentSettings>('/api/agent/settings'),
 
   saveSettings: (payload: Partial<AgentSettings>) =>
@@ -126,4 +195,10 @@ export const agentApi = {
       '/api/agent/runs/active',
       sessionId ? { sessionId } : {},
     ),
+
+  /** 下载库 */
+  downloads: () => get<{ downloads: AgentDownload[] }>('/api/agent/downloads'),
+
+  deleteDownload: (id: number) =>
+    del<{ id: number; deleted: boolean }>('/api/agent/downloads/' + id),
 };

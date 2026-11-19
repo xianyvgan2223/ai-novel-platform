@@ -8,6 +8,10 @@ dist/
 data/*
 !data/.gitkeep
 
+# web/server 是旧 Node 服务目录，源码已迁到 server-java，
+# 现在只放运行时数据（data/、data-demo/、.env），整目录不入库
+server/
+
 # 演示数据目录（复制真实 data 得到，可随时删除重建）
 data-demo/
 

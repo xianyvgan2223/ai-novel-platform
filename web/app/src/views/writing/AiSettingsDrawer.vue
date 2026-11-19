@@ -3,13 +3,14 @@ import { computed, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import { MagicStick } from '@element-plus/icons-vue';
 import {
-  DEFAULT_BATTLE_PROMPT, DEFAULT_CHAPTER_PROMPT, DEFAULT_OUTLINE_PROMPT, MODEL_OPTIONS,
-  battleSettings, chapterSettings, outlineSettings, saveBattleSettings, saveChapterSettings, saveOutlineSettings,
+  DEFAULT_BATTLE_PROMPT, DEFAULT_CHAPTER_PROMPT, DEFAULT_OUTLINE_PROMPT, DEFAULT_TOOLS_PROMPT, MODEL_OPTIONS,
+  battleSettings, chapterSettings, outlineSettings, saveBattleSettings, saveChapterSettings, saveOutlineSettings, saveToolsSettings,
+  toolsSettings,
 } from './novelSettings';
 
 const props = defineProps<{
   modelValue: boolean;
-  kind: 'outline' | 'chapter' | 'battle';
+  kind: 'outline' | 'chapter' | 'battle' | 'tools';
 }>();
 
 const emit = defineEmits<{ (e: 'update:modelValue', value: boolean): void }>();
@@ -24,14 +25,17 @@ const saving = ref(false);
 const isOutline = computed(() => props.kind === 'outline');
 const isChapter = computed(() => props.kind === 'chapter');
 const isBattle = computed(() => props.kind === 'battle');
+const isTools = computed(() => props.kind === 'tools');
 const settings = computed(() => {
   if (isOutline.value) return outlineSettings;
   if (isChapter.value) return chapterSettings;
+  if (isTools.value) return toolsSettings;
   return battleSettings;
 });
 const title = computed(() => {
   if (isOutline.value) return '大纲 AI 设置';
   if (isChapter.value) return '小事件 AI 设置';
+  if (isTools.value) return '写作工具 AI 设置';
   return '战斗 AI 设置';
 });
 
@@ -43,6 +47,8 @@ async function save() {
       await saveOutlineSettings();
     } else if (isChapter.value) {
       await saveChapterSettings();
+    } else if (isTools.value) {
+      await saveToolsSettings();
     } else {
       await saveBattleSettings();
     }
@@ -60,6 +66,8 @@ function resetPrompt() {
     outlineSettings.systemPrompt = DEFAULT_OUTLINE_PROMPT;
   } else if (isChapter.value) {
     chapterSettings.chapterSystemPrompt = DEFAULT_CHAPTER_PROMPT;
+  } else if (isTools.value) {
+    toolsSettings.systemPrompt = DEFAULT_TOOLS_PROMPT;
   } else {
     battleSettings.systemPrompt = DEFAULT_BATTLE_PROMPT;
   }
@@ -127,9 +135,21 @@ function resetPrompt() {
           </div>
         </template>
 
-        <template v-else>
+        <template v-else-if="isBattle">
           <el-form-item label="战斗系统提示词">
             <el-input v-model="battleSettings.systemPrompt" type="textarea" :rows="8" />
+          </el-form-item>
+        </template>
+
+        <template v-else>
+          <el-form-item label="写作工具补充提示词">
+            <el-input
+              v-model="toolsSettings.systemPrompt"
+              type="textarea"
+              :rows="6"
+              placeholder="留空使用内置规则；填写后会追加在内置优化 / 抽卡规则后面"
+            />
+            <div class="field-hint">只追加，不替换内置规则；对「自由优化」和「抽卡」都生效。</div>
           </el-form-item>
         </template>
       </el-form>

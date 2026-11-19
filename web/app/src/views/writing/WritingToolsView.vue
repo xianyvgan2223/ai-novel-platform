@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { ElMessage } from 'element-plus';
-import { CopyDocument, MagicStick, Promotion, Refresh, VideoPause } from '@element-plus/icons-vue';
+import { CopyDocument, MagicStick, Promotion, Refresh, Setting, VideoPause } from '@element-plus/icons-vue';
 import { api } from '@/api';
 import type {
   DrawKind, OptimizePayload, WritingAction, WritingCard, WritingStrength, WritingStyle,
 } from '@/api';
 import PageHeader from '@/components/PageHeader.vue';
+import AiSettingsDrawer from './AiSettingsDrawer.vue';
+import { loadAiSettings, toolsRequestSettings } from './novelSettings';
 import {
   ACTION_ITEMS, STRENGTH_OPTIONS, STYLE_OPTIONS, toggleAction,
 } from '@/views/writing/options';
@@ -20,6 +22,7 @@ const MODE_TABS: { key: Mode; label: string; hint: string }[] = [
 ];
 
 const mode = ref<Mode>('optimize');
+const settingsVisible = ref(false);
 
 /* ── 文稿优化 ── */
 
@@ -69,6 +72,7 @@ async function optimize() {
     style: style.value,
     strength: strength.value,
     extra: extra.value.trim() || undefined,
+    settings: toolsRequestSettings(),
   };
 
   result.value = '';
@@ -161,6 +165,7 @@ async function draw() {
       perspective: perspective.value,
       count: count.value,
       extra: drawExtra.value.trim() || undefined,
+      settings: toolsRequestSettings(),
     });
     cards.value = res.cards;
     cardsKind.value = res.kind;
@@ -196,6 +201,7 @@ function cardText(card: WritingCard): string {
 }
 
 onMounted(() => {
+  void loadAiSettings();
   try {
     const raw = localStorage.getItem(CARD_STORAGE_KEY);
     if (!raw) return;
@@ -216,7 +222,11 @@ onMounted(() => {
       title="写作工具"
       desc="贴一段稿子交给 AI 改写，或抽短篇点子 / 长篇骨架。"
       back="/writing"
-    />
+    >
+      <template #actions>
+        <el-button :icon="Setting" @click="settingsVisible = true">AI 设置</el-button>
+      </template>
+    </PageHeader>
 
     <div class="mode-switch">
       <button
@@ -455,6 +465,8 @@ onMounted(() => {
         </div>
       </section>
     </div>
+
+    <AiSettingsDrawer v-model="settingsVisible" kind="tools" />
   </div>
 </template>
 

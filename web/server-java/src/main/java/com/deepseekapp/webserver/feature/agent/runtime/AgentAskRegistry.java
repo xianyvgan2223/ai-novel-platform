@@ -7,26 +7,35 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 等待用户选择的登记表：askId → 未完成的 Future。
- * 前端提交答案后唤醒对应工具调用，对话继续往下走。
+ * 等待用户选择的登记表：askId → 未完成的 Future + 归属设备。
+ *
+ * <p>带上 deviceId 是为了让答题接口也能做设备校验：askId 虽然随机，
+ * 但只靠它就能替别的会话答题，属于越权面。</p>
  */
 @Component
 public class AgentAskRegistry {
 
-    private final Map<String, CompletableFuture<String>> pending = new ConcurrentHashMap<>();
+    public record Ask(String deviceId, long createdAt, CompletableFuture<String> future) {
+    }
 
-    public CompletableFuture<String> register(String askId) {
+    private final Map<String, Ask> pending = new ConcurrentHashMap<>();
+
+    public CompletableFuture<String> register(String askId, String deviceId) {
         CompletableFuture<String> future = new CompletableFuture<>();
-        pending.put(askId, future);
+        pending.put(askId, new Ask(deviceId == null ? "" : deviceId, System.currentTimeMillis(), future));
         return future;
     }
 
-    public boolean answer(String askId, String answer) {
-        CompletableFuture<String> future = pending.remove(askId);
-        if (future == null) {
+    /** 只有同一台设备才能回答；返回 false 表示已超时/不存在/不是本设备的提问。 */
+    public boolean answer(String askId, String deviceId, String answer) {
+        Ask ask = pending.get(askId);
+        if (ask == null || !ask.deviceId().equals(deviceId == null ? "" : deviceId)) {
             return false;
         }
-        future.complete(answer == null ? "" : answer);
+        if (!pending.remove(askId, ask)) {
+            return false;
+        }
+        ask.future().complete(answer == null ? "" : answer);
         return true;
     }
 
@@ -36,9 +45,13 @@ public class AgentAskRegistry {
 
     /** 运行被取消时唤醒等待中的工具，让它尽快退出。 */
     public void cancel(String askId) {
-        CompletableFuture<String> future = pending.remove(askId);
-        if (future != null) {
-            future.completeExceptionally(new AgentCancelledException());
+        Ask ask = pending.remove(askId);
+        if (ask != null) {
+            ask.future().completeExceptionally(new AgentCancelledException());
         }
+    }
+
+    public int pendingCount() {
+        return pending.size();
     }
 }

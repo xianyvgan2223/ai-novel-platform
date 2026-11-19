@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../domain/chat_message.dart';
 import '../domain/chat_session.dart';
 import '../../../core/config/user_setting.dart';
+import '../../../core/config/deepseek_models.dart';
 import '../../../core/network/api_service.dart';
 import '../../../core/config/user_setting_service.dart';
 import '../data/chat_session_service.dart';
@@ -15,6 +16,7 @@ import '../data/chat_message_service.dart';
 import '../../../core/network/baidu_search_service.dart';
 import '../../../core/network/deepseek_search_service.dart';
 import 'chat_prompt.dart';
+import 'chat_context_budget.dart';
 import 'package:dio/dio.dart';
 
 class ChatController extends ChangeNotifier {
@@ -60,8 +62,24 @@ class ChatController extends ChangeNotifier {
   String? _lastFinishReason; // 上一条流式块的 finish_reason
   String _phase1Text = ''; // Phase 1 保留文本（搜索前 AI 的预回答）
   String _phase1Thinking = ''; // Phase 1 保留思考内容
-  String _summary = ''; // 当前会话的对话历史摘要（持久化到 DB）
-  int _summarizedUserCount = 0; // 已被摘要覆盖的用户消息轮数
+  // ── 两阶段搜索的请求快照 ──
+  // 第二阶段直接复用第一阶段已发送的消息与 tools（只在末尾追加搜索结果），
+  // 保证前缀逐字节一致，DeepSeek 才能命中第一阶段写好的缓存。
+  List<Map<String, dynamic>>? _phaseOneMessages;
+  List<Map<String, dynamic>>? _phaseOneTools;
+  String _summary = ''; // 当前会话的对话历史检查点（持久化到 DB）
+  int _summaryCount = 0; // 已被检查点覆盖的消息条数（从会话开头算）
+
+  // ── 上下文用量与缓存（来自 API usage，用于面板展示） ──
+  int _contextTokens = 0; // 上次请求的真实 prompt_tokens
+  int _cachedTokens = 0; // 上次请求命中的缓存 token 数
+  int _completionTokens = 0; // 上次请求的 completion_tokens
+  int _contextWindow = 0; // 上次请求使用的窗口
+  int _totalPromptTokens = 0; // 本会话累计输入 token（Σ 所有请求）
+  int _totalCachedTokens = 0; // 本会话累计缓存命中 token
+  int _estimatedTokens = 0; // 发送前的估算值（还没拿到 usage 时展示）
+  bool _isCompacting = false; // 正在压缩历史
+  int _lastCompactedCount = 0; // 最近一次压缩掉的消息条数
 
   // ── getter ──
   List<ChatMessage> get messages => _messages;
@@ -72,9 +90,52 @@ class ChatController extends ChangeNotifier {
       _streamingSearchResults;
   ChatSession? get currentSession => _currentSession;
   bool get isStreamingEmpty =>
-      _streamingText.isEmpty && _streamingThinking.isEmpty;
+      !_isLoading && _streamingText.isEmpty && _streamingThinking.isEmpty;
   String get phase1Text => _phase1Text;
   String get phase1Thinking => _phase1Thinking;
+
+  /// ── 上下文占用 / 缓存命中（面板展示用） ──
+  int get contextTokens => _contextTokens;
+  int get cachedTokens => _cachedTokens;
+  int get completionTokens => _completionTokens;
+  int get contextWindow => _contextWindow;
+  int get totalPromptTokens => _totalPromptTokens;
+  int get totalCachedTokens => _totalCachedTokens;
+  int get estimatedTokens => _estimatedTokens;
+  bool get isCompacting => _isCompacting;
+  int get lastCompactedCount => _lastCompactedCount;
+
+  /// 优先用真实 usage，拿不到时退回估算值
+  int get displayContextTokens =>
+      _contextTokens > 0 ? _contextTokens : _estimatedTokens;
+
+  /// 上下文占用百分比（0-100）
+  int get contextPercent {
+    final window = _contextWindow > 0
+        ? _contextWindow
+        : ChatContextBudget.defaultWindow;
+    final tokens = displayContextTokens;
+    if (tokens <= 0) return 0;
+    final value = (tokens * 100 / window).round();
+    return value > 100 ? 100 : value;
+  }
+
+  /// 整体缓存命中率（本会话 Σ命中 / Σ输入）；还没有任何用量时返回 null。
+  ///
+  /// 注意：不是最近一次请求的命中率——切换会话会显示各会话自己的累计值，
+  /// 旧版本会话没有累计数据时显示「缓存 —」。
+  int? get cachePercent {
+    if (_totalPromptTokens <= 0) return null;
+    final value = (_totalCachedTokens * 100 / _totalPromptTokens).round();
+    return value > 100 ? 100 : value;
+  }
+
+  /// 最近一次请求的命中率（用于「缓存」详情弹窗里的对比）
+  int? get lastCachePercent {
+    if (_contextTokens <= 0) return null;
+    final value = (_cachedTokens * 100 / _contextTokens).round();
+    return value > 100 ? 100 : value;
+  }
 
   /// 配置缓存为空时重新加载
   bool get _hasSettingCache => _settingCache != null;
@@ -150,10 +211,11 @@ class ChatController extends ChangeNotifier {
             DeepSeekSearchService.maxCount,
           )
         : setting.searchCount;
-    final today = DeepSeekSearchService.isoDate(DateTime.now());
+    // 日期不能写进工具描述：工具定义属于提示词前缀，日期每天变化会让整段
+    // 工具块和历史缓存全部失配。当前日期统一由本轮用户消息末尾的运行环境注记提供。
     final baseDescription =
         '搜索互联网获取实时信息。当用户询问新闻、实时数据或需要最新信息时使用。'
-        '当前日期是 $today，检索最新信息时请使用正确的年份。';
+        '当前日期见本轮运行环境注记，检索最新信息时请使用正确的年份。';
     return {
       'type': 'function',
       'function': {
@@ -212,6 +274,11 @@ class ChatController extends ChangeNotifier {
     _messages.add(userMsg);
     _streamingText = '';
     _streamingThinking = '';
+    _phase1Text = '';
+    _phase1Thinking = '';
+    _streamingSearchResults = null;
+    _phaseOneMessages = null; // 新一轮：清掉上一轮的请求快照
+    _phaseOneTools = null;
     _isLoading = true;
     notifyListeners();
 
@@ -256,22 +323,20 @@ class ChatController extends ChangeNotifier {
       return;
     }
 
-    // ④ 组装 API 消息：历史摘要 + 最近 N 轮原文
-    final apiMessages = _buildApiMessages(setting.contextRounds);
+    // ④ 上下文接近窗口上限时先压缩（DSH 式检查点），再组装消息
+    await _maybeCompact(setting);
+    _estimatedTokens = _estimateContext(setting);
+    final apiMessages = _buildApiMessages();
 
     // ⑤ 组装 API 参数
     final apiParams = setting.toApiParams();
 
-    // ⑤b 注入系统提示词：会话自定义提示 + 联网搜索开启时的当前时间。
-    // 模型输出的 Markdown 不再用提示词禁止，交给展示层清洗
-    // （presentation/markdown_cleaner.dart）。
+    // ⑤b 注入系统提示词：稳定基础提示 + 会话自定义提示（跨请求不变），
+    // 模型输出的 Markdown 交给展示层清洗（presentation/markdown_cleaner.dart）。
     final sessionPrompt = _currentSession?.systemPrompt ?? '';
     final searchEngine = effectiveSearchEngine(setting);
     final searchEnabled = searchEngine != UserSetting.searchEngineOff;
-    final systemContent = buildChatSystemPrompt(
-      sessionPrompt: sessionPrompt,
-      searchEnabled: searchEnabled,
-    );
+    final systemContent = buildChatSystemPrompt(sessionPrompt: sessionPrompt);
     if (systemContent.isNotEmpty) {
       apiMessages.insert(0, {'role': 'system', 'content': systemContent});
     }
@@ -299,7 +364,6 @@ class ChatController extends ChangeNotifier {
         _isLoading = false;
         notifyListeners();
         await _persistSession();
-        await _updateSummary();
         return;
       }
       tools.add(buildWebSearchTool(setting, searchEngine));
@@ -318,6 +382,13 @@ class ChatController extends ChangeNotifier {
       }
     }
 
+    // 缓存关键：快照第一阶段最终发送的消息与 tools 定义，第二阶段原样复用。
+    // 不能到第二阶段再从数据库重建历史——那样会丢掉末尾的时间注记，前缀失配。
+    _phaseOneMessages = apiMessages
+        .map((m) => Map<String, dynamic>.from(m))
+        .toList();
+    _phaseOneTools = tools.map((t) => Map<String, dynamic>.from(t)).toList();
+
     // ⑥ 发起流式请求
     _pendingToolCalls.clear();
     _lastFinishReason = null;
@@ -334,73 +405,222 @@ class ChatController extends ChangeNotifier {
   }
 
   // ============================================================
-  //  ── 上下文裁剪逻辑 ──
+  //  ── 上下文组装与压缩（DSH 式：按窗口压力触发，不按轮数） ──
   // ============================================================
 
-  /// 从完整 messages 中截取最近 contextRounds 轮对话（本地完整保留）
-  List<ChatMessage> _trimContext(int contextRounds) {
-    if (_messages.isEmpty) return [];
-
-    // 按用户消息轮次计数，保留最后 N 轮
-    final reversed = _messages.reversed.toList();
-    final result = <ChatMessage>[];
-    int userCount = 0;
-
-    for (final msg in reversed) {
-      result.insert(0, msg);
-      if (msg.isUser) {
-        userCount++;
-        if (userCount >= contextRounds) break;
-      }
-    }
-
-    return result;
+  ChatContextBudget _budgetFor(UserSetting setting) {
+    final window = contextWindowForModel(DeepSeekModels.toApiId(setting.model));
+    return ChatContextBudget.of(
+      maxTokens: setting.maxTokens,
+      window: window > 0 ? window : null,
+    );
   }
 
-  /// 提取超出 contextRounds 的老消息（需要被压缩进摘要的部分）
-  List<ChatMessage> _extractOldMessages(int contextRounds) {
-    final userMsgCount = _messages.where((m) => m.isUser).length;
-    if (userMsgCount <= contextRounds) return [];
-
-    final maxOldUserRounds = userMsgCount - contextRounds;
-    final oldMessages = <ChatMessage>[];
-    int userCount = 0;
-
-    for (final msg in _messages) {
-      if (msg.isUser) {
-        if (userCount >= maxOldUserRounds) break;
-        userCount++;
-      }
-      oldMessages.add(msg);
-    }
-
-    return oldMessages;
+  /// 检查点之后保留的原始消息（压缩时只压缩这段之前的部分）。
+  List<ChatMessage> _historyAfterSummary() {
+    final start = _summaryCount.clamp(0, _messages.length);
+    return _messages.sublist(start);
   }
 
-  /// 组装发送给 API 的消息列表：[历史摘要(system)] + [最近 N 轮原文]
-  List<Map<String, dynamic>> _buildApiMessages(int contextRounds) {
+  /// 估算这次请求的上下文大小（system + 检查点 + 历史）。
+  int _estimateContext(UserSetting setting, {String pendingUser = ''}) {
+    final systemPrompt = buildChatSystemPrompt(
+      sessionPrompt: _currentSession?.systemPrompt ?? '',
+    );
+    var total = estimateMessageTokens(systemPrompt);
+    if (_summary.isNotEmpty) {
+      total += estimateMessageTokens(_summary);
+    }
+    for (final message in _historyAfterSummary()) {
+      total += estimateMessageTokens(_apiContentForMessage(message));
+    }
+    if (pendingUser.isNotEmpty) {
+      total += estimateMessageTokens(pendingUser);
+    }
+    return total;
+  }
+
+  /// 组装发送给 API 的消息列表：主 system + 检查点(system) + 检查点之后的原文。
+  ///
+  /// 顺序固定为「不变的在前」：基础 system + 会话自定义提示 → 检查点 → 历史；
+  /// 每条用户消息末尾都按自己的发送时间追加运行环境注记，且重建历史时逐字节一致，
+  /// 所以上一轮请求的 prompt 是下一轮的前缀，时间不会破坏缓存。
+  List<Map<String, dynamic>> _buildApiMessages() {
     final apiMessages = <Map<String, dynamic>>[];
-
-    // ① 注入对话历史摘要（早期对话的压缩总结）
     if (_summary.isNotEmpty) {
       apiMessages.add({
         'role': 'system',
-        'content': '以下是对话前期的历史摘要（包含已超出上下文的早期对话）：\n$_summary',
+        'content':
+            '【更早对话的检查点（系统自动生成，可直接采信）】\n'
+            '这段检查点替换了更早的历史消息，把它当作已确认的背景，不要向用户复述。\n'
+            '<compacted-summary>\n$_summary\n</compacted-summary>',
       });
     }
-
-    // ② 注入最近 N 轮原始消息
-    final recentMessages = _trimContext(contextRounds);
-    apiMessages.addAll(recentMessages.map((m) => m.toApiMessage()));
-
+    for (final message in _historyAfterSummary()) {
+      apiMessages.add({
+        'role': message.isUser ? 'user' : 'assistant',
+        'content': _apiContentForMessage(message),
+      });
+    }
     return apiMessages;
+  }
+
+  /// 实际发给模型的消息内容：用户消息按发送时间追加运行环境注记。
+  ///
+  /// 时间来自 message.timestamp 而不是 now：第一次发送和后续重建历史得到完全
+  /// 相同的字符串，上一轮 prompt 才能成为下一轮的前缀。
+  String _apiContentForMessage(ChatMessage message) {
+    if (!message.isUser) return message.content;
+    final sentAt = DateTime.tryParse(message.timestamp);
+    if (sentAt == null) return message.content;
+    return runtimeHintedContent(message.content, sentAt);
+  }
+
+  /// 接近窗口上限时，把最旧的一段历史压缩成检查点。
+  ///
+  /// 与网页端 / DSH 一致：阈值 `min(W×0.8, W−输出预留−65536)`，保留最近
+  /// `(W−输出预留)×16%` 的原文。只压缩检查点之后、保留段之前的消息。
+  Future<void> _maybeCompact(UserSetting setting) async {
+    if (_isCompacting || _messages.isEmpty) return;
+    final budget = _budgetFor(setting);
+    final estimated = _estimateContext(setting);
+    final pressure = _contextTokens > estimated ? _contextTokens : estimated;
+    _contextWindow = budget.window;
+    if (!budget.needsCompaction(pressure)) {
+      return;
+    }
+
+    final history = _historyAfterSummary();
+    final tokens = history
+        .map((m) => estimateMessageTokens(_apiContentForMessage(m)))
+        .toList();
+    final keepFrom = ChatContextBudget.keepFrom(tokens, budget.retain);
+    if (keepFrom <= 0) return; // 全部都在保留预算内，没有可压缩的
+
+    final toCompact = history.sublist(0, keepFrom);
+    if (toCompact.isEmpty) return;
+
+    _isCompacting = true;
+    notifyListeners();
+    try {
+      final summaryMessages = <Map<String, dynamic>>[
+        {
+          'role': 'system',
+          'content':
+              '你是一个会话压缩引擎。把上面的对话压缩成一份结构化检查点，'
+              '让另一个模型在没有原始历史的情况下也能继续工作。'
+              '只输出下面的 Markdown 结构，每个小节都要保留；没有内容写「无」。\n\n'
+              '## 用户目标与要求\n- [用户最初和变化后的目标]\n'
+              '## 已确认的设定与事实\n- [关键结论、人物、偏好]\n'
+              '## 已完成与进行中的事\n- [做到哪一步、下一步做什么]\n'
+              '## 关键约束\n- [用户明确要求或禁止的事项]\n\n'
+              '规则：保留准确的时间、数字与专有名词，不要编造；不要提到「压缩」这件事；'
+              '如果对话里已有 <compacted-summary>，把它当作更早的检查点合并进来。',
+        },
+        {'role': 'user', 'content': _buildCompactInput(toCompact)},
+      ];
+
+      final result = await _apiService.chat(
+        apiKey: setting.apiKey,
+        apiParams: {
+          'model': setting.model,
+          'temperature': 0.3,
+          'max_tokens': 2048,
+          'thinking': {'type': 'disabled'},
+        },
+        messages: summaryMessages,
+      );
+      final choices = result['choices'] as List?;
+      if (choices == null || choices.isEmpty) return;
+      final content = choices[0]['message']?['content'] as String?;
+      if (content == null || content.trim().isEmpty) return;
+
+      _summary = content.trim();
+      _summaryCount += toCompact.length;
+      _lastCompactedCount = toCompact.length;
+      _contextTokens = 0; // 压缩后重新按估算值计算
+      _contextWindow = budget.window;
+      await _saveSessionMeta();
+    } catch (_) {
+      // 压缩失败按原样发送，不阻断对话
+    } finally {
+      _isCompacting = false;
+      notifyListeners();
+    }
+  }
+
+  String _buildCompactInput(List<ChatMessage> messages) {
+    final buffer = StringBuffer();
+    if (_summary.isNotEmpty) {
+      buffer.writeln('【更早的检查点】\n$_summary\n');
+    }
+    buffer.writeln('【需要并入检查点的对话】');
+    for (final message in messages) {
+      final role = message.isUser ? '用户' : '助手';
+      final content = message.content.length > 4000
+          ? '${message.content.substring(0, 4000)}…'
+          : message.content;
+      buffer.writeln('$role：$content');
+    }
+    buffer.writeln('\n请输出合并后的完整检查点。');
+    return buffer.toString();
   }
 
   // ============================================================
   //  ── 流式数据分片处理 ──
   // ============================================================
 
+  /// 读取 API 返回的 usage：真实上下文占用与缓存命中率。
+  ///
+  /// 兼容两种字段形态：官方 `prompt_cache_hit_tokens` 与
+  /// OpenAI 风格的 `prompt_tokens_details.cached_tokens`。
+  void _captureUsage(Map<String, dynamic> chunk) {
+    final usage = chunk['usage'];
+    if (usage is! Map) return;
+    final prompt = usage['prompt_tokens'];
+    final completion = usage['completion_tokens'];
+    var cached = usage['prompt_cache_hit_tokens'];
+    if (cached == null) {
+      final details = usage['prompt_tokens_details'];
+      if (details is Map) cached = details['cached_tokens'];
+    }
+    final promptTokens = prompt is num ? prompt.toInt() : null;
+    final cachedTokenCount = cached is num ? cached.toInt() : null;
+    // usage 只应在最后一个分片出现一次；网关若重复携带，用「数值有变化」去重，
+    // 避免把同一次请求累计两遍。
+    final isNewRequest =
+        (promptTokens != null && promptTokens != _contextTokens) ||
+        (cachedTokenCount != null && cachedTokenCount != _cachedTokens);
+    var changed = false;
+    if (isNewRequest) {
+      if (promptTokens != null) {
+        _contextTokens = promptTokens;
+        _estimatedTokens = promptTokens;
+        _totalPromptTokens += promptTokens;
+        changed = true;
+      }
+      if (cachedTokenCount != null) {
+        _cachedTokens = cachedTokenCount;
+        _totalCachedTokens += cachedTokenCount;
+        changed = true;
+      }
+    }
+    if (completion is num) {
+      _completionTokens = completion.toInt();
+    }
+    if (_contextWindow <= 0) {
+      final setting = _settingCache;
+      _contextWindow = setting == null
+          ? ChatContextBudget.defaultWindow
+          : _budgetFor(setting).window;
+      changed = true;
+    }
+    if (changed) notifyListeners();
+  }
+
   void _handleStreamChunk(Map<String, dynamic> chunk, UserSetting setting) {
+    // usage 只在最后一个分片出现（include_usage），先于 choices 读取
+    _captureUsage(chunk);
     final choices = chunk['choices'] as List?;
     if (choices == null || choices.isEmpty) return;
 
@@ -537,6 +757,12 @@ class ChatController extends ChangeNotifier {
     // 保存 Phase 1 文本（搜索前的预回答）
     _phase1Text = _streamingText;
     _phase1Thinking = _streamingThinking;
+    // 进入搜索等待：预回答改由 phase1 展示，流式缓冲清空；思考内容继续
+    // 留在 _streamingThinking 里，第二阶段接续输出。立刻 notify 一次，
+    // 让界面在搜索开始时就切到「预回答 + 搜索中」，而不是等结果返回时
+    // 整个气泡突然消失再出现（那一下就是用户看到的闪烁）。
+    _streamingText = '';
+    notifyListeners();
     try {
       // 每路查询的条数：AI 指定的 top_k 优先，上限是用户设置的最大条数
       final perQuery = aiTopK > 0
@@ -577,11 +803,12 @@ class ChatController extends ChangeNotifier {
       }
       _streamingText = '';
       _streamingThinking = '';
+      _phase1Text = '';
+      _phase1Thinking = '';
       _streamingSearchResults = null;
       _isLoading = false;
       notifyListeners();
       await _persistSession();
-      await _updateSummary();
       return;
     }
 
@@ -589,39 +816,84 @@ class ChatController extends ChangeNotifier {
     final searchContext = _buildSearchContext(
       _streamingSearchResults ?? const [],
     );
+    // 模型有时会在第二阶段又想搜一次；明确告诉它结果已经拿到，直接回答。
+    // 这段属于尾部新增内容（本来就不会命中缓存），不影响前面的前缀。
+    final answerContext =
+        '以下搜索结果已经由 web_search 工具检索完成，'
+        '请直接基于这些结果回答用户的问题，不要再次调用任何工具。\n\n'
+        '$searchContext';
 
-    // 从原始上下文中排除旧 system 工具结果，重建消息列表
-    final apiMessages = _buildApiMessages(setting.contextRounds);
-    final sessionPrompt = _currentSession?.systemPrompt ?? '';
-    // 第二阶段一定处于联网搜索流程中：注入当前时间，Markdown 交给展示层清洗
-    final systemContent = buildChatSystemPrompt(
-      sessionPrompt: sessionPrompt,
-      searchEnabled: true,
-    );
-    if (systemContent.isNotEmpty) {
-      apiMessages.insert(0, {'role': 'system', 'content': systemContent});
+    // 缓存关键：第二阶段 = 第一阶段已发送的消息（含 tools）原样复用 + 末尾追加搜索结果。
+    // 这样前缀与第一阶段逐字节一致，能命中第一阶段已写好的缓存；
+    // 如果改成重建历史，时间注记会丢失，前缀从最后一条用户消息开始就失配。
+    final phaseOne = _phaseOneMessages;
+    final List<Map<String, dynamic>> apiMessages;
+    if (phaseOne != null) {
+      apiMessages = buildSearchAnswerMessages(
+        phaseOneMessages: phaseOne,
+        searchContext: answerContext,
+      );
+    } else {
+      // 兜底（理论上不会走到）：没有快照时按旧逻辑重建
+      apiMessages = _buildApiMessages();
+      final sessionPrompt = _currentSession?.systemPrompt ?? '';
+      final systemContent = buildChatSystemPrompt(sessionPrompt: sessionPrompt);
+      if (systemContent.isNotEmpty) {
+        apiMessages.insert(0, {'role': 'system', 'content': systemContent});
+      }
+      apiMessages.add({'role': 'user', 'content': answerContext});
     }
-    apiMessages.add({'role': 'user', 'content': searchContext});
 
-    // 重置流式状态，保持 _isLoading
+    // 进入第二阶段：保留思考内容（Phase 1 思考已包含在 _streamingThinking
+    // 里），只清空正文缓冲；_phase1Thinking 置空，避免最终消息重复拼接。
     _streamingText = '';
-    _streamingThinking = '';
+    _phase1Thinking = '';
     notifyListeners();
 
-    // 发起第二阶段流式请求
-    final apiParams = setting.toApiParams();
-    apiParams.remove('tools'); // 第二阶段不需要 tools
-    apiParams.remove('tool_choice');
-    _cancelToken = CancelToken();
-    await _apiService.streamChat(
-      apiKey: setting.apiKey,
-      apiParams: apiParams,
-      messages: apiMessages,
-      onChunk: (chunk) => _handleStreamChunk(chunk, setting),
-      onDone: () => _handleStreamDoneNormal(),
-      onError: (error) => _handleStreamError(error),
-      cancelToken: _cancelToken,
-    );
+    // 保留与第一阶段完全相同的 tools，否则提示词前缀不一致、缓存全部失效。
+    //
+    // 实测：`tool_choice: 'none'` 会让服务端把 tools 从提示词里整个去掉
+    // （输入 token 从 350+ 掉到 86），前缀照样失配；所以这里用默认的 auto，
+    // 靠搜索结果里的“不要再次调用工具”约束，并做一层降级兜底。
+    final phaseOneTools = _phaseOneTools;
+    var failed = false;
+
+    Future<void> requestAnswer({required bool withTools}) async {
+      _pendingToolCalls.clear();
+      _lastFinishReason = null;
+      _cancelToken = CancelToken();
+      final params = setting.toApiParams();
+      if (withTools && phaseOneTools != null && phaseOneTools.isNotEmpty) {
+        params['tools'] = phaseOneTools;
+      }
+      await _apiService.streamChat(
+        apiKey: setting.apiKey,
+        apiParams: params,
+        messages: apiMessages,
+        onChunk: (chunk) => _handleStreamChunk(chunk, setting),
+        // 收尾不在回调里做：先回到本方法，检测到二次工具调用才能降级重试
+        onDone: () {},
+        onError: (error) {
+          failed = true;
+          _handleStreamError(error);
+        },
+        cancelToken: _cancelToken,
+      );
+    }
+
+    await requestAnswer(withTools: true);
+    if (failed) return;
+
+    // 兜底：模型无视提示再次发起工具调用时，去掉 tools 再请求一次（这次放弃缓存），
+    // 避免把一条空回答存进数据库。
+    if (_lastFinishReason == 'tool_calls' || _pendingToolCalls.isNotEmpty) {
+      _streamingText = '';
+      _streamingThinking = '';
+      await requestAnswer(withTools: false);
+      if (failed) return;
+    }
+
+    await _handleStreamDoneNormal();
   }
 
   /// 按当前来源执行搜索，返回归一化后的结果 Map 列表。
@@ -808,6 +1080,11 @@ class ChatController extends ChangeNotifier {
         thinkingText: mergedThinking.isNotEmpty ? mergedThinking : null,
         timestamp: DateTime.now().toIso8601String(),
         searchResults: _streamingSearchResults,
+        // 记录产生这条回答的那次请求的 usage：消息菜单里的「缓存命中」用它，
+        // 和会话累计（输入框上方）区分开。
+        promptTokens: _contextTokens,
+        cachedTokens: _cachedTokens,
+        completionTokens: _completionTokens,
       );
       _messages.add(assistantMsg);
 
@@ -829,7 +1106,6 @@ class ChatController extends ChangeNotifier {
     _isLoading = false;
     notifyListeners();
     await _persistSession();
-    await _updateSummary(); // 摘要更新（静默，不会阻塞 UI）
   }
 
   void _handleStreamError(String error) async {
@@ -848,6 +1124,8 @@ class ChatController extends ChangeNotifier {
     }
     _streamingText = '';
     _streamingThinking = '';
+    _phase1Text = '';
+    _phase1Thinking = '';
     _streamingSearchResults = null;
     _isLoading = false;
     notifyListeners();
@@ -862,9 +1140,20 @@ class ChatController extends ChangeNotifier {
   Future<void> newSession() async {
     _messages = [];
     _summary = '';
-    _summarizedUserCount = 0;
+    _summaryCount = 0;
+    _contextTokens = 0;
+    _cachedTokens = 0;
+    _completionTokens = 0;
+    _contextWindow = 0;
+    _totalPromptTokens = 0;
+    _totalCachedTokens = 0;
+    _estimatedTokens = 0;
+    _lastCompactedCount = 0;
+    _isCompacting = false;
     _streamingText = '';
     _streamingThinking = '';
+    _phase1Text = '';
+    _phase1Thinking = '';
     _streamingSearchResults = null;
     // 创建内存会话（id=null），等发消息时再入库，避免空会话堆积
     _currentSession = ChatSession(
@@ -877,9 +1166,22 @@ class ChatController extends ChangeNotifier {
   /// 加载已有会话：从数据库读取历史消息
   Future<void> loadSession(ChatSession session) async {
     _currentSession = session;
-    _summary = session.summary; // 加载持久化的对话摘要
+    _summary = session.summary; // 加载持久化的检查点
+    _summaryCount = session.summaryCount;
+    _contextTokens = session.contextTokens;
+    _cachedTokens = session.cachedTokens;
+    _completionTokens = 0;
+    _contextWindow = session.contextWindow;
+    _totalPromptTokens = session.totalPromptTokens;
+    _totalCachedTokens = session.totalCachedTokens;
+    _estimatedTokens = 0;
+    _lastCompactedCount = 0;
+    _isCompacting = false;
     _streamingText = '';
     _streamingThinking = '';
+    _phase1Text = '';
+    _phase1Thinking = '';
+    _streamingSearchResults = null;
     _isLoading = false;
     notifyListeners();
 
@@ -889,8 +1191,21 @@ class ChatController extends ChangeNotifier {
     } catch (_) {
       _messages = [];
     }
-    // 标记当前所有消息已覆盖（避免加载后立即触发重复摘要）
-    _summarizedUserCount = _messages.where((m) => m.isUser).length;
+    // 兼容旧数据：摘要覆盖条数不能超过当前消息数
+    if (_summaryCount > _messages.length) {
+      _summaryCount = _messages.length;
+    }
+    // 旧版本的摘要没有记录覆盖条数（summary_count=0）：直接丢弃，
+    // 因为所有消息都还在本地，重新按窗口压缩即可，避免摘要与全文重复注入。
+    if (_summary.isNotEmpty && _summaryCount <= 0) {
+      _summary = '';
+    }
+    // 打开会话就先给一个估算占用，进度条不用等下一轮
+    final setting = _settingCache ?? const UserSetting();
+    _contextWindow = _contextWindow > 0
+        ? _contextWindow
+        : _budgetFor(setting).window;
+    _estimatedTokens = _estimateContext(setting);
     notifyListeners();
   }
 
@@ -913,6 +1228,13 @@ class ChatController extends ChangeNotifier {
             _currentSession?.createTime ?? DateTime.now().toIso8601String(),
         lastMessage: lastMsg,
         systemPrompt: _currentSession?.systemPrompt ?? '', // 继承内存中的系统提示词
+        summary: _summary,
+        summaryCount: _summaryCount,
+        contextTokens: _contextTokens,
+        cachedTokens: _cachedTokens,
+        contextWindow: _contextWindow,
+        totalPromptTokens: _totalPromptTokens,
+        totalCachedTokens: _totalCachedTokens,
       );
 
       final id = await ChatSessionService.insertSession(newSession);
@@ -924,83 +1246,38 @@ class ChatController extends ChangeNotifier {
         _messages[i] = saved;
       }
     } else {
-      // 已有会话：更新最后一条消息
-      final updated = _currentSession!.copyWith(lastMessage: lastMsg);
+      // 已有会话：更新最后一条消息与检查点/用量
+      final updated = _currentSession!.copyWith(
+        lastMessage: lastMsg,
+        summary: _summary,
+        summaryCount: _summaryCount,
+        contextTokens: _contextTokens,
+        cachedTokens: _cachedTokens,
+        contextWindow: _contextWindow,
+        totalPromptTokens: _totalPromptTokens,
+        totalCachedTokens: _totalCachedTokens,
+      );
       await ChatSessionService.updateSession(updated);
       _currentSession = updated;
     }
     notifyListeners();
   }
 
-  /// 异步更新对话历史摘要（仅在消息超出 contextRounds 时触发）
-  Future<void> _updateSummary() async {
-    final setting = _settingCache;
-    if (setting == null) return;
-    if (_currentSession?.id == null) return; // 未持久化的会话不更新摘要
-
-    // 提取所有被裁掉的老消息
-    final oldMessages = _extractOldMessages(setting.contextRounds);
-    final oldUserCount = oldMessages.where((m) => m.isUser).length;
-    if (oldUserCount <= _summarizedUserCount) return; // 没有新增被裁的消息，跳过
-
-    // 提取新增被裁的消息（oldMessages 中靠后的 newCutUserRounds 轮）
-    final newCutUserRounds = oldUserCount - _summarizedUserCount;
-    final newCutMessages = <ChatMessage>[];
-    int count = 0;
-    for (final msg in oldMessages.reversed) {
-      newCutMessages.insert(0, msg);
-      if (msg.isUser) {
-        count++;
-        if (count >= newCutUserRounds) break;
-      }
-    }
-
-    // 构建摘要更新提示
-    final summaryMessages = <Map<String, dynamic>>[];
-    summaryMessages.add({
-      'role': 'system',
-      'content':
-          '你是一个对话摘要生成器。请根据已有的摘要和新内容，生成更新后的完整对话摘要。'
-          '要求：保持简洁（200字以内），保留关键信息，使用与对话相同的语言。',
-    });
-
-    final prompt = StringBuffer();
-    if (_summary.isNotEmpty) {
-      prompt.writeln('【当前摘要】\n$_summary\n');
-    }
-    prompt.writeln('【新被裁掉的对话内容，请将其融入摘要】');
-    for (final msg in newCutMessages) {
-      final role = msg.isUser ? '用户' : '助手';
-      prompt.writeln('$role：${msg.content}');
-    }
-    prompt.writeln('\n请输出更新后的完整摘要：');
-    summaryMessages.add({'role': 'user', 'content': prompt.toString()});
-
-    try {
-      final result = await _apiService.chat(
-        apiKey: setting.apiKey,
-        apiParams: {
-          'model': setting.model,
-          'temperature': 0.3,
-          'max_tokens': setting.maxTokens,
-        },
-        messages: summaryMessages,
-      );
-      final choices = result['choices'] as List?;
-      if (choices != null && choices.isNotEmpty) {
-        final content = choices[0]['message']?['content'] as String?;
-        if (content != null && content.trim().isNotEmpty) {
-          _summary = content.trim();
-
-          // 持久化摘要到数据库
-          _currentSession = _currentSession!.copyWith(summary: _summary);
-          await ChatSessionService.updateSession(_currentSession!);
-          _summarizedUserCount = oldUserCount; // 更新已覆盖计数
-        }
-      }
-    } catch (_) {
-      // 静默失败，保留旧摘要
-    }
+  /// 只更新会话元数据（检查点与 usage），不动消息表；压缩后立即调用。
+  Future<void> _saveSessionMeta() async {
+    final session = _currentSession;
+    if (session == null || session.id == null) return;
+    final updated = session.copyWith(
+      summary: _summary,
+      summaryCount: _summaryCount,
+      contextTokens: _contextTokens,
+      cachedTokens: _cachedTokens,
+      contextWindow: _contextWindow,
+      totalPromptTokens: _totalPromptTokens,
+      totalCachedTokens: _totalCachedTokens,
+    );
+    await ChatSessionService.updateSession(updated);
+    _currentSession = updated;
   }
 
   // ============================================================
@@ -1014,14 +1291,20 @@ class ChatController extends ChangeNotifier {
     // 按降序排列索引，避免删除时索引偏移
     final sorted = indices.toList()..sort((a, b) => b.compareTo(a));
     final dbIds = <int>[];
+    var removedBeforeSummary = 0;
 
     for (final index in sorted) {
       if (index >= 0 && index < _messages.length) {
         final msg = _messages[index];
         if (msg.id != null) dbIds.add(msg.id!);
+        if (index < _summaryCount) removedBeforeSummary++;
         _messages.removeAt(index);
       }
     }
+    // 检查点覆盖的条数跟着删除前移，避免把未被摘要的消息重复注入
+    _summaryCount = (_summaryCount - removedBeforeSummary)
+        .clamp(0, _messages.length)
+        .toInt();
 
     // 从数据库删除
     if (dbIds.isNotEmpty) {

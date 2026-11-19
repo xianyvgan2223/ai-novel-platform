@@ -27,9 +27,8 @@
 
 ### 不做
 
-- Agent 写库、删除数据（生成结果只回传，保存由用户点按钮走原流程）
+- Agent 删除/覆盖用户已有数据（生成类只新增作品与章节，不改旧作品）
 - 驱动界面跳转（`ui_action`）
-- 对话历史持久化（本期放内存，刷新清空）
 - 修改 APK 版本号 / 发 release
 
 ## 3. 架构
@@ -72,11 +71,30 @@ AgentService  ──► ChatClient(prompt).tools(AgentTools).toolContext(runId)
 | `tool_result` | `id` `name` `ok` `summary` `data` `elapsedMs` | 工具成功 |
 | `tool_error` | `id` `name` `error` `elapsedMs` | 工具失败 |
 | `stage` | `label` `index` `total` | 长任务分阶段进度 |
+| `context` | `tokens` `window` `threshold` `percent` `compacted` | 请求发送前的上下文占用（估算或上次实测） |
+| `usage` | `promptTokens` `completionTokens` `totalTokens` `cachedTokens` `window` `threshold` `percent` | 每轮请求的真实 token 用量（API usage） |
+| `compaction` | `count` `kept` `freedTokens` `summaryChars` `estimatedTokens` | 历史被压缩成检查点 |
 | `done` | `elapsedMs` | 正常结束 |
 | `cancelled` | — | 被中断 |
 | `error` | `error` | 失败 |
 
 心跳：每 15 秒写一行 `: ping`，避免长工具执行期间被代理/浏览器判超时。
+
+### 上下文占用与自动压缩
+
+窗口 W 默认 1,000,000（DeepSeek Flash / Pro 均为 1M），可在面板设置里按模型覆盖。
+
+- 触发阈值 `floor(min(W × 0.8, W − 输出预留 − 65,536))`；
+- 压缩时把最旧的一段历史摘要成 `<compacted-summary>` 检查点，最近 `(W − 输出预留) × 16%` 的对话保留原文；
+- 摘要写进 `agent_sessions.summary`，`summary_upto` 记录覆盖到的消息 id，后续轮次只加载它之后的消息；
+- 压力优先用上一轮 API 返回的 `prompt_tokens`，没有时按中文 1 字 ≈ 1 token 估算；
+- 提供方返回上下文溢出且还没输出内容时，压缩后重试一次；
+- `POST /api/agent/sessions/{id}/compact` 手动压缩（对应 DSH 的 `/compact`），会话正在生成时返回 409。
+
+面板展示：输入框上方显示「上下文占用百分比 + 缓存命中率」，悬浮可看本轮输入/输出/缓存命中 token 与压缩阈值；
+`GET /api/agent/sessions/{id}` 的 `context` 字段带 `tokens / cachedTokens / cachePercent / window / threshold / percent`，
+刷新或切换会话后缓存命中率仍能显示（落库在 `agent_sessions.context_tokens / context_cached_tokens` 与
+`agent_messages.prompt_tokens / completion_tokens / cached_tokens`）。
 
 ## 5. 工具清单
 
@@ -87,15 +105,17 @@ AgentService  ──► ChatClient(prompt).tools(AgentTools).toolContext(runId)
 | `get_row` | `db` `table` `id` | 单行完整字段 |
 | `search_rag` | `query` `size` `tags` | hits：标题/情节/原文摘录/标签/情感/相似度 |
 | `rag_status` | — | 索引状态、书目、标签 |
-| `generate_outline` | `genre` `theme` `protagonist` `worldview` `majorCount` `minorCount` `extra` | 大纲 JSON（不落库），过程中推送 `stage` |
-| `list_outlines` | `limit` | 已有大纲列表 |
-| `generate_chapter` | `title` `genre` `theme` `protagonist` `outline` `minWords` | 正文文本（不落库） |
+| `generate_outline` | `genre` `theme` `protagonist` `worldview` `majorCount` `minorCount` `extra` | **保存为作品**（outline_records + outline_chapters），返回 outlineId/章节数，过程中推送 `stage` |
+| `list_outlines` | `limit` | 已有作品列表（id/题材/摘录） |
+| `list_chapters` | `outlineId` | 作品章节清单（eventIndex/标题/是否已写） |
+| `generate_chapter` | `outlineId` `eventIndex` `minWords` `extra` | **正文写入对应章节**（outline_chapters.content，status=completed），返回 chapterId |
 
 约束：
 
 - 行数上限 50，单字段文本上限 300 字，工具返回整体上限约 8KB
 - 表名/库名必须通过 `SchemaCatalog.hasTable()` 校验
-- 所有工具只读；生成类只返回结果
+- 除 `generate_outline` / `generate_chapter` 外全部只读；写库必须走 `SyncStore.writeRow`（否则手机端同步不到）
+- 生成成功但落库失败时，工具仍返回内容并带 `saved:false` / `saveError`，不会让整次生成白做
 
 ## 6. 真正的中断
 

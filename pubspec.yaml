@@ -18,7 +18,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # of the product and file versions while build-number is used as the build suffix.
 # ⚠️ 发版规则：只有用户明确要求「发布 / 出新版 / 更新版本号」时才修改 version 和 build number。
 # 功能开发、调样式、调试期间保持版本不变；日常验证只构建 debug。
-version: 5.5.4+23
+version: 5.5.7+26
 
 environment:
   sdk: ^3.12.2
@@ -41,6 +41,8 @@ dependencies:
   path_provider: ^2.1.6
   crypto: ^3.0.7
   file_picker: 11.0.0
+  # 聊天 Markdown 渲染（flutter_markdown 已停止维护，使用其维护分支）
+  flutter_markdown_plus: ^1.0.12
 dev_dependencies:
   flutter_test:
     sdk: flutter

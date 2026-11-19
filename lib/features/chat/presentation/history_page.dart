@@ -8,6 +8,7 @@ import 'package:deepseekapp/core/theme/app_palette.dart';
 import '../application/history_controller.dart';
 import '../application/chat_controller.dart'; // chatProvider
 import '../domain/chat_session.dart';
+import 'markdown_cleaner.dart';
 import '../../sync/application/sync_service.dart';
 import '../../sync/data/sync_store.dart';
 import '../../sync/presentation/sync_page.dart';
@@ -153,9 +154,7 @@ class _HistoryDrawerState extends ConsumerState<HistoryDrawer> {
   void _openSyncPage() {
     final navigator = Navigator.of(context);
     _closeDrawer();
-    navigator.push(
-      MaterialPageRoute<void>(builder: (_) => const SyncPage()),
-    );
+    navigator.push(MaterialPageRoute<void>(builder: (_) => const SyncPage()));
   }
 
   Future<void> _onNewSession() async {
@@ -210,9 +209,7 @@ class _HistoryDrawerState extends ConsumerState<HistoryDrawer> {
         _buildHeader(),
         Expanded(
           child: !historyCtrl.isLoaded
-              ? Center(
-                  child: CircularProgressIndicator(color: p.accent),
-                )
+              ? Center(child: CircularProgressIndicator(color: p.accent))
               : Column(
                   children: [
                     // 「新建对话」始终可用，没有历史会话时也能新建
@@ -261,11 +258,7 @@ class _HistoryDrawerState extends ConsumerState<HistoryDrawer> {
                 ),
               ),
               IconButton(
-                icon: Icon(
-                  Icons.close,
-                  size: 18,
-                  color: p.textTertiary,
-                ),
+                icon: Icon(Icons.close, size: 18, color: p.textTertiary),
                 tooltip: '关闭',
                 onPressed: _closeDrawer,
               ),
@@ -290,11 +283,8 @@ class _HistoryDrawerState extends ConsumerState<HistoryDrawer> {
     return ListView.separated(
       padding: const EdgeInsets.symmetric(vertical: 8),
       itemCount: sessions.length,
-      separatorBuilder: (_, _) => Divider(
-        height: 1,
-        indent: 16,
-        color: p.border,
-      ),
+      separatorBuilder: (_, _) =>
+          Divider(height: 1, indent: 16, color: p.border),
       itemBuilder: (context, index) {
         final session = sessions[index];
         return _SessionTile(
@@ -330,10 +320,7 @@ class _HistoryDrawerState extends ConsumerState<HistoryDrawer> {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(ctx).pop(),
-              child: Text(
-                '取消',
-                style: TextStyle(color: p.textTertiary),
-              ),
+              child: Text('取消', style: TextStyle(color: p.textTertiary)),
             ),
             TextButton(
               onPressed: () {
@@ -377,11 +364,7 @@ class _SyncEntry extends StatelessWidget {
                     height: 20,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : Icon(
-                    Icons.cloud_sync_outlined,
-                    size: 20,
-                    color: p.accent,
-                  ),
+                : Icon(Icons.cloud_sync_outlined, size: 20, color: p.accent),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -510,7 +493,8 @@ class _SessionTile extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              session.lastMessage,
+              // 预览行只显示纯文本：气泡里渲染 Markdown，列表里再露出 ** / ## 很突兀
+              stripMarkdownForChat(session.lastMessage),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(

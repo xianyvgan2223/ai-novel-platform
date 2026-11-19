@@ -12,6 +12,20 @@ import { activeDeviceId } from '@/stores/device';
 const BASE = (import.meta.env.VITE_API_BASE ?? '').replace(/\/+$/, '');
 const TOKEN = import.meta.env.VITE_API_TOKEN ?? '';
 
+/** 拼出可访问的后端地址（下载、预览用） */
+export function fileUrl(path: string): string {
+  return BASE + path;
+}
+
+/** 带设备头/鉴权拉取二进制，用于「保存到本机」 */
+export async function fetchBlob(path: string): Promise<Blob> {
+  const res = await fetch(BASE + path, { headers: headers() });
+  if (!res.ok) {
+    throw new ApiError('下载失败：HTTP ' + res.status, res.status, path);
+  }
+  return res.blob();
+}
+
 export interface Envelope<T> {
   ok: boolean;
   data: T;

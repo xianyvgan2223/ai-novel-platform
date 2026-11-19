@@ -1,6 +1,7 @@
 package com.deepseekapp.webserver.feature.rag.api;
 
 import com.deepseekapp.webserver.feature.rag.service.RagService;
+import com.deepseekapp.webserver.feature.rag.service.RagSettingsService;
 import com.deepseekapp.webserver.web.Api;
 import com.deepseekapp.webserver.web.ApiException;
 import org.springframework.http.MediaType;
@@ -8,6 +9,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -25,13 +27,20 @@ import java.util.Map;
  * RAG 情节素材库接口：
  *
  * <pre>
- * GET    /api/rag/status                 配置、索引、统计
- * POST   /api/rag/import                 上传 txt，后台导入（multipart）
- * GET    /api/rag/jobs/{id}              导入任务进度
- * GET    /api/rag/scenes                 已入库情节列表 / 关键字搜索
- * POST   /api/rag/search                 语义检索（百炼 embedding + ES kNN）
- * POST   /api/rag/imitate                检索参考情节 + DeepSeek 仿写
- * DELETE /api/rag/books?book=...         删除一部作品的素材
+ * GET    /api/rag/status                  配置、索引、统计
+ * GET    /api/rag/settings                导入设置（手动开始提炼/窗口/重叠/并行）
+ * PUT    /api/rag/settings                保存导入设置
+ * POST   /api/rag/analyze                 上传 txt → 只解析与分块（返回窗口，可暂停预览）
+ * POST   /api/rag/jobs/{id}/resplit       重新分块（未开始提炼时）
+ * POST   /api/rag/jobs/{id}/start         开始提炼（并行 + 合并 + embedding + 入库）
+ * GET    /api/rag/jobs                    最近任务列表（切页后恢复进度）
+ * GET    /api/rag/jobs/{id}               任务详情（含窗口状态）
+ * GET    /api/rag/jobs/{id}/windows/{i}   单个窗口原文 + DeepSeek 原始输出 + 解析出的情节
+ * POST   /api/rag/import                  兼容旧接口：上传并立即开始提炼
+ * GET    /api/rag/scenes                  已入库情节列表 / 关键字搜索
+ * POST   /api/rag/search                  语义检索（百炼 embedding + ES kNN）
+ * POST   /api/rag/imitate                 检索参考情节 + DeepSeek 仿写
+ * DELETE /api/rag/books?book=...          删除一部作品的素材
  * </pre>
  */
 @RestController
@@ -39,9 +48,11 @@ import java.util.Map;
 public class RagController {
 
     private final RagService ragService;
+    private final RagSettingsService settingsService;
 
-    public RagController(RagService ragService) {
+    public RagController(RagService ragService, RagSettingsService settingsService) {
         this.ragService = ragService;
+        this.settingsService = settingsService;
     }
 
     @GetMapping("/status")
@@ -49,32 +60,41 @@ public class RagController {
         return Api.ok(ragService.status());
     }
 
-    @PostMapping(value = "/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public Map<String, Object> importNovel(
+    @GetMapping("/settings")
+    public Map<String, Object> settings() {
+        return Api.ok(settingsService.view());
+    }
+
+    @PutMapping("/settings")
+    public Map<String, Object> saveSettings(@RequestBody(required = false) Map<String, Object> body) {
+        return Api.ok(settingsService.save(body));
+    }
+
+    /** 只解析/分块：manualExtract=true 时返回 waiting 状态，等用户确认后 start。 */
+    @PostMapping(value = "/analyze", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public Map<String, Object> analyze(
             @RequestParam("file") MultipartFile file,
-            @RequestParam(value = "book", required = false, defaultValue = "") String book,
-            @RequestParam(value = "replace", required = false, defaultValue = "true") boolean replace
+            @RequestParam(value = "book", required = false, defaultValue = "") String book
     ) throws IOException {
-        if (file == null || file.isEmpty()) {
-            throw new ApiException(400, "请先选择 txt 文件");
-        }
-        String filename = file.getOriginalFilename() == null ? "" : file.getOriginalFilename();
-        if (!filename.toLowerCase().endsWith(".txt")) {
-            throw new ApiException(400, "目前只支持导入 .txt 文本文件");
-        }
-        String text = decodeText(file.getBytes());
-        String title = book == null ? "" : book.trim();
-        if (title.isEmpty()) {
-            title = filename.replaceFirst("(?i)\\.txt$", "").trim();
-        }
-        if (title.isEmpty()) title = "未命名作品";
-        RagService.ImportJob job = ragService.startImport(title, text);
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("jobId", job.id());
-        data.put("book", title);
-        data.put("chars", text.length());
-        data.put("replace", replace);
-        return Api.ok(data);
+        Uploaded uploaded = readUpload(file, book);
+        return Api.ok(ragService.analyze(uploaded.title(), uploaded.text()));
+    }
+
+    @PostMapping("/jobs/{id}/resplit")
+    public Map<String, Object> resplit(@PathVariable("id") String id,
+                                       @RequestBody(required = false) Map<String, Object> body) {
+        return Api.ok(ragService.resplit(id, body));
+    }
+
+    @PostMapping("/jobs/{id}/start")
+    public Map<String, Object> start(@PathVariable("id") String id,
+                                     @RequestBody(required = false) Map<String, Object> body) {
+        return Api.ok(ragService.start(id, body));
+    }
+
+    @GetMapping("/jobs")
+    public Map<String, Object> jobs() {
+        return Api.ok(ragService.jobs());
     }
 
     @GetMapping("/jobs/{id}")
@@ -82,14 +102,34 @@ public class RagController {
         return Api.ok(ragService.job(id));
     }
 
+    @GetMapping("/jobs/{id}/windows/{index}")
+    public Map<String, Object> window(@PathVariable("id") String id,
+                                      @PathVariable("index") int index) {
+        return Api.ok(ragService.window(id, index));
+    }
+
+    /** 兼容旧接口：上传并立即开始提炼（忽略 manualExtract 设置）。 */
+    @PostMapping(value = "/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public Map<String, Object> importNovel(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(value = "book", required = false, defaultValue = "") String book,
+            @RequestParam(value = "replace", required = false, defaultValue = "true") boolean replace
+    ) throws IOException {
+        Uploaded uploaded = readUpload(file, book);
+        Map<String, Object> data = new LinkedHashMap<>(ragService.startImport(uploaded.title(), uploaded.text()));
+        data.put("replace", replace);
+        return Api.ok(data);
+    }
+
     @GetMapping("/scenes")
     public Map<String, Object> scenes(
             @RequestParam(value = "page", defaultValue = "1") int page,
             @RequestParam(value = "pageSize", defaultValue = "20") int pageSize,
             @RequestParam(value = "q", required = false, defaultValue = "") String q,
-            @RequestParam(value = "tag", required = false, defaultValue = "") String tag
+            @RequestParam(value = "tag", required = false, defaultValue = "") String tag,
+            @RequestParam(value = "book", required = false, defaultValue = "") String book
     ) {
-        RagService.ScenePage result = ragService.listScenes(page, pageSize, q, tag);
+        RagService.ScenePage result = ragService.listScenes(page, pageSize, q, tag, book);
         Map<String, Object> meta = new LinkedHashMap<>();
         meta.put("total", result.total());
         meta.put("page", result.page());
@@ -129,6 +169,28 @@ public class RagController {
         data.put("book", book);
         data.put("deleted", true);
         return Api.ok(data);
+    }
+
+    private record Uploaded(String title, String text) {
+    }
+
+    private static Uploaded readUpload(MultipartFile file, String book) throws IOException {
+        if (file == null || file.isEmpty()) {
+            throw new ApiException(400, "请先选择 txt 文件");
+        }
+        String filename = file.getOriginalFilename() == null ? "" : file.getOriginalFilename();
+        if (!filename.toLowerCase().endsWith(".txt")) {
+            throw new ApiException(400, "目前只支持导入 .txt 文本文件");
+        }
+        String text = decodeText(file.getBytes());
+        String title = book == null ? "" : book.trim();
+        if (title.isEmpty()) {
+            title = filename.replaceFirst("(?i)\\.txt$", "").trim();
+        }
+        if (title.isEmpty()) {
+            title = "未命名作品";
+        }
+        return new Uploaded(title, text);
     }
 
     private static String decodeText(byte[] bytes) {

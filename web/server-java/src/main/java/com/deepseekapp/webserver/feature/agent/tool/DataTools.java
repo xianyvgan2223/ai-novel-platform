@@ -126,7 +126,7 @@ public class DataTools {
             rowArgs.add((long) (current - 1) * size);
 
             List<String> quotedColumns = new ArrayList<>();
-            for (String column : schema.columnNames(db, table)) {
+            for (String column : support.readableColumns(db, table)) {
                 quotedColumns.add("`" + column + "`");
             }
             String columnList = String.join(", ", quotedColumns);
@@ -145,7 +145,7 @@ public class DataTools {
                 out.put("page", current);
                 out.put("pageSize", size);
                 out.put("total", total);
-                out.put("columns", schema.columnNames(db, table));
+                out.put("columns", support.readableColumns(db, table));
                 out.put("rows", AgentToolSupport.trimRows(rows));
                 return out;
             });
@@ -180,7 +180,7 @@ public class DataTools {
                 }
                 row.remove("_row_id");
                 row.remove("device_id");
-                return AgentToolSupport.trimRows(List.of(row)).getFirst();
+                return AgentToolSupport.trimRows(List.of(support.redactSensitive(db, table, row))).getFirst();
             });
         });
     }

@@ -142,8 +142,10 @@ public class BiliTranscriptService {
         }
 
         sink.stage(2, 2, "下载字幕");
+        StringBuilder transcript = new StringBuilder();
         long chars = 0;
         for (String line : biliApi.fetchSubtitleLines(url)) {
+            transcript.append(line).append('\n');
             sink.delta(line + "\n");
             chars += line.length() + 1;
         }
@@ -151,6 +153,7 @@ public class BiliTranscriptService {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("source", "subtitle");
         result.put("chars", chars);
+        result.put("text", transcript.toString());
         return result;
     }
 
@@ -225,19 +228,21 @@ public class BiliTranscriptService {
             }
 
             sink.stage(3, 4, "本地转写");
-            long chars = runWhisper(audioPath, durationSec, sink);
+            StringBuilder transcript = new StringBuilder();
+            long chars = runWhisper(audioPath, durationSec, sink, transcript);
 
             sink.stage(4, 4, "完成");
             Map<String, Object> result = new LinkedHashMap<>();
             result.put("source", "asr");
             result.put("chars", chars);
+            result.put("text", transcript.toString());
             return result;
         } finally {
             Files.deleteIfExists(audioPath);
         }
     }
 
-    private long runWhisper(Path audioPath, long durationSec, EventSink sink) throws IOException {
+    private long runWhisper(Path audioPath, long durationSec, EventSink sink, StringBuilder transcript) throws IOException {
         double[] duration = {durationSec};
         long[] chars = {0};
         whisper.transcribe(audioPath, new WhisperAsrService.Listener() {
@@ -255,6 +260,7 @@ public class BiliTranscriptService {
                     return;
                 }
                 chars[0] += line.length() + 1;
+                transcript.append(line).append('\n');
                 try {
                     if (duration[0] > 0) {
                         sink.progress((int) Math.min(100, segment.end() * 100 / duration[0]),
