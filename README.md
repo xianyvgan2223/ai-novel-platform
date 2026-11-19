@@ -95,27 +95,25 @@ DeepSeek 并行提炼可复用情节，跨窗口去重后由百炼 embedding 写
 
 <table>
   <tr>
-    <td align="center" width="33%">
-      <img src="docs/screenshots/app-chat.png" width="230"/><br/>
-      <sub>对话 · 流式输出 / 思考过程 / 联网来源 / 上下文与缓存</sub>
+    <td align="center" width="20%">
+      <img src="docs/screenshots/app-chat.png" width="150"/><br/>
+      <sub>对话 · 流式 / 思考 / 来源 / 缓存</sub>
     </td>
-    <td align="center" width="33%">
-      <img src="docs/screenshots/app-writing-home.png" width="230"/><br/>
-      <sub>写小说 · 9 个写作功能入口</sub>
+    <td align="center" width="20%">
+      <img src="docs/screenshots/app-writing-home.png" width="150"/><br/>
+      <sub>写小说 · 9 个功能入口</sub>
     </td>
-    <td align="center" width="33%">
-      <img src="docs/screenshots/app-outline-generate.png" width="230"/><br/>
-      <sub>一键生成大纲 · 题材 / 主题 / 主角 / 世界观 / 事件规模</sub>
+    <td align="center" width="20%">
+      <img src="docs/screenshots/app-outline-generate.png" width="150"/><br/>
+      <sub>一键生成大纲</sub>
     </td>
-  </tr>
-  <tr>
-    <td align="center" width="50%">
-      <img src="docs/screenshots/app-inspiration.png" width="300"/><br/>
-      <sub>小说灵感 · 对话推进剧情，并行推演多段正文，可展开 / 选择 / 朗读 / 采用</sub>
+    <td align="center" width="20%">
+      <img src="docs/screenshots/app-inspiration.png" width="150"/><br/>
+      <sub>小说灵感 · 并行推演</sub>
     </td>
-    <td align="center" width="50%">
-      <img src="docs/screenshots/app-battle.png" width="300"/><br/>
-      <sub>AI 写战斗 · 输入双方技能 / 场景 / 结果，生成战斗场面</sub>
+    <td align="center" width="20%">
+      <img src="docs/screenshots/app-battle.png" width="150"/><br/>
+      <sub>AI 写战斗</sub>
     </td>
   </tr>
 </table>
