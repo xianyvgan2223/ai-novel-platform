@@ -98,7 +98,7 @@ public final class AgentPromptFactory {
             }
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("role", item.role());
-            row.put("content", item.content());
+            row.put("content", item.promptContent());
             out.add(row);
         }
         Map<String, Object> current = new LinkedHashMap<>();

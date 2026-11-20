@@ -22,6 +22,10 @@ public class AgentConversationService {
     private static final int TITLE_MAX = 24;
     /** 单条用户消息上限，防止整章正文直接灌进上下文。 */
     private static final int MAX_MESSAGE_CHARS = 20000;
+    /** 中断消息里单个工具摘要的最大字符数。 */
+    private static final int TOOL_SUMMARY_MAX = 160;
+    /** 中断消息里已完成 / 未完成工具各列多少条。 */
+    private static final int TOOL_LINES_MAX = 10;
 
     private final AgentStore store;
     private final AgentRunRegistry registry;
@@ -128,10 +132,11 @@ public class AgentConversationService {
             if (content.isBlank() || (!"user".equals(role) && !"assistant".equals(role))) {
                 continue;
             }
-            if ("error".equals(text(row.get("status")))) {
-                continue;
-            }
-            messages.add(new AgentHistory.Message(number(row.get("id")), role, content));
+            // 生成失败的消息也保留：里面是中断前已经产出的内容，模型接着做时需要看到；
+            // 加 incomplete 标记，由 promptContent() 在发给模型时明确标注它不完整。
+            boolean incomplete = "error".equals(text(row.get("status")));
+            String toolNote = incomplete ? toolNote(text(row.get("parts"))) : null;
+            messages.add(new AgentHistory.Message(number(row.get("id")), role, content, incomplete, toolNote));
             chars += content.length();
         }
         int maxChars = Math.max(2000, props.getAgentHistoryMaxChars());
@@ -297,6 +302,71 @@ public class AgentConversationService {
 
     private static String text(Object value) {
         return value == null ? "" : String.valueOf(value).trim();
+    }
+
+    /**
+     * 从中断消息的 parts 里摘出工具执行情况，拼成给模型看的说明：
+     * 哪些工具已经拿到结果、哪些还没完成，避免模型重复执行或凭空猜测结果。
+     */
+    private static String toolNote(String partsJson) {
+        if (partsJson == null || partsJson.isBlank()) {
+            return "";
+        }
+        List<?> parts;
+        try {
+            if (!(Json.parse(partsJson) instanceof List<?> list)) {
+                return "";
+            }
+            parts = list;
+        } catch (RuntimeException e) {
+            return "";
+        }
+        List<String> completed = new ArrayList<>();
+        List<String> pending = new ArrayList<>();
+        for (Object item : parts) {
+            Map<String, Object> part = Json.asMap(item);
+            if (part == null || !"tool".equals(text(part.get("kind")))) {
+                continue;
+            }
+            String name = text(part.get("name"));
+            if (name.isBlank()) {
+                continue;
+            }
+            if ("ok".equals(text(part.get("status")))) {
+                String summary = text(part.get("summary")).replaceAll("\\s+", " ");
+                if (summary.length() > TOOL_SUMMARY_MAX) {
+                    summary = summary.substring(0, TOOL_SUMMARY_MAX) + "…";
+                }
+                completed.add(summary.isBlank() ? "- " + name : "- " + name + "：" + summary);
+            } else {
+                pending.add("- " + name);
+            }
+        }
+        if (completed.isEmpty() && pending.isEmpty()) {
+            return "";
+        }
+        StringBuilder note = new StringBuilder(
+                "【中断前的工具执行情况】中断前已经输出的内容和下列工具结果都在上下文里，不要重复已经完成的操作。");
+        if (!completed.isEmpty()) {
+            note.append("\n已经完成并拿到结果的工具：");
+            for (String line : tail(completed)) {
+                note.append('\n').append(line);
+            }
+        }
+        if (!pending.isEmpty()) {
+            note.append("\n中断时尚未完成的工具（结果未知，需要时请重新调用，或换一种方式获取同样的信息）：");
+            for (String line : tail(pending)) {
+                note.append('\n').append(line);
+            }
+        }
+        return note.toString();
+    }
+
+    /** 只保留最近几条，避免超长会话把工具清单撑爆。 */
+    private static List<String> tail(List<String> lines) {
+        return lines.size() <= TOOL_LINES_MAX
+                ? lines
+                : lines.subList(lines.size() - TOOL_LINES_MAX, lines.size());
     }
 
     private static long number(Object value) {

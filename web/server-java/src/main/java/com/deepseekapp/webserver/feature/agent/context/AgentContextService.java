@@ -208,7 +208,8 @@ public class AgentContextService {
         for (AgentHistory.Message message : messages) {
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("role", "assistant".equals(message.role()) ? "assistant" : "user");
-            row.put("content", message.content());
+            // 中断过的回复同样带标注，压缩摘要时不会把它当成完整回答
+            row.put("content", message.promptContent());
             input.add(row);
         }
         Map<String, Object> instruction = new LinkedHashMap<>();

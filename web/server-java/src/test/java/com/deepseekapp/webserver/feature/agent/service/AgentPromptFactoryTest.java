@@ -35,6 +35,22 @@ class AgentPromptFactoryTest {
     }
 
     @Test
+    void conversationMarksIncompleteHistory() {
+        String toolNote = "【中断前的工具执行情况】\n已经完成并拿到结果的工具：\n- read_chapter：第 12 章";
+        List<AgentHistory.Message> history = List.of(
+                new AgentHistory.Message(1L, "user", "第一问"),
+                new AgentHistory.Message(2L, "assistant", "写到一半的回答", true, toolNote));
+
+        List<Map<String, Object>> messages = AgentPromptFactory.conversation(history, "继续");
+
+        assertEquals(3, messages.size());
+        String content = String.valueOf(messages.get(1).get("content"));
+        assertTrue(content.startsWith(AgentHistory.Message.INCOMPLETE_NOTE));
+        assertTrue(content.contains("写到一半的回答"));
+        assertTrue(content.endsWith(toolNote));
+    }
+
+    @Test
     void systemPromptCarriesDeviceTimeAndSearchState() {
         String enabled = AgentPromptFactory.systemPrompt(options(true), "phone-1");
         assertTrue(enabled.contains("phone-1"));
