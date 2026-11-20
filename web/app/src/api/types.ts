@@ -575,6 +575,8 @@ export interface RagJob {
   progress: number;
   message: string;
   error: string;
+  /** 非致命提示：AI 章节识别失败、回退到段落分窗等 */
+  warnings: string[];
   chunksTotal: number;
   chunksDone: number;
   sceneCount: number;

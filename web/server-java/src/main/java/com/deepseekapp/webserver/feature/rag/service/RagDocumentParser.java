@@ -82,14 +82,19 @@ public final class RagDocumentParser {
         return text.trim();
     }
 
+    public static ParsedDocument parse(String rawText, int windowChars, int overlapChars) {
+        return parse(rawText, windowChars, overlapChars, null);
+    }
+
     /**
      * 解析全文。
      *
      * @param rawText      原始文本（未清洗也可以）
      * @param windowChars  单个情节弧窗口的目标字符数
      * @param overlapChars 相邻窗口重叠字符数
+     * @param aiPattern    内置规则识别不到章节时，用 AI 判断出的标题正则再试一次；null 表示不启用
      */
-    public static ParsedDocument parse(String rawText, int windowChars, int overlapChars) {
+    public static ParsedDocument parse(String rawText, int windowChars, int overlapChars, String aiPattern) {
         String text = normalize(rawText);
         int target = Math.max(2000, windowChars);
         int overlap = Math.max(0, Math.min(overlapChars, target / 2));
@@ -100,7 +105,7 @@ public final class RagDocumentParser {
             return new ParsedDocument(format, "", List.of(), List.of(), List.of(), text.length(), text);
         }
 
-        ChapterMatch match = detectChapters(paragraphs);
+        ChapterMatch match = detectChapters(paragraphs, aiPattern);
         List<Chapter> chapters = match == null ? List.of() : buildChapters(paragraphs, match);
         List<Window> windows = chapters.isEmpty()
                 ? buildParagraphWindows(paragraphs, target, overlap)
@@ -184,17 +189,14 @@ public final class RagDocumentParser {
     private record ChapterMatch(PatternDef def, List<Integer> positions) {
     }
 
-    private static ChapterMatch detectChapters(List<String> paragraphs) {
+    private static ChapterMatch detectChapters(List<String> paragraphs, String aiPattern) {
         ChapterMatch best = null;
         int bestScore = 0;
         for (PatternDef def : CHAPTER_PATTERNS) {
             List<Integer> positions = new ArrayList<>();
             for (int i = 0; i < paragraphs.size(); i++) {
                 String p = paragraphs.get(i).trim();
-                if (p.isEmpty() || p.length() > MAX_HEADING_CHARS) {
-                    continue;
-                }
-                if (p.endsWith("。") || p.endsWith("！") || p.endsWith("？")) {
+                if (!isHeadingCandidate(p)) {
                     continue;
                 }
                 if (def.pattern().matcher(p).matches()) {
@@ -213,7 +215,44 @@ public final class RagDocumentParser {
                 best = new ChapterMatch(def, positions);
             }
         }
-        return best;
+        // 内置三档都识别不到时才用 AI 判断出的正则兜底
+        return best == null ? matchAiPattern(paragraphs, aiPattern) : best;
+    }
+
+    /** 标题候选：短，且不以句末标点结尾。 */
+    private static boolean isHeadingCandidate(String paragraph) {
+        String p = paragraph.trim();
+        return !p.isEmpty() && p.length() <= MAX_HEADING_CHARS
+                && !p.endsWith("。") && !p.endsWith("！") && !p.endsWith("？");
+    }
+
+    /**
+     * 用 AI 判断出的正则扫全文。
+     *
+     * <p>命中少于 3 条说明规则不适用；命中超过一半说明可能把所有段落都匹配了。
+     * 这两种都放弃，交给按段落分窗兜底，避免把整本书切坏。</p>
+     */
+    private static ChapterMatch matchAiPattern(List<String> paragraphs, String aiPattern) {
+        if (aiPattern == null || aiPattern.isBlank()) {
+            return null;
+        }
+        Pattern pattern;
+        try {
+            pattern = Pattern.compile(aiPattern.trim());
+        } catch (RuntimeException e) {
+            return null;
+        }
+        List<Integer> positions = new ArrayList<>();
+        for (int i = 0; i < paragraphs.size(); i++) {
+            String p = paragraphs.get(i).trim();
+            if (isHeadingCandidate(p) && pattern.matcher(p).matches()) {
+                positions.add(i);
+            }
+        }
+        if (positions.size() < 3 || positions.size() * 2 > paragraphs.size()) {
+            return null;
+        }
+        return new ChapterMatch(new PatternDef("AI 识别", pattern, false), positions);
     }
 
     /** 阿拉伯数字标题检查编号递增，避免把列表项误判成章节。 */

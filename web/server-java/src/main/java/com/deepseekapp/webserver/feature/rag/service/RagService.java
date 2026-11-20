@@ -49,6 +49,26 @@ public class RagService {
     private static final int EMBEDDING_BATCH = 8;
     private static final int MAX_SCENES = 3000;
 
+    /** AI 辅助章节识别时读取的开头字数：覆盖若干章，用来推断标题格式。 */
+    private static final int AI_CHAPTER_SAMPLE_CHARS = 20_000;
+
+    private static final String AI_CHAPTER_SYSTEM = """
+            你是小说排版分析助手。用户会给你一部小说的开头片段，你要判断它是否存在章节标题行，
+            并给出一条能匹配全书所有章节标题的 Java 正则表达式。
+            只输出 JSON，不要输出解释或 Markdown：
+            {"hasChapters": true, "pattern": "^第[0-9一二三四五六七八九十百千两]+章.*$"}
+            要求：
+            1. pattern 用整行匹配（Java matches），只匹配标题行，不能匹配正文；
+            2. 标题后面通常带标题文字，允许可选的空格、冒号、顿号等分隔；
+            3. 没有章节标题时输出 {"hasChapters": false, "pattern": ""}。
+            """;
+
+    private static final String AI_CHAPTER_INSTRUCTION =
+            "判断下面这段小说开头是否存在章节标题行，并按系统要求输出 JSON。";
+
+    /** 章节判断只需要一小段 JSON：低温、限长，避免拖慢导入。 */
+    private static final AiSettings AI_CHAPTER_OPTIONS = new AiSettings("", 0.1, 500, null, true);
+
     private static final int WINDOW_MIN = 4000;
     private static final int WINDOW_MAX = 30000;
     private static final int OVERLAP_MAX = 5000;
@@ -135,6 +155,13 @@ public class RagService {
         public volatile int progress;
         public volatile String message = "";
         public volatile String error = "";
+        /** 非致命问题（AI 章节识别失败、回退到段落分窗等），供前端提示。 */
+        public final List<String> warnings = Collections.synchronizedList(new ArrayList<>());
+        /** AI 判断出的章节标题正则；空串表示未识别到。 */
+        public volatile String chapterGuess = "";
+        /** AI 章节识别是否已经跑过：同一任务重新分块时复用结果，避免重复调用。 */
+        public volatile boolean chapterGuessDone;
+        public volatile String chapterGuessWarning = "";
         public volatile int sceneCount;
         public volatile int mergedCount;
         public final long createdAt = System.currentTimeMillis();
@@ -354,7 +381,15 @@ public class RagService {
 
     private void parseJob(ImportJob job) {
         RagDocumentParser.ParsedDocument parsed = RagDocumentParser.parse(job.text,
-                job.windowChars, job.overlapChars);
+                job.windowChars, job.overlapChars, job.chapterGuess);
+        job.warnings.clear();
+        if (parsed.chapters().isEmpty()) {
+            if (!job.chapterGuessDone) {
+                parsed = aiChapterFallback(job, parsed);
+            } else if (!job.chapterGuessWarning.isEmpty()) {
+                job.warnings.add(job.chapterGuessWarning);
+            }
+        }
         if (parsed.windows().isEmpty()) {
             throw new ApiException(400, "没有解析出可提炼的文本窗口");
         }
@@ -371,6 +406,80 @@ public class RagService {
                         window.chars(), window.text()));
             }
         }
+    }
+
+    /**
+     * 内置规则识别不到章节时的 AI 兜底：只让模型判断“标题长什么样”，
+     * 规则仍由本地应用到全文。任何一步失败都只记警告并保留按段落分窗，不打断导入。
+     */
+    private RagDocumentParser.ParsedDocument aiChapterFallback(ImportJob job,
+                                                               RagDocumentParser.ParsedDocument parsed) {
+        job.chapterGuessDone = true;
+        String sample = head(parsed.text(), AI_CHAPTER_SAMPLE_CHARS);
+        String raw;
+        try {
+            raw = ai.complete(AI_CHAPTER_SYSTEM,
+                    AI_CHAPTER_INSTRUCTION + "\n\n<novel>\n" + sample + "\n</novel>",
+                    AI_CHAPTER_OPTIONS);
+        } catch (RuntimeException e) {
+            return aiChapterGiveUp(job, parsed, "AI 章节识别失败：" + readableError(e));
+        }
+        Map<String, Object> guess = parseChapterGuess(raw);
+        if (guess == null) {
+            return aiChapterGiveUp(job, parsed, "AI 章节识别返回格式异常");
+        }
+        Object flag = guess.get("hasChapters");
+        boolean hasChapters = Boolean.TRUE.equals(flag) || "true".equalsIgnoreCase(String.valueOf(flag));
+        String pattern = guess.get("pattern") == null ? "" : String.valueOf(guess.get("pattern")).trim();
+        if (!hasChapters || pattern.isEmpty()) {
+            return aiChapterGiveUp(job, parsed, "AI 判断本文没有章节标题");
+        }
+        RagDocumentParser.ParsedDocument retried = RagDocumentParser.parse(parsed.text(),
+                job.windowChars, job.overlapChars, pattern);
+        if (retried.chapters().isEmpty()) {
+            return aiChapterGiveUp(job, parsed, "AI 给出的章节规则没有匹配到标题");
+        }
+        job.chapterGuess = pattern;
+        job.chapterGuessWarning = "";
+        return retried;
+    }
+
+    private RagDocumentParser.ParsedDocument aiChapterGiveUp(ImportJob job,
+                                                             RagDocumentParser.ParsedDocument parsed,
+                                                             String reason) {
+        job.chapterGuess = "";
+        job.chapterGuessWarning = reason + "；已按段落分窗";
+        job.warnings.add(job.chapterGuessWarning);
+        return parsed;
+    }
+
+    /** 模型偶尔会包 Markdown 代码块或加解释，这里只截取第一个 JSON 对象。 */
+    private static Map<String, Object> parseChapterGuess(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        int start = raw.indexOf('{');
+        int end = raw.lastIndexOf('}');
+        if (start < 0 || end <= start) {
+            return null;
+        }
+        try {
+            return Json.asMap(Json.parse(raw.substring(start, end + 1)));
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    /** 截取开头若干字符，尽量落在段落边界；不加省略号，避免干扰模型判断。 */
+    private static String head(String text, int maxChars) {
+        if (text == null) {
+            return "";
+        }
+        if (text.length() <= maxChars) {
+            return text;
+        }
+        int cut = text.lastIndexOf('\n', maxChars);
+        return text.substring(0, cut > maxChars / 2 ? cut : maxChars);
     }
 
     private String buildParseMessage(ImportJob job, boolean manual) {
@@ -751,6 +860,7 @@ public class RagService {
         out.put("progress", job.progress);
         out.put("message", job.message);
         out.put("error", job.error);
+        out.put("warnings", new ArrayList<>(job.warnings));
         out.put("chunksTotal", job.windows.size());
         out.put("chunksDone", job.chunksDone());
         out.put("sceneCount", job.sceneCount);

@@ -789,6 +789,10 @@ onUnmounted(() => {
           <el-progress :percentage="jobProgress" :show-text="false" :stroke-width="5" color="var(--ink-1)" />
           <div class="job-message">{{ job.message || job.phase || '等待服务端返回进度…' }}</div>
 
+          <div v-if="job.warnings && job.warnings.length" class="job-warnings">
+            <div v-for="(warning, index) in job.warnings" :key="index">· {{ warning }}</div>
+          </div>
+
           <div class="job-meta">
             <span v-if="job.phase">阶段：{{ job.phase }}</span>
             <span>窗口 {{ job.chunksDone }}/{{ job.chunksTotal }}</span>
@@ -1343,6 +1347,13 @@ onUnmounted(() => {
 .job-head-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .job-num { font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .job-message { margin-top: 8px; font-size: 12px; color: var(--ink-3); line-height: 1.6; }
+.job-warnings {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--warn);
+  line-height: 1.6;
+  word-break: break-word;
+}
 .job-meta {
   display: flex;
   flex-wrap: wrap;
